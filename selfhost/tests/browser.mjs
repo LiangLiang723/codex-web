@@ -1,3 +1,4 @@
+import { verifyNativeRecovery } from "./native-history.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -162,11 +163,18 @@ async function workspace(page, width) {
   await page.getByRole("dialog", { name: "选择模型" }).waitFor();
   assert((await page.getByRole("option").count()) > 0);
   await page.keyboard.press("Escape");
-  if(process.env.SELFHOST_TEST_PANEL==="1"){
-    const git=page.locator('[data-status-capsule="git"]');
-    await git.waitFor();await git.click();await page.getByTestId("status-git-files").waitFor();await page.keyboard.press("Escape");
+  if (process.env.SELFHOST_TEST_PANEL === "1") {
+    const git = page.locator('[data-status-capsule="git"]');
+    await git.waitFor();
+    await git.click();
+    await page.getByTestId("status-git-files").waitFor();
+    await page.keyboard.press("Escape");
   }
-  if(width<600)assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  if (width < 600)
+    assert.equal(
+      await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+      true,
+    );
   await verify(page);
 }
 try {
@@ -183,6 +191,7 @@ try {
       await login(page);
       const roots = await catalog(page, width > 1000 && process.env.SELFHOST_TEST_MUTATE === "1");
       await workspace(page, width);
+      if (width >= 1300 && thread) await verifyNativeRecovery(page, hostId, thread);
       assert.deepEqual(errors, []);
       console.log(width + "px passed (" + roots.length + " remote projects)");
     } finally {
