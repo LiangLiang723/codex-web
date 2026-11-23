@@ -86,8 +86,21 @@ export async function extensionRequest(
     const [name, params] = mutation[method];
     return call(name, params);
   }
-  const result = await call("plugin/list", { cwds: [cwd] }),
-    markets = array(result.marketplaces);
+  const installedOnly = method === "getPluginReferenceCatalog" || method === "listPlugins";
+  const dirs = { cwds: [cwd] };
+  const result = installedOnly
+    ? await call("plugin/installed", dirs).catch((error) => {
+        // Older app-servers expose only plugin/list. Keep mention discovery local there too.
+        if (
+          !/method not found|unknown (method|variant)|unsupported method|-32601/i.test(
+            String(error),
+          )
+        )
+          throw error;
+        return call("plugin/list", { ...dirs, marketplaceKinds: ["local"] });
+      })
+    : await call("plugin/list", dirs);
+  const markets = array(result.marketplaces);
   const marketplaces = markets.map((m) => ({
     id: str(m.name),
     name: str(m.name),

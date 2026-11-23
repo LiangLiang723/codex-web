@@ -155,15 +155,26 @@ async function workspace(page, width, projects) {
       }),
     );
   }
-  await page.goto(base + "/?" + query);
-  const plus = button(page, "添加上下文");
-  await plus.waitFor({ timeout: 75000 });
-  await plus.click();
-  const pluginLabels = await api(page, "/api/selfhost/capability", {
-    hostId,
-    method: "plugin/list",
-    params: { cwds: [cwd] },
-  });
+  const [pluginResponse] = await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/selfhost/capability" &&
+        response.request().method() === "POST" &&
+        response.request().postDataJSON()?.method === "plugin/installed",
+      { timeout: 75000 },
+    ),
+    (async () => {
+      await page.goto(base + "/?" + query);
+      const plus = button(page, "添加上下文");
+      await plus.waitFor({ timeout: 75000 });
+      await plus.click();
+    })(),
+  ]);
+  assert(
+    pluginResponse.ok(),
+    "Remote installed plugin catalog returned " + pluginResponse.status(),
+  );
+  const pluginLabels = await pluginResponse.json();
   const enabled = pluginLabels.value.marketplaces
     .flatMap((m) => m.plugins)
     .filter((p) => p.enabled);

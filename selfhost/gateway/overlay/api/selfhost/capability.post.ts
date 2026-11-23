@@ -8,6 +8,7 @@ const methods = z.enum([
   "skills/list",
   "skills/config/write",
   "plugin/list",
+  "plugin/installed",
   "plugin/read",
   "plugin/install",
   "plugin/uninstall",
