@@ -8,8 +8,7 @@ RUN corepack enable && COREPACK_NPM_REGISTRY="$NPM_CONFIG_REGISTRY" corepack pre
 COPY . .
 RUN pnpm config set --location=project --json supportedArchitectures '{"os":["current"],"cpu":["current"],"libc":["current"]}' && \
     pnpm --filter . --filter @zcode/web... install --frozen-lockfile --ignore-scripts --child-concurrency=1
-RUN pnpm config set --location=project --json supportedArchitectures '{"os":["current"],"cpu":["current"],"libc":["current"]}' && \
-    pnpm --filter @zcode/web exec vite build --mode selfhost && node selfhost/worker/build.mjs /release/workspace.cjs
+RUN pnpm --filter @zcode/web exec vite build --mode selfhost && node selfhost/worker/build.mjs /release/workspace.cjs
 RUN python3 selfhost/gateway/materialize.py /gateway && mkdir -p /gateway/public && cp -a packages/web/dist/. /gateway/public/
 RUN find /gateway/public -name '*.map' -delete
 
@@ -17,7 +16,7 @@ FROM toolchain AS service
 ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org
 WORKDIR /api
 COPY --from=web /gateway/ ./
-RUN npm ci --no-audit --no-fund && npm run build
+RUN npm_config_nodedir=/usr/local npm ci --no-audit --no-fund && npm run build
 
 FROM node:24-bookworm-slim AS runner
 RUN apt-get update && apt-get install -y --no-install-recommends tini ca-certificates && rm -rf /var/lib/apt/lists/*
