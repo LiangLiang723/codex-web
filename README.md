@@ -13,7 +13,9 @@ docker compose up -d --build
 docker compose ps
 ```
 
-源码归档部署可略过第一行。部署脚本生成权限为 `0600` 的 `.env` 和随机加密密钥。首次登录前，在服务器的 Bash 终端创建账号，密码由标准输入传入。
+源码归档部署可略过第一行。如果 Linux 宿主机的 Docker 构建代理只在本机回环地址监听，可在 `.env` 设置 `CODEX_WEB_BUILD_NETWORK=host`，让构建步骤访问该代理。若已有可信的 npm 镜像，可通过 `CODEX_WEB_NPM_REGISTRY` 指定其地址。构建使用仓库的锁文件校验依赖。
+
+部署脚本生成权限为 `0600` 的 `.env` 和随机加密密钥。首次登录前，在服务器的 Bash 终端创建账号，密码由标准输入传入。
 
 ```sh
 read -rsp 'Web 登录密码 ' web_password
@@ -30,6 +32,16 @@ ssh -N -L 33723:127.0.0.1:33723 admin@agents.example.net
 
 转发目标应与 `CODEX_WEB_BIND` 匹配。仅绑定局域网 IP 时使用那个 IP。Docker 数据库位于 `/data/codex-web.db`。备份整个数据卷、`.env` 里的加密密钥、挂载的身份文件及信任记录。恢复时使用原密钥。`docker compose down` 可保留卷。
 
+## 使用已构建的 Linux 镜像
+
+随交付提供 Linux AMD64 镜像归档时，可在同架构服务器跳过镜像构建。用 `sha256sum -c SHA256SUMS` 核对下载文件，解压源代码后在项目根目录执行以下命令。创建 Web 账号和配置监听地址的操作与上文相同。
+
+```sh
+docker load -i /path/to/zcode-web-linux-amd64.tar.gz
+sh selfhost/setup.sh
+docker compose up -d --no-build
+```
+
 ## 连接和切换主机
 
 在「SSH 工作区」选择「添加主机」，输入 SSH 地址、端口、用户与认证方式。可使用 Tailscale IP、普通 SSH 主机名或中心服务器能访问的 SSH 隧道端点。
@@ -45,7 +57,7 @@ ssh -N -L 33723:127.0.0.1:33723 admin@agents.example.net
 - 模型菜单、思考强度、Lexical 输入框、文件引用、会话列表和消息时间线使用 upstream ZCode 组件。模型来自选中主机的 `model/list`。
 - Thread 和 Turn 由官方 CLI 创建。历史来自远端 Codex，网页地址保留原生 Thread ID。断开浏览器后，后台任务仍由远端 app-server 处理。支持流式输出、工具调用、Plan Mode、权限审批和重新进入同一会话。
 - 桌面和手机沿用 ZCode v4 的输入框状态栏。Git 更改、目标、计划进度和后台活动按真实数据出现，点开相应胶囊可查看详情。
-- 文件浏览与 Git 使用 ZCode 原服务，经校验身份的 SSH 通道在远端执行。终端复用 Gateway 的远程 PTY。
+- 文件浏览与 Git 使用 ZCode 原服务，经校验身份的 SSH 通道在远端执行。终端复用 Gateway 的远程 PTY。展开的远程目录通过 Codex 的 `fs/watch` 更新文件树。
 - 插件、Skills 和 MCP 通过选中主机的 Codex 接口读取。支持工作流文件的读取、元数据编辑、移动和删除。ZCode 的动态工作流脚本运行器尚未接入 Codex。自动化界面可保存任务，由中心调度器发起 Codex Thread 和 Turn。
 - 私有分享保存选定轮次的用户和助手文本，使用同一中心账号查看、撤销或删除。文本分享省略图片附件和工具输出。
 
@@ -74,6 +86,6 @@ python3 selfhost/upstreams.py check
 python3 -m unittest discover -s selfhost/tests
 ```
 
-桌面与手机回归脚本为 `selfhost/tests/browser.mjs`。设置 `SELFHOST_TEST_URL`、`SELFHOST_TEST_USER`、`SELFHOST_TEST_PASSWORD_FILE`、`SELFHOST_TEST_HOST`、`SELFHOST_TEST_CWD` 和 `SELFHOST_TEST_THREAD`，在已安装 Chrome 的开发机执行 `node selfhost/tests/browser.mjs`。`SELFHOST_TEST_PANEL=1` 验证有 Git 更改的测试项目的 v4 状态栏。`SELFHOST_TEST_MUTATE=1` 会创建、编辑并删除仅属于本次测试的临时主机。
+桌面与手机回归脚本为 `selfhost/tests/browser.mjs`。设置 `SELFHOST_TEST_URL`、`SELFHOST_TEST_USER`、`SELFHOST_TEST_PASSWORD_FILE`、`SELFHOST_TEST_HOST`、`SELFHOST_TEST_CWD` 和 `SELFHOST_TEST_THREAD`，选择至少有一轮已完成对话的测试 Thread，在已安装 Chrome 的开发机执行 `node selfhost/tests/browser.mjs`。`SELFHOST_TEST_PANEL=1` 验证有 Git 更改的测试项目的 v4 状态栏。`SELFHOST_TEST_FILE_WATCH=1` 会在指定的测试项目创建并清理临时文件，验证文件树随远端变动刷新。`SELFHOST_TEST_MUTATE=1` 会创建、编辑并删除仅属于本次测试的临时主机。
 
 后续升级、完整 SHA 和取舍清单见 [上游同步说明](selfhost/UPSTREAMS.md)、[上游版本锁](selfhost/upstreams.lock.json) 和 [功能盘点](selfhost/FEATURE-AUDIT.zh.md)。源码遵循上游许可。[ZCode](LICENSE) · [Codex Gateway](upstream/codex-gateway/LICENSE) · [第三方许可](THIRD-PARTY-NOTICES.md)

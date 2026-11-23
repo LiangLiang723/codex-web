@@ -1,7 +1,11 @@
 services:
   codex-web:
     image: ${CODEX_WEB_IMAGE:-zcode-selfhost:local}
-    build: .
+    build:
+      context: .
+      network: ${CODEX_WEB_BUILD_NETWORK:-default}
+      args:
+        NPM_CONFIG_REGISTRY: ${CODEX_WEB_NPM_REGISTRY:-https://registry.npmjs.org}
     restart: unless-stopped
     ports:
       - "${CODEX_WEB_BIND:-127.0.0.1}:${CODEX_WEB_PORT:-33723}:3000"

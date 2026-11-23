@@ -1,15 +1,20 @@
-# syntax=docker/dockerfile:1
-FROM node:24-bookworm AS web
+FROM node:24-bookworm-slim AS toolchain
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git python3 make g++ && rm -rf /var/lib/apt/lists/*
+
+FROM toolchain AS web
+ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org
 WORKDIR /src
-RUN apt-get update && apt-get install -y --no-install-recommends python3 git && rm -rf /var/lib/apt/lists/*
-RUN corepack enable && corepack prepare pnpm@10.33.2 --activate
+RUN corepack enable && COREPACK_NPM_REGISTRY="$NPM_CONFIG_REGISTRY" corepack prepare pnpm@10.33.2 --activate
 COPY . .
-RUN pnpm --filter . --filter @zcode/web... install --frozen-lockfile --ignore-scripts --child-concurrency=1
-RUN pnpm --filter @zcode/web exec vite build --mode selfhost && node selfhost/worker/build.mjs /release/workspace.cjs
+RUN pnpm config set --location=project --json supportedArchitectures '{"os":["current"],"cpu":["current"],"libc":["current"]}' && \
+    pnpm --filter . --filter @zcode/web... install --frozen-lockfile --ignore-scripts --child-concurrency=1
+RUN pnpm config set --location=project --json supportedArchitectures '{"os":["current"],"cpu":["current"],"libc":["current"]}' && \
+    pnpm --filter @zcode/web exec vite build --mode selfhost && node selfhost/worker/build.mjs /release/workspace.cjs
 RUN python3 selfhost/gateway/materialize.py /gateway && mkdir -p /gateway/public && cp -a packages/web/dist/. /gateway/public/
 RUN find /gateway/public -name '*.map' -delete
 
-FROM node:24-bookworm AS service
+FROM toolchain AS service
+ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org
 WORKDIR /api
 COPY --from=web /gateway/ ./
 RUN npm ci --no-audit --no-fund && npm run build
