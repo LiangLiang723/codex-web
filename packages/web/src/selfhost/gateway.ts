@@ -185,9 +185,8 @@ export class Gateway {
     await this.connect();
     this.socket!.send(JSON.stringify(message));
   }
-  async call(type: string, args: Message = {}): Promise<Message> {
+  async call(type: string, args: Message = {}, requestId = wireId()): Promise<Message> {
     await this.connect();
-    const requestId = wireId();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId);

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { Gateway, type Host, type Message, type Project, type RemoteModel } from "./gateway.js";
 import { rec, str, array, num, providerId } from "./threadProjection.js";
 import { extensionRequest, codexRequest } from "./capabilities.js";
+import { FileWatches } from "./fileWatches.js";
 import { AttachmentBridge } from "./attachments.js";
 import { shareOperation } from "./shares.js";
 import { SessionBridge } from "./sessionBridge.js";
@@ -103,10 +104,15 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
   let preferences = initialPrefs;
   type Listener = { arg: unknown; fn: (value: unknown) => void };
   const listeners = new Map<string, Set<Listener>>();
+  // ZCode subscribes after create() resolves. Retain the snapshot and any intervening PTY output.
+  const terminalSessions = new Map<string, string | null>();
   const emit = (channel: string, event: string, value: unknown, target?: unknown) => {
     for (const entry of listeners.get(channel + "." + event) ?? [])
       if (target === undefined || target === entry.arg) entry.fn(value);
   };
+  const fileWatches = new FileWatches(gateway, host.id, (id, event) =>
+    emit("file-watcher", "onDynamicChange", event, id),
+  );
   const uploads = new AttachmentBridge(gateway, host.id);
   const bridges = new Map<string, SessionBridge>();
   const scopedBridge = (path: unknown) => {
@@ -155,12 +161,19 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
     },
     gateway.onTerminal((buffer) => {
       const frame = decodeTerminalStreamFrame(new Uint8Array(buffer));
-      if (frame)
-        emit("terminal", "onDynamicData", decodeTerminalTextPayload(frame), frame.sessionId);
+      if (!frame) return;
+      const data = decodeTerminalTextPayload(frame);
+      if (data === null) return;
+      const early = terminalSessions.get(frame.sessionId);
+      if (typeof early === "string")
+        terminalSessions.set(frame.sessionId, (early + data).slice(-65536));
+      else if (early === null) emit("terminal", "onDynamicData", data, frame.sessionId);
     }),
     gateway.on((msg) => {
-      if (msg.type === "terminal.exited")
-        emit("terminal", "onDynamicExit", num(msg.code), msg.sessionId);
+      if (msg.type === "terminal.exited" || msg.type === "terminal.closed.event") {
+        if (terminalSessions.delete(str(msg.sessionId)))
+          emit("terminal", "onDynamicExit", num(msg.code), msg.sessionId);
+      }
       if (msg.type === "config.catalog.changed") {
         emit("broadcast", "onMessage", { channel: "state:projects", payload: {} });
         void gateway
@@ -171,8 +184,6 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
           })
           .catch(() => {});
       }
-      if (msg.type === "file.watch.event")
-        emit("file-watcher", "onDidChange", { dirPath: cwd, changedPath: msg.path });
     }),
   ];
   async function rpc(channel: string, method: string, args: unknown[]): Promise<unknown> {
@@ -328,6 +339,11 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
         return projectRow(value, mapped.length);
       }
     }
+    if (channel === "file-watcher") {
+      if (method === "watch") return fileWatches.watch(str(p.path), p.recursive === true);
+      if (method === "unwatch") return fileWatches.unwatch(str(p.id));
+      if (method === "disposeAll") return fileWatches.clear();
+    }
     if (channel === "terminal") {
       if (method === "create") {
         const response = await gateway.call("terminal.open", {
@@ -337,11 +353,15 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
           cols: p.cols,
           rows: p.rows,
         });
+        const session = z
+          .object({ sessionId: z.string().uuid(), output: z.string() })
+          .parse(response.session);
+        terminalSessions.set(session.sessionId, session.output.slice(-65536));
         return {
-          id: str(rec(response.session).id),
+          id: session.sessionId,
           shell: "SSH",
           fontFamily: "monospace",
-          fontFamilySource: "default",
+          fontFamilySource: "fallback",
         };
       }
       if (method === "write")
@@ -354,7 +374,16 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
           rows: p.rows,
         });
       if (method === "dispose") {
-        await gateway.call("terminal.close", { sessionId: p.id });
+        const id = str(p.id);
+        if (!terminalSessions.has(id)) return;
+        try {
+          await gateway.call("terminal.close", { sessionId: id });
+        } catch (error) {
+          // The shell may have exited between the dispose request and the server lookup.
+          if (!(error instanceof Error && error.message === "Terminal session not found"))
+            throw error;
+        }
+        terminalSessions.delete(id);
         return;
       }
       if (method === "listTerminalIdsUnderPath") {
@@ -363,7 +392,7 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
           .filter(
             (t) => t.hostId === host.id && (t.cwd === path || str(t.cwd).startsWith(path + "/")),
           )
-          .map((s) => s.id);
+          .map((s) => s.sessionId);
       }
     }
     if (channel === "window-controller" || channel === "zcode-task") {
@@ -475,6 +504,14 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
             listeners.set(key, group);
             const entry = { arg, fn: listener as (v: unknown) => void };
             group.add(entry);
+            if (channel === "terminal" && event === "onDynamicData" && typeof arg === "string") {
+              const buffered = terminalSessions.get(arg);
+              if (buffered !== undefined) terminalSessions.set(arg, null);
+              if (buffered)
+                queueMicrotask(() => {
+                  if (group.has(entry)) entry.fn(buffered);
+                });
+            }
             return {
               dispose() {
                 group.delete(entry);
@@ -492,8 +529,10 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
     dispose() {
       for (const bridge of bridges.values()) bridge.dispose();
       bridges.clear();
+      fileWatches.dispose();
       disposers.forEach((fn) => fn());
       listeners.clear();
+      terminalSessions.clear();
     },
   };
 }

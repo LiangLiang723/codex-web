@@ -1,4 +1,6 @@
 import { readFile } from "node:fs/promises";
+import { promisify } from "node:util";
+import { gzip } from "node:zlib";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
@@ -12,6 +14,7 @@ type Reply = { ready?: boolean; id?: string; error?: string; value?: unknown };
 type Worker = { call: (request: Request) => Promise<unknown> };
 const workers = new Map<string, Promise<Worker>>();
 const deadline = 90000;
+const compress = promisify(gzip);
 function startWorker(channel: ClientChannel, source: Buffer, remove: () => void): Promise<Worker> {
   return new Promise((resolve, reject) => {
     const pending = new Map<string, { done: (value: unknown) => void; fail: (e: Error) => void }>();
@@ -19,7 +22,7 @@ function startWorker(channel: ClientChannel, source: Buffer, remove: () => void)
     const startup = setTimeout(() => {
       channel.close();
       reject(Error("Remote Node workspace failed to start"));
-    }, 20000);
+    }, deadline);
     let idle: ReturnType<typeof setTimeout>;
     const touch = () => {
       clearTimeout(idle);
@@ -102,15 +105,19 @@ export async function callWorkspace(host: HostWithSecret, request: Request) {
       if (workers.get(key) === worker) workers.delete(key);
     };
     worker = (async () => {
-      const source = await readFile(
-        join(process.env.SELFHOST_ASSET_DIR || "/app/selfhost-assets", "workspace.cjs"),
+      const source = await compress(
+        await readFile(
+          join(process.env.SELFHOST_ASSET_DIR || "/app/selfhost-assets", "workspace.cjs"),
+        ),
       );
       // Only the release asset length enters the command. All user paths, arguments and content use JSON on stdin.
+      const inflate =
+        'node -e \'require("node:stream/promises").pipeline(process.stdin,require("node:zlib").createGunzip(),process.stdout).catch(()=>process.exit(1))\'';
       const script = [
         "umask 077",
         "d=$(mktemp -d) || exit 1",
         `trap 'rm -f "$d/workspace.cjs"; rmdir "$d"' EXIT`,
-        `head -c ` + source.length + ` > "$d/workspace.cjs" || exit 1`,
+        `head -c ` + source.length + " | " + inflate + ` > "$d/workspace.cjs" || exit 1`,
         `node "$d/workspace.cjs"`,
       ].join("\n");
       const channel = await sshConnections.execChannel(host, remoteLoginShellCommand(script));

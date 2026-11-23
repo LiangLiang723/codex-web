@@ -106,7 +106,9 @@ export function refreshProjects(user: number, host: HostWithSecret, force: boole
   if (!force && prior && Date.now() - prior.updated < 60000)
     return Promise.resolve(knownProjects(user, host.id));
   const pending = inFlight.get(key);
-  if (pending) return pending;
+  const forCaller = (refresh: Promise<Project[]>) =>
+    !force && prior ? refresh.catch(() => knownProjects(user, host.id)) : refresh;
+  if (pending) return forCaller(pending);
   const fetch = (async () => {
     const roots = registered.parse(
       await callWorkspace(host, { channel: "projects", method: "catalog", args: [] }),
@@ -146,5 +148,5 @@ export function refreshProjects(user: number, host: HostWithSecret, force: boole
     return items;
   })().finally(() => inFlight.delete(key));
   inFlight.set(key, fetch);
-  return fetch;
+  return forCaller(fetch);
 }

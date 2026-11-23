@@ -1,8 +1,10 @@
 import { verifyNativeRecovery } from "./native-history.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { once } from "node:events";
+import { randomInt, randomUUID } from "node:crypto";
 import { chromium } from "playwright-core";
+import { setTimeout as delay } from "node:timers/promises";
 
 const base = new URL(process.env.SELFHOST_TEST_URL).origin;
 const username = process.env.SELFHOST_TEST_USER || "admin";
@@ -10,10 +12,11 @@ const password = (await readFile(process.env.SELFHOST_TEST_PASSWORD_FILE, "utf8"
 const thread = process.env.SELFHOST_TEST_THREAD,
   hostId = Number(process.env.SELFHOST_TEST_HOST || 1),
   cwd = process.env.SELFHOST_TEST_CWD;
-const browser = await chromium.launch({
+const server = await chromium.launchServer({
   channel: process.env.SELFHOST_TEST_BROWSER || "chrome",
   headless: true,
 });
+const browser = await chromium.connect(server.wsEndpoint());
 const faults = (page) =>
   page.getByText(/^(这块界面出了点问题|应用界面出了点问题|useZCodeIntl 必须在)/);
 const button = (page, name) => page.getByRole("button", { name, exact: true });
@@ -137,9 +140,21 @@ async function catalog(page, mutation) {
   await verify(page);
   return roots;
 }
-async function workspace(page, width) {
+async function workspace(page, width, projects) {
   if (!cwd || !thread) return;
   const query = new URLSearchParams({ host: String(hostId), cwd, thread });
+  let terminalId;
+  const watchedPaths = new Set();
+  if (width >= 1300) {
+    page.on("websocket", (socket) =>
+      socket.on("framereceived", ({ payload }) => {
+        if (typeof payload !== "string") return;
+        const event = JSON.parse(payload);
+        if (event.type === "terminal.opened") terminalId = event.session.sessionId;
+        if (event.type === "file.watch.ready") watchedPaths.add(event.cwd);
+      }),
+    );
+  }
   await page.goto(base + "/?" + query);
   const plus = button(page, "添加上下文");
   await plus.waitFor({ timeout: 75000 });
@@ -170,6 +185,66 @@ async function workspace(page, width) {
     await page.getByTestId("status-git-files").waitFor();
     await page.keyboard.press("Escape");
   }
+  if (width >= 1300) {
+    const watchPrefix =
+      process.env.SELFHOST_TEST_FILE_WATCH === "1" ? "zcode-watch-" + randomUUID() : undefined;
+    if (watchPrefix) {
+      const project = projects.find((project) => project.remotePath === cwd);
+      assert(project, "File watch verification needs a registered project directory");
+      const row = page
+        .getByTestId("virtual-project-row")
+        .filter({ has: page.getByText(project.name, { exact: true }) });
+      await row.hover();
+      await row.getByTestId("virtual-project-files").click();
+      await button(page, "刷新文件树").waitFor();
+      const deadline = Date.now() + 20000;
+      while (!watchedPaths.has(cwd) && Date.now() < deadline) await delay(50);
+      assert(watchedPaths.has(cwd), "No Codex fs/watch lease for the expanded project");
+    }
+    await button(page, "切换终端").click();
+    const deadline = Date.now() + 20000;
+    while (!terminalId && Date.now() < deadline) await delay(50);
+    assert(terminalId, "SSH terminal did not open");
+    const input = page.locator(".xterm-helper-textarea").last();
+    await input.focus();
+    const factor = randomInt(2, 200);
+    const expected = "zcode_pty_" + 211 * factor;
+    // Only a remote shell evaluating the expression can produce the expected line.
+    await page.keyboard.type("printf 'zcode_pty_%d\\n' $(( 211 * " + factor + " ))");
+    await page.keyboard.press("Enter");
+    try {
+      await page.waitForFunction(
+        (text) =>
+          [...document.querySelectorAll(".xterm-rows")].some((rows) =>
+            rows.textContent.includes(text),
+          ),
+        expected,
+        { timeout: 15000 },
+      );
+      if (watchPrefix) {
+        await page.keyboard.type("zcode_watch_file=$(mktemp ./" + watchPrefix + "-XXXXXX)");
+        await page.keyboard.press("Enter");
+        await page
+          .getByRole("treeitem")
+          .filter({ hasText: watchPrefix })
+          .waitFor({ timeout: 15000 });
+      }
+    } finally {
+      await input.focus();
+      if (watchPrefix) {
+        await page.keyboard.type(
+          'if [ -n "$zcode_watch_file" ]; then rm -f -- "$zcode_watch_file"; fi',
+        );
+        await page.keyboard.press("Enter");
+        await page
+          .getByRole("treeitem")
+          .filter({ hasText: watchPrefix })
+          .waitFor({ state: "hidden", timeout: 15000 });
+      }
+      await page.keyboard.type("exit");
+      await page.keyboard.press("Enter");
+    }
+  }
   if (width < 600)
     assert.equal(
       await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
@@ -190,7 +265,7 @@ try {
       page.on("pageerror", (e) => errors.push(e.message));
       await login(page);
       const roots = await catalog(page, width > 1000 && process.env.SELFHOST_TEST_MUTATE === "1");
-      await workspace(page, width);
+      await workspace(page, width, roots);
       if (width >= 1300 && thread) await verifyNativeRecovery(page, hostId, thread);
       assert.deepEqual(errors, []);
       console.log(width + "px passed (" + roots.length + " remote projects)");
@@ -198,6 +273,21 @@ try {
       await ctx.close();
     }
   }
+} catch (error) {
+  console.error(error);
+  process.exitCode = 1;
 } finally {
-  await browser.close();
+  const chrome = server.process();
+  if (chrome.exitCode === null && chrome.signalCode === null) {
+    const exited = once(chrome, "exit");
+    const timer = setTimeout(() => chrome.kill("SIGKILL"), 5000);
+    try {
+      void server.close().catch(() => chrome.kill("SIGKILL"));
+      await exited;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 }
+// launchServer's WebSocket listener can outlive its Chrome child on macOS.
+process.exit(process.exitCode ?? 0);
