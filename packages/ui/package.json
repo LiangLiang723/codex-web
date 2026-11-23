@@ -4,6 +4,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./input": "./src/components/ui/input.tsx",
+    "./textarea": "./src/components/ui/textarea.tsx",
     "./button": "./src/components/ui/button.tsx",
     "./dialog": "./src/components/ui/dialog.tsx",
     "./alert-dialog": "./src/components/ui/alert-dialog.tsx",
@@ -26,6 +28,7 @@
     "lint:fix": "oxlint --fix"
   },
   "dependencies": {
+    "@noble/hashes": "1.8.0",
     "@aiden0z/pptx-renderer": "1.2.4",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/dom": "^0.4.0",

@@ -1,4 +1,5 @@
 /* eslint-disable max-lines -- OAuth lifecycle effects intentionally share one coordination point. */
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { useEffect, useRef } from "react";
 import type {
   IPlatformService,
@@ -106,6 +107,7 @@ export function useRootOAuthEffects({
   const oauthLoginSuccessOwnerRef = useRef<"polling" | "deep-link" | null>(null);
 
   useEffect(() => {
+    if (selfHostedBuild) return;
     let disposed = false;
     async function restoreOAuthSessionInBackground() {
       logger.info("[Root] 后台启动 OAuth 本地会话恢复");
@@ -189,6 +191,7 @@ export function useRootOAuthEffects({
   ]);
 
   useEffect(() => {
+    if (selfHostedBuild) return;
     let disposed = false;
     let promptPending = false;
     const disposable = services.broadcastService.onMessage((message) => {
@@ -223,6 +226,7 @@ export function useRootOAuthEffects({
   }, [intl, onReauthenticationRequired, requestAlert, services.broadcastService, setUser]);
 
   useEffect(() => {
+    if (selfHostedBuild) return;
     if (!oauthPollingActive) {
       return;
     }
@@ -302,6 +306,7 @@ export function useRootOAuthEffects({
   ]);
 
   useEffect(() => {
+    if (selfHostedBuild) return;
     const disposeOAuth = platform.onOAuthCallback(async (url) => {
       try {
         const result = await services.oauthService.handleCallback(url);

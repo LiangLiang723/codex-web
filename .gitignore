@@ -78,3 +78,13 @@ __pycache__/
 
 # CR-01：afterPack 生成的 NSIS helper define，按架构命名，不得入库
 packages/desktop/build/generated/
+
+# Self-hosted credentials, volume mounts, generated release and private test state.
+/.data/
+/ssh-keys/
+/.env
+/.selfhost/
+/dist/
+/.e2e-runtime/
+
+/selfhost/**/__pycache__/

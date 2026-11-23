@@ -1,3 +1,4 @@
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { GitBranchActionsHost } from "@/GitBranchSwitcher.js";
 import { completeNewModelSelection } from "@zcode/provider";
 import { useSubagents } from "@/hooks/useSubagents.js";
@@ -3415,7 +3416,7 @@ export function SessionPane({
   const { binding: prewarmBinding, waitForSession: waitForDraftSession } = useDraftSessionPrewarm({
     // worktree 草稿不预热：会话要等 worktree 建好后由 Host 创建，cwd 一次确定（§3.2）。
     enabled:
-      sessionId === null && draftAgentStartupAllowed && !recoveringDraft && !draftWorktreeEnabled,
+      !selfHostedBuild && sessionId === null && draftAgentStartupAllowed && !recoveringDraft && !draftWorktreeEnabled,
     workspaceKey,
     paneId,
     invalidationVersion: draftRuntimeInvalidationVersion,
@@ -4165,6 +4166,24 @@ export function SessionPane({
       }
       // Bug 根因：首发曾把 binding=null 当成无预热，绕过 owner 再建一个会话。
       // 文本、附件/context 和 goal 都等待同一创建任务，创建失败或换代直接保留草稿。
+      if(selfHostedBuild && sessionId===null && draftSlashCommand?.kind==="sendGoalCommand"){
+        const created=await dispatchSubmissionCommand("createSession",{workspaceId:workspaceKey,config:submission},null);
+        if(created.status!=="accepted"||created.result?.type!=="createSession")throw Error(created.message??"Codex 未能创建目标会话");
+        const id=created.result.sessionId;
+        await dispatchSlashCommand(draftSlashCommand,id,undefined,heldQueueDisposition,expectedHeldQueueItemIds,submission);
+        await handleDraftSessionCreated(id,createSourceAtSend,created.commandId,taskGroupIdAtSend);
+        return;
+      }
+      if (selfHostedBuild && sessionId === null && !draftSlashCommand) {
+        const ack = await dispatchSubmissionCommand("createSession", {
+          workspaceId: workspaceKey,
+          firstInput: { text, ...submission, ...(readyAttachments.length ? {attachments:readyAttachments} : {}) },
+        }, null);
+        if (ack.status !== "accepted" || ack.result?.type !== "createSession")
+          throw new Error(ack.message ?? "Codex 未能创建会话");
+        await handleDraftSessionCreated(ack.result.sessionId, createSourceAtSend, ack.commandId, taskGroupIdAtSend);
+        return;
+      }
       const draftBinding = sessionId === null ? await waitForDraftSession() : null;
       if (draftBinding) {
         await ensureDraftPrewarmConfigBeforeSendRef.current(draftBinding.sessionId);
@@ -6343,6 +6362,7 @@ export function SessionPane({
       }
     />
   ) : null;
+
 
   const pendingGuideProjection = snapshot ? projectPendingGuideQueue(snapshot.queue) : null;
   // 子组件返回 null 不会让 React 元素变成假值；用同一可见队列控制内容和阻塞态外层留白。

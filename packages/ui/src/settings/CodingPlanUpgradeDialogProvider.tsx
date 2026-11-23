@@ -1,3 +1,4 @@
+import {selfHostedBuild} from "@zcode/shared/runtimeEnv";
 import {
   createContext,
   useCallback,
@@ -32,7 +33,11 @@ const CodingPlanUpgradeDialogContext = createContext<CodingPlanUpgradeDialogCont
   null,
 );
 
-export function CodingPlanUpgradeDialogProvider({ children }: { children: ReactNode }) {
+export function CodingPlanUpgradeDialogProvider({children}:{children:ReactNode}){
+  if(selfHostedBuild)return <CodingPlanUpgradeDialogContext.Provider value={{inventory:{entryPlanList:"",status:"ready",retry:()=>{}},openCodingPlanUpgrade:()=>false}}>{children}</CodingPlanUpgradeDialogContext.Provider>;
+  return <VendorCodingPlanDialogProvider>{children}</VendorCodingPlanDialogProvider>;
+}
+function VendorCodingPlanDialogProvider({ children }: { children: ReactNode }) {
   const platform = usePlatform();
   const inventory = useCodingPlanEntryPlanList();
   const inventoryRef = useRef(inventory);

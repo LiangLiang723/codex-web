@@ -12,7 +12,9 @@
     "#preinstalled-poppler/*": "./scripts/preinstalled-tools/poppler/*.mjs"
   },
   "scripts": {
-    "dev:web": "concurrently -k -n server,web -c blue,green \"pnpm --filter @zcode/server dev\" \"pnpm --filter @zcode/web dev\"",
+    "dev:web": "sh selfhost/build.sh && sh selfhost/serve.sh",
+    "build:web": "sh selfhost/build.sh",
+    "start:web": "sh selfhost/serve.sh",
     "dev:docs": "pnpm --filter @zcode/dev-docs dev",
     "dev:desktop": "pnpm run dev:desktop:prod",
     "dev:desktop:test": "node scripts/dev-desktop-env.mjs test",
@@ -68,7 +70,7 @@
     "ci:assert-node": "node scripts/assert-node-version.mjs",
     "build:cua": "pnpm --filter @zcode/zcode-cua build",
     "doctor:macos-release": "bash scripts/doctor-macos-release-app.sh",
-    "lint": "oxlint && node scripts/architecture/session-control-boundary.mjs && node scripts/check-document-libreoffice.mjs && node scripts/check-document-python.mjs",
+    "lint": "oxlint --ignore-pattern 'upstream/**' && node scripts/architecture/session-control-boundary.mjs && node scripts/check-document-libreoffice.mjs && node scripts/check-document-python.mjs",
     "lint:fix": "oxlint --fix --fix-suggestions",
     "bootstrap": "node scripts/bootstrap.mjs",
     "bootstrap:with-remote": "node scripts/bootstrap.mjs --with-remote",
@@ -98,6 +100,8 @@
     "tailwind-scrollbar-hide": "^4.0.0"
   },
   "devDependencies": {
+    "playwright-core": "1.59.1",
+    "smol-toml": "1.6.1",
     "@jridgewell/trace-mapping": "0.3.31",
     "@release-it/conventional-changelog": "^10.0.6",
     "@tanstack/react-virtual": "^3.13.23",

@@ -1,3 +1,4 @@
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { useInterfaceModeTelemetry } from "@/lib/appTelemetry.js";
 import { ProjectDirectoryProvider } from "@/project-sidebar/ProjectDirectoryProvider.js";
 import { DataSyncDialogProvider } from "@/data-sync/index.js";
@@ -149,6 +150,13 @@ type WelcomeScreenOpenReason =
  *
  * 外层挂载 StoreProvider（连接广播服务）+ TabStoreProvider，内层处理认证和路由。
  */
+const LocalContent = ({children}: {children: import("react").ReactNode; desktop?:boolean}) => <>{children}</>;
+const ProductMarketing = selfHostedBuild ? LocalContent : MarketingTouchProvider;
+const ProductRewards = selfHostedBuild ? LocalContent : RewardsProvider;
+const WorkspaceOnboarding = selfHostedBuild
+  ? ({ children }: import("react").ComponentProps<typeof OccupationOnboarding>) => <>{children}</>
+  : OccupationOnboarding;
+
 export function Root(props: RootProps) {
   return (
     <LucideProvider strokeWidth={DEFAULT_LUCIDE_STROKE_WIDTH}>
@@ -171,7 +179,7 @@ export function Root(props: RootProps) {
           <PlatformProvider platform={props.platform}>
             <StoreProvider
               broadcastService={props.services.broadcastService}
-              initialIsRestoringOAuthSession
+              initialIsRestoringOAuthSession={!selfHostedBuild}
             >
               <TabStoreProvider>
                 <ProjectDirectoryProvider isDesktop={props.isDesktop}>
@@ -181,16 +189,16 @@ export function Root(props: RootProps) {
                         enabled={props.assistantCodeCommentCardsEnabled}
                       >
                         <CodingPlanUpgradeDialogProvider>
-                          <RewardsProvider desktop={props.isDesktop === true}>
+                          <ProductRewards desktop={props.isDesktop === true}>
                             <RequestSecurityHost />
-                            <MarketingTouchProvider desktop={props.isDesktop === true}>
+                            <ProductMarketing desktop={props.isDesktop === true}>
                               <RemoteConnectionProgressProvider>
                                 <DataSyncDialogProvider>
                                   <RootInner {...props} />
                                 </DataSyncDialogProvider>
                               </RemoteConnectionProgressProvider>
-                            </MarketingTouchProvider>
-                          </RewardsProvider>
+                            </ProductMarketing>
+                          </ProductRewards>
                         </CodingPlanUpgradeDialogProvider>
                       </AssistantCodeCommentFeatureProvider>
                     </WebRemoteControlFeatureProvider>
@@ -598,7 +606,7 @@ function RootInner({
   });
   const isWebRemoteControlRoot = Boolean(webRemoteControlWorkspaceSwitcher);
   const providerAvailabilityLoginEntryGuardEnabled =
-    shouldEnableProviderAvailabilityLoginEntryGuard({
+    !selfHostedBuild && shouldEnableProviderAvailabilityLoginEntryGuard({
       isWebRemoteControlRoot,
     });
   const { startupCheckCompleted: providerAvailabilityStartupCheckCompleted } =
@@ -1500,7 +1508,7 @@ function RootInner({
 
   // 修复原因：没有打开的项目时 Root 只渲染独立设置页，迁移向导没有挂载，数据同步页「迁移」点了没有反应。
   // 两个分支共用同一个迁移向导节点；没有项目时 workspacePath 为空，用户级的项照常导入（见 useSettingsSync）。
-  const onboardingDialog = (
+  const onboardingDialog = selfHostedBuild ? null : (
     <ScopedErrorBoundary
       scope="onboarding-dialog"
       resetKeys={[workspaceShellIdentity?.trim() || workspaceShellPath]}
@@ -1614,7 +1622,7 @@ function RootInner({
       {requestSecurityBridgeNode}
       {remoteConnectionDialog}
       {directoryBrowserDialog}
-      <OccupationOnboarding
+      <WorkspaceOnboarding
         showWindowControls={Boolean(isWindowsDesktop || (isDesktop && !isMacDesktop))}
         showChildrenWhileLoading={!workspaceShellPath && isSettingsTabActive}
         isMacDesktop={isMacDesktop}
@@ -1691,7 +1699,7 @@ function RootInner({
           </RemoteWorkspaceControllerProvider>
         )}
         {onboardingDialog}
-      </OccupationOnboarding>
+      </WorkspaceOnboarding>
     </RootShell>
   );
 }

@@ -1,3 +1,4 @@
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import {
   Archive,
   Share2,
@@ -240,6 +241,7 @@ export function createSettingsPageConfig({
 }: SettingsPageConfigOptions = {}) {
   const showComputerUse = isDesktop || isMacDesktop || isWindowsDesktop;
   const settingsSections = BASE_SETTINGS_SECTIONS.filter((section) => {
+    if (selfHostedBuild && ["remoteDevices","dataSync","usage","modelProvider"].includes(section.id)) return false;
     if (section.id === "computerUse" && !showComputerUse) return false;
     return isSettingsSectionEnabled(section.id);
   });

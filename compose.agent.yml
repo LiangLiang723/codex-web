@@ -1,0 +1,12 @@
+# Optional Linux ssh-agent. Expose only this instance's socket directory.
+services:
+  codex-web:
+    environment:
+      SSH_AUTH_SOCK: /run/workspace-agent/agent.sock
+    volumes:
+      - type: bind
+        source: ${CODEX_WEB_AGENT_DIR:?Set the path to the ssh-agent socket directory}
+        target: /run/workspace-agent
+        read_only: true
+        bind:
+          create_host_path: false

@@ -1,0 +1,37 @@
+{
+  "name": "zcode-selfhost-codex-service",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "nitro build"
+  },
+  "engines": {
+    "node": ">=24.22.0"
+  },
+  "dependencies": {
+    "@fastify/busboy": "3.2.3",
+    "@posva/event-emitter": "2.0.0",
+    "agent-base": "9.0.0",
+    "async-mutex": "0.5.0",
+    "crossws": "0.4.12",
+    "ensure-error": "5.0.0",
+    "h3": "1.15.11",
+    "isbinaryfile": "6.0.0",
+    "lru-cache": "11.5.3",
+    "p-limit": "7.3.3",
+    "p-retry": "8.0.1",
+    "socks": "2.8.10",
+    "ssh2": "1.17.0",
+    "ts-pattern": "5.9.2",
+    "web-push": "3.6.7",
+    "ws": "8.22.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "nitropack": "2.13.4"
+  },
+  "overrides": {
+    "crossws": "0.4.12",
+    "h3": "1.15.11"
+  }
+}

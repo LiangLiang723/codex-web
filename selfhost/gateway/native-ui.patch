@@ -1,0 +1,14 @@
+--- a/server/utils/gateway/runtime/broker.ts
++++ b/server/utils/gateway/runtime/broker.ts
+@@ -30,6 +30,11 @@
+   private readonly files = new AppServerFileService(this.registry);
+   private readonly attachments = new ThreadAttachmentService(this.registry);
+ 
++  async selfhostCapability(host: HostRecord, method: string, params: Record<string, unknown>) {
++    const client = await this.registry.getHostClient(host);
++    return client.request(method, params);
++  }
++
+   async openThread(
+     host: HostRecord,
+     threadId: string,

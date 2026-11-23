@@ -1,3 +1,4 @@
+declare const __ZCODE_SELFHOST__: boolean;
 import {
   DEFAULT_ZCODE_ENDPOINT_ORIGIN,
   ZCODE_VERSION,
@@ -24,6 +25,7 @@ const readHelpConfig = createHelpAppConfigReader({
 });
 
 export async function resolveWebHelpConfig(options: ResolveWebCommunityUrlOptions = {}) {
+  if (typeof __ZCODE_SELFHOST__ !== "undefined" && __ZCODE_SELFHOST__) return {};
   const env = import.meta.env;
   const endpoint =
     options.endpointOrigin ??

@@ -1,0 +1,12 @@
+# Optional single-file mount. The Web form's server-side key path is "default".
+services:
+  codex-web:
+    environment:
+      CODEX_GATEWAY_SSH_KEY_DIR: /run/codex-identity
+    volumes:
+      - type: bind
+        source: ${CODEX_WEB_IDENTITY_FILE:?Set CODEX_WEB_IDENTITY_FILE to an absolute private key path}
+        target: /run/codex-identity/default
+        read_only: true
+        bind:
+          create_host_path: false

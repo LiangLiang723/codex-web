@@ -1,0 +1,1118 @@
+diff --git a/server/api/health.get.ts b/server/api/health.get.ts
+new file mode 100644
+--- /dev/null
++++ b/server/api/health.get.ts
+@@ -0,0 +1 @@
++export default defineEventHandler(() => ({ status: "ok" }));
+diff --git a/server/api/projects/index.post.ts b/server/api/projects/index.post.ts
+--- a/server/api/projects/index.post.ts
++++ b/server/api/projects/index.post.ts
+@@ -1,12 +1,15 @@
+ import { readValidatedBody } from "h3";
+-import { defineGatewayEventHandler } from "../../utils/gateway/http/errors";
+ import { requireRecord } from "../../utils/gateway/http/validation/common";
+ import { projectCreateSchema } from "../../utils/gateway/http/validation/hosts-projects";
+ import { hostStore } from "../../utils/gateway/state/hosts";
++import { userConfigMutationService } from "../../utils/gateway/config/user-config-mutation-service";
++import { defineGatewayConfigMutationHandler } from "../../utils/gateway/http/config-mutation";
+ import { projectStore } from "../../utils/gateway/state/projects";
+ 
+-export default defineGatewayEventHandler(async (event) => {
++export default defineGatewayConfigMutationHandler(async (event) => {
+   const input = await readValidatedBody(event, (body) => projectCreateSchema.parse(body));
+   requireRecord(hostStore.get(input.hostId), "Host not found");
+-  return projectStore.create(input);
++  return userConfigMutationService.commit(event.context.auth!.user.id, () =>
++    projectStore.save(input),
++  );
+ });
+diff --git a/server/middleware/auth.ts b/server/middleware/auth.ts
+--- a/server/middleware/auth.ts
++++ b/server/middleware/auth.ts
+@@ -1,11 +1,13 @@
+-import { defineEventHandler, getRequestURL } from "h3";
++import { defineEventHandler, getRequestURL, setResponseHeader } from "h3";
+ import { authenticateEvent } from "../utils/gateway/auth/context";
+ 
+-const PUBLIC_API_PATHS = new Set(["/api/auth/login", "/api/realtime"]);
++const PUBLIC_API_PATHS = new Set(["/api/auth/login", "/api/realtime", "/api/health"]);
+ 
+ export default defineEventHandler((event) => {
+   const path = getRequestURL(event).pathname;
+-  if (!path.startsWith("/api/") || PUBLIC_API_PATHS.has(path)) {
++  if (!path.startsWith("/api/")) return;
++  setResponseHeader(event, "Cache-Control", "no-store");
++  if (PUBLIC_API_PATHS.has(path)) {
+     return;
+   }
+   authenticateEvent(event);
+diff --git a/server/utils/gateway/browser-preview/browser-preview-manager.ts b/server/utils/gateway/browser-preview/browser-preview-manager.ts
+--- a/server/utils/gateway/browser-preview/browser-preview-manager.ts
++++ b/server/utils/gateway/browser-preview/browser-preview-manager.ts
+@@ -202,12 +202,15 @@
+     .update(`${userId}:${hostId}:${target.origin}:${sessionId}`)
+     .digest("hex")
+     .slice(0, 32);
+-  const domain = trimmedOrFallback(process.env.BROWSER_PREVIEW_DOMAIN, "cloudawn.top");
++  const domain = process.env.BROWSER_PREVIEW_DOMAIN?.trim();
++  if (domain === undefined || domain === "")
++    throw new Error("Set BROWSER_PREVIEW_DOMAIN to your own preview domain first");
+   return `p-${digest}.${domain}`;
+ }
+ 
+ export function isBrowserPreviewHostname(hostname: string) {
+-  const domain = trimmedOrFallback(process.env.BROWSER_PREVIEW_DOMAIN, "cloudawn.top");
++  const domain = process.env.BROWSER_PREVIEW_DOMAIN?.trim();
++  if (domain === undefined || domain === "") return false;
+   return new RegExp(`^p-[0-9a-f]{32}\\.${escapeRegExp(domain)}$`, "i").test(hostname);
+ }
+ 
+diff --git a/server/utils/gateway/config/pinned-thread-events.ts b/server/utils/gateway/config/pinned-thread-events.ts
+--- a/server/utils/gateway/config/pinned-thread-events.ts
++++ b/server/utils/gateway/config/pinned-thread-events.ts
+@@ -2,7 +2,7 @@
+ 
+ type PinnedThreadSubscriber = () => void;
+ 
+-class PinnedThreadEvents {
++class UserConfigEvents {
+   private readonly subscribersByUser = new Map<number, Set<PinnedThreadSubscriber>>();
+ 
+   publish(userId: number) {
+@@ -28,4 +28,5 @@
+   }
+ }
+ 
+-export const pinnedThreadEvents = new PinnedThreadEvents();
++export const pinnedThreadEvents = new UserConfigEvents();
++export const catalogEvents = new UserConfigEvents();
+diff --git a/server/utils/gateway/config/user-config-mutation-service.ts b/server/utils/gateway/config/user-config-mutation-service.ts
+--- a/server/utils/gateway/config/user-config-mutation-service.ts
++++ b/server/utils/gateway/config/user-config-mutation-service.ts
+@@ -1,6 +1,8 @@
+ import type { GatewayConfig } from "~~/shared/types";
+ import { userStore } from "../auth/users";
+ import { sshConnections } from "../infra/host-services";
++import { withGatewayDatabaseTransaction } from "../storage/database";
++import { remoteHostIdentity } from "~~/shared/utils/workspace";
+ import { hostResourceLifecycle } from "../runtime/host-resource-lifecycle";
+ import { hostRuntimeFingerprint } from "../runtime/host-runtime-fingerprint";
+ import { hostRuntimeSupervisor } from "../runtime/host-runtime-supervisor";
+@@ -10,7 +12,7 @@
+   type StoredHostRecord,
+ } from "../state/memory";
+ import { runtimeConfigFromMemory } from "../http/errors";
+-import { pinnedThreadEvents } from "./pinned-thread-events";
++import { catalogEvents, pinnedThreadEvents } from "./pinned-thread-events";
+ import { gatewayLog } from "../logging";
+ 
+ export class UserConfigMutationService {
+@@ -32,7 +34,23 @@
+     // SQLite is the durable source of truth. Never expose the draft to subsequent requests when
+     // encryption or persistence fails.
+     replaceCurrentGatewayMemoryState(previousState);
+-    userStore.saveConfig(userId, nextConfig);
++    const replaced = previousState.hosts.filter((previous) => {
++      const next = draftState.hosts.find((host) => host.id === previous.id);
++      return !next || remoteHostIdentity(next) !== remoteHostIdentity(previous);
++    });
++    const replacedIds = new Set(replaced.map((host) => host.id));
++    if (replacedIds.size) {
++      draftState.savedProjects = draftState.savedProjects.filter((p) => !replacedIds.has(p.hostId));
++      draftState.projects = draftState.projects.filter((p) => !replacedIds.has(p.hostId));
++      draftState.pinnedThreads = draftState.pinnedThreads.filter((p) => !replacedIds.has(p.hostId));
++      nextConfig.projects = draftState.savedProjects;
++      nextConfig.pinnedThreads = draftState.pinnedThreads;
++    }
++    withGatewayDatabaseTransaction((db) => {
++      userStore.saveConfig(userId, nextConfig);
++      for (const id of replacedIds)
++        db.prepare("DELETE FROM thread_index WHERE user_id=? AND host_id=?").run(userId, id);
++    });
+     replaceCurrentGatewayMemoryState(draftState);
+     this.reconcileCommittedConfig(
+       userId,
+@@ -41,6 +59,12 @@
+       previousState.pinnedThreads,
+       draftState.pinnedThreads,
+     );
++    if (
++      JSON.stringify(previousState.hosts) !== JSON.stringify(draftState.hosts) ||
++      JSON.stringify(previousState.savedProjects) !== JSON.stringify(draftState.savedProjects)
++    ) {
++      catalogEvents.publish(userId);
++    }
+     return result;
+   }
+ 
+@@ -106,6 +130,7 @@
+   // Relation cleanup belongs to the draft transaction, before SQLite is written. Resource
+   // lifecycle callbacks run after commit and must never mutate durable configuration: doing so
+   // would make memory look correct until the next restart restores orphaned rows from SQLite.
++  state.savedProjects = state.savedProjects.filter((project) => hostIds.has(project.hostId));
+   state.projects = state.projects.filter((project) => hostIds.has(project.hostId));
+   state.pinnedThreads = state.pinnedThreads.filter((thread) => hostIds.has(thread.hostId));
+ }
+diff --git a/server/utils/gateway/http/errors.ts b/server/utils/gateway/http/errors.ts
+--- a/server/utils/gateway/http/errors.ts
++++ b/server/utils/gateway/http/errors.ts
+@@ -106,6 +106,7 @@
+       ...host,
+       hasPassword: Boolean(host.password),
+     })),
++    projects: state.savedProjects,
+     pinnedThreads: state.pinnedThreads,
+     notifications: normalizeNotificationSettings(state.notifications),
+   };
+diff --git a/server/utils/gateway/http/validation/config.ts b/server/utils/gateway/http/validation/config.ts
+--- a/server/utils/gateway/http/validation/config.ts
++++ b/server/utils/gateway/http/validation/config.ts
+@@ -43,11 +43,25 @@
+         hostBaseSchema
+           .extend({
+             id: z.coerce.number().int().positive(),
++            hasPrivateKey: z.boolean().optional(),
+             hasPassword: z.boolean().optional(),
+             createdAt: z.string().optional(),
+             updatedAt: z.string().optional(),
+           })
+           .superRefine(validateHostProxy),
++      )
++      .default([]),
++    projects: z
++      .array(
++        z
++          .object({
++            hostId: z.number().int().positive(),
++            name: z.string().trim().min(1),
++            remotePath: z.string().trim().startsWith("/"),
++            createdAt: z.string(),
++            updatedAt: z.string(),
++          })
++          .strict(),
+       )
+       .default([]),
+     pinnedThreads: z.array(pinnedThreadSchema).default([]),
+@@ -75,6 +89,10 @@
+       username: trimmedOrNull(host.username),
+       port: host.port ?? null,
+       authMode: host.authMode,
++      hostKeyType: host.hostKeyType,
++      hostKeyFingerprint: host.hostKeyFingerprint ?? null,
++      passphrase: host.passphrase ?? null,
++      hasPrivateKey: Boolean(host.privateKey) || host.hasPrivateKey === true,
+       privateKeyPath: trimmedOrNull(host.privateKeyPath),
+       privateKey: host.privateKey ?? null,
+       password: host.password ?? null,
+@@ -84,6 +102,7 @@
+       createdAt: host.createdAt ?? timestamp,
+       updatedAt: host.updatedAt ?? timestamp,
+     })),
++    projects: input.projects,
+     pinnedThreads: input.pinnedThreads.map((thread) => ({
+       hostId: thread.hostId,
+       threadId: thread.threadId.trim(),
+diff --git a/server/utils/gateway/http/validation/hosts-projects.ts b/server/utils/gateway/http/validation/hosts-projects.ts
+--- a/server/utils/gateway/http/validation/hosts-projects.ts
++++ b/server/utils/gateway/http/validation/hosts-projects.ts
+@@ -1,3 +1,4 @@
++import { hostKeyTypes } from "~~/shared/types/records";
+ import { z } from "zod";
+ 
+ export const hostBaseSchema = z
+@@ -10,10 +11,18 @@
+       z.coerce.number().int().min(1).max(65535).nullable().optional(),
+     ),
+     authMode: z.enum(["agent", "privateKey", "password"]).default("agent"),
++    hostKeyType: z.enum(hostKeyTypes).default("ssh-ed25519"),
++    hostKeyFingerprint: z
++      .string()
++      .trim()
++      .regex(/^SHA256:[A-Za-z0-9+/]{43}$/)
++      .nullable()
++      .optional(),
++    passphrase: z.string().max(4096).nullable().optional(),
+     privateKeyPath: z.string().trim().nullable().optional(),
+-    privateKey: z.string().nullable().optional(),
++    privateKey: z.string().max(65536).nullable().optional(),
+     password: z.string().nullable().optional(),
+-    proxyUrl: z.string().trim().nullable().optional().default("socks5h://127.0.0.1:7890"),
++    proxyUrl: z.string().trim().nullable().optional().default(null),
+   })
+   .strict();
+ 
+@@ -26,14 +35,14 @@
+     if (url.protocol !== "socks5:" && url.protocol !== "socks5h:") {
+       throw new Error("Unsupported proxy protocol");
+     }
+-    if (url.hostname === "" || url.port === "") {
++    if (url.hostname === "" || url.port === "" || url.username !== "" || url.password !== "") {
+       throw new Error("Proxy host and port are required");
+     }
+   } catch {
+     ctx.addIssue({
+       code: "custom",
+       path: ["proxyUrl"],
+-      message: "Proxy URL must look like socks5h://127.0.0.1:7890",
++      message: "Use a SOCKS5 host and port without embedded credentials",
+     });
+   }
+ }
+@@ -44,5 +53,5 @@
+ export const projectCreateSchema = z.object({
+   hostId: z.coerce.number().int().positive(),
+   name: z.string().trim().min(1),
+-  remotePath: z.string().trim().min(1),
++  remotePath: z.string().trim().startsWith("/").max(4096),
+ });
+diff --git a/server/utils/gateway/infra/codex/codex-daemon.ts b/server/utils/gateway/infra/codex/codex-daemon.ts
+--- a/server/utils/gateway/infra/codex/codex-daemon.ts
++++ b/server/utils/gateway/infra/codex/codex-daemon.ts
+@@ -59,6 +59,14 @@
+       return { version: started.appServerVersion, updated: false };
+     }
+ 
++    if (process.env.CODEX_GATEWAY_MANAGE_CLI !== "1") {
++      if (isCodexVersionAtLeast(started.appServerVersion, SUPPORTED_CODEX_VERSION)) {
++        return { version: started.appServerVersion, updated: false };
++      }
++      throw new Error(
++        "Update the remote Codex app-server daemon to " + SUPPORTED_CODEX_VERSION + " or later",
++      );
++    }
+     beforeUpdate();
+     // CLI and daemon have independent package selections. Restarting after only replacing
+     // standalone/current can keep running the old daemon package. This official offline update
+diff --git a/server/utils/gateway/infra/codex/codex-upgrade-workflow.ts b/server/utils/gateway/infra/codex/codex-upgrade-workflow.ts
+--- a/server/utils/gateway/infra/codex/codex-upgrade-workflow.ts
++++ b/server/utils/gateway/infra/codex/codex-upgrade-workflow.ts
+@@ -27,15 +27,20 @@
+         const installed = await this.versionChecker.readVersionOrRecoverableMissing(host);
+         const beforeVersion = installed.version;
+         const installRequired =
+-          repair ||
+-          installed.installationLayout !== "standalone" ||
+-          !isCodexVersionAtLeast(beforeVersion, SUPPORTED_CODEX_VERSION);
++          repair || !isCodexVersionAtLeast(beforeVersion, SUPPORTED_CODEX_VERSION);
+         let version = beforeVersion;
+         codexUpgradeLog("remote version inspected", host, {
+           observedVersion: beforeVersion,
+           installationLayout: installed.installationLayout,
+           targetVersion: SUPPORTED_CODEX_VERSION,
+         });
++        if (installRequired && process.env.CODEX_GATEWAY_MANAGE_CLI !== "1") {
++          throw new Error(
++            "Install or update the official Codex CLI on the remote host (minimum " +
++              SUPPORTED_CODEX_VERSION +
++              "), then reconnect",
++          );
++        }
+         if (installRequired) {
+           hostUpgradeState.begin(host, SUPPORTED_CODEX_VERSION);
+           hostLifecycleBus.emit({
+@@ -76,7 +81,7 @@
+         hostUpgradeState.finish(host, false);
+         return {
+           version,
+-          installationLayout: "standalone",
++          installationLayout: installRequired ? "standalone" : installed.installationLayout,
+           appServerVersion: daemon.version,
+           supportedVersion: SUPPORTED_CODEX_VERSION,
+           beforeVersion,
+diff --git a/server/utils/gateway/infra/ssh/remote-command.ts b/server/utils/gateway/infra/ssh/remote-command.ts
+--- a/server/utils/gateway/infra/ssh/remote-command.ts
++++ b/server/utils/gateway/infra/ssh/remote-command.ts
+@@ -39,7 +39,6 @@
+   return codexRemotePayload(`
+ set -eu
+ cd "$HOME"
+-${ensureGatewayCodexConfigFeatureSnippet()}
+ exec "$CODEX_BIN" app-server daemon ${command}
+ `);
+ }
+@@ -67,7 +66,6 @@
+ export function codexRemoteAppServerVerifyPayload() {
+   return codexRemotePayload(`
+ set -eu
+-${ensureGatewayCodexConfigFeatureSnippet()}
+ "$CODEX_BIN" --version
+ "$CODEX_BIN" app-server proxy --help >/dev/null
+ `);
+@@ -95,51 +93,3 @@
+ 
+   return `sh -c ${shellQuote(wrapper)} sh ${shellQuote(payload)}`;
+ }
+-
+-function ensureGatewayCodexConfigFeatureSnippet() {
+-  return `
+-codex_home="\${CODEX_HOME:-$HOME/.codex}"
+-config_file="$codex_home/config.toml"
+-config_tmp="$config_file.$$.\${RANDOM:-0}.tmp"
+-mkdir -p "$codex_home"
+-touch "$config_file"
+-awk '
+-  BEGIN { in_features = 0; saw_features = 0; wrote_key = 0 }
+-  /^\\[features\\][[:space:]]*$/ {
+-    print
+-    in_features = 1
+-    saw_features = 1
+-    next
+-  }
+-  /^\\[/ {
+-    if (in_features && !wrote_key) {
+-      print "apply_patch_streaming_events = true"
+-      wrote_key = 1
+-    }
+-    in_features = 0
+-    print
+-    next
+-  }
+-  in_features && /^[[:space:]]*apply_patch_streaming_events[[:space:]]*=/ {
+-    if (!wrote_key) {
+-      print "apply_patch_streaming_events = true"
+-      wrote_key = 1
+-    }
+-    next
+-  }
+-  { print }
+-  END {
+-    if (in_features && !wrote_key) {
+-      print "apply_patch_streaming_events = true"
+-      wrote_key = 1
+-    }
+-    if (!saw_features) {
+-      print ""
+-      print "[features]"
+-      print "apply_patch_streaming_events = true"
+-    }
+-  }
+-' "$config_file" > "$config_tmp" && mv "$config_tmp" "$config_file"
+-true
+-`;
+-}
+diff --git a/server/utils/gateway/infra/ssh/ssh-config.ts b/server/utils/gateway/infra/ssh/ssh-config.ts
+--- a/server/utils/gateway/infra/ssh/ssh-config.ts
++++ b/server/utils/gateway/infra/ssh/ssh-config.ts
+@@ -1,12 +1,22 @@
+ import { createHash } from "node:crypto";
+-import { existsSync, readFileSync } from "node:fs";
++import { existsSync, readFileSync, realpathSync } from "node:fs";
+ import { homedir } from "node:os";
+-import { join } from "node:path";
++import { isAbsolute, join, relative, resolve } from "node:path";
+ import { SocksClient } from "socks";
+ import type { HostWithSecret } from "./ssh-types";
+ 
+ export function expandHome(path: string) {
+   return path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
++}
++
++export function readSshPrivateKey(path: string) {
++  const root = realpathSync(process.env.CODEX_GATEWAY_SSH_KEY_DIR ?? "/run/ssh-keys");
++  const key = realpathSync(resolve(root, expandHome(path)));
++  const within = relative(root, key);
++  if (!within || within === ".." || within.startsWith("../") || isAbsolute(within)) {
++    throw new Error("SSH identity file must be inside the configured key directory");
++  }
++  return readFileSync(key);
+ }
+ 
+ export function resolveSshConfig(host: HostWithSecret) {
+@@ -69,6 +79,12 @@
+   resolved: ReturnType<typeof resolveSshConfig>,
+ ) {
+   const secretFingerprint = createHash("sha256")
++    .update(host.hostKeyType ?? "ssh-ed25519")
++    .update("\0")
++    .update(host.hostKeyFingerprint ?? "")
++    .update("\0")
++    .update(host.passphrase ?? "")
++    .update("\0")
+     .update(host.authMode)
+     .update("\0")
+     .update(host.authMode === "password" ? (host.password ?? "") : "")
+diff --git a/server/utils/gateway/infra/ssh/ssh-connection.ts b/server/utils/gateway/infra/ssh/ssh-connection.ts
+--- a/server/utils/gateway/infra/ssh/ssh-connection.ts
++++ b/server/utils/gateway/infra/ssh/ssh-connection.ts
+@@ -1,4 +1,3 @@
+-import { readFileSync } from "node:fs";
+ import { StringDecoder } from "node:string_decoder";
+ import { Client, type ClientChannel, type SFTPWrapper } from "ssh2";
+ import type {
+@@ -7,7 +6,12 @@
+   HostWithSecret,
+   ShellOptions,
+ } from "./ssh-types";
+-import { createProxySocket, expandHome, resolveSshConfig, sshConnectionKey } from "./ssh-config";
++import {
++  createProxySocket,
++  readSshPrivateKey,
++  resolveSshConfig,
++  sshConnectionKey,
++} from "./ssh-config";
+ import { SSH_CONNECTION_CLOSED_BEFORE_READY, withSshConnectRetries } from "./ssh-connect-retry";
+ import { isConnectionLevelSshError } from "./ssh-errors";
+ import { SftpChannelPool } from "./ssh-sftp";
+@@ -17,7 +21,7 @@
+ import { SshBackgroundTaskScheduler } from "./ssh-background-tasks";
+ import { hostMfaManager } from "../../host-mfa/host-mfa-instance";
+ import { HOST_MFA_TIMEOUT_MS } from "../../host-mfa/host-mfa-manager";
+-import { verifySshHostKey } from "./ssh-host-trust";
++import { hostKeyAlgorithms, verifySshHostKey } from "./ssh-host-trust";
+ 
+ const SSH_READY_TIMEOUT_MS = 30_000;
+ const SSH_KEEPALIVE_INTERVAL_MS = 30_000;
+@@ -553,6 +557,8 @@
+             });
+         })
+         .connect({
++          algorithms: { serverHostKey: hostKeyAlgorithms(host) },
++          passphrase: host.authMode === "privateKey" ? (host.passphrase ?? undefined) : undefined,
+           hostVerifier: (serverKey: Buffer) => {
+             try {
+               assertCurrentConnection();
+@@ -575,7 +581,7 @@
+               : resolved.privateKeyPath !== null &&
+                   resolved.privateKeyPath !== undefined &&
+                   resolved.privateKeyPath !== ""
+-                ? readFileSync(expandHome(resolved.privateKeyPath))
++                ? readSshPrivateKey(resolved.privateKeyPath)
+                 : undefined,
+           // ssh2 keeps this timer running while keyboard-interactive waits for the MFA answer.
+           // Include the user-input window or a valid challenge is misreported as a handshake
+diff --git a/server/utils/gateway/infra/ssh/ssh-host-trust.ts b/server/utils/gateway/infra/ssh/ssh-host-trust.ts
+--- a/server/utils/gateway/infra/ssh/ssh-host-trust.ts
++++ b/server/utils/gateway/infra/ssh/ssh-host-trust.ts
+@@ -1,26 +1,58 @@
+-import { createHash } from "node:crypto";
+-import { gatewayDatabase } from "../../storage/database";
++import { createHash, createHmac } from "node:crypto";
++import type { ServerHostKeyAlgorithm } from "ssh2";
++import { existsSync, readFileSync } from "node:fs";
+ import type { HostWithSecret } from "./ssh-types";
+-import { sshEndpointIdentity } from "./ssh-identity";
++import { resolveSshConfig } from "./ssh-config";
+ 
+-/** Persistent trust-on-first-use, as with OpenSSH accept-new. Pin the server key during key
+- * exchange, before password/MFA authentication. A changed key fails closed, including after a
+- * Gateway restart. Endpoint trust includes the proxy tenant but not the SSH login credential. */
++// OpenSSH stores both RSA-SHA2 variants under the public key type "ssh-rsa".
++export function hostKeyAlgorithms(host: HostWithSecret): ServerHostKeyAlgorithm[] {
++  const type = host.hostKeyType ?? "ssh-ed25519";
++  return type === "ssh-rsa" ? ["rsa-sha2-512", "rsa-sha2-256"] : [type];
++}
++
++// Accept explicitly provisioned host keys only. A network scan is never a trust decision.
+ export function verifySshHostKey(host: HostWithSecret, key: Buffer) {
+-  const endpoint = sshEndpointIdentity(host);
+-  const fingerprint = createHash("sha256").update(key).digest("hex");
+-  const db = gatewayDatabase();
+-  db.prepare("INSERT OR IGNORE INTO ssh_host_keys (endpoint, fingerprint) VALUES (?, ?)").run(
+-    endpoint,
+-    fingerprint,
++  const digest = createHash("sha256").update(key).digest();
++  const fingerprint = "SHA256:" + digest.toString("base64").replace(/=+$/, "");
++  if (host.hostKeyFingerprint != null && host.hostKeyFingerprint !== "") {
++    if (host.hostKeyFingerprint !== fingerprint) throw new Error("SSH host fingerprint mismatch");
++    return digest.toString("hex");
++  }
++  const path = process.env.CODEX_GATEWAY_KNOWN_HOSTS;
++  if (path === undefined || path === "" || !existsSync(path))
++    throw new Error("A verified SSH host fingerprint or a trusted known_hosts file is required");
++  const { hostName, port } = resolveSshConfig(host);
++  const endpoint = port === 22 ? hostName : `[${hostName}]:${port}`;
++  const expectedKey = key.toString("base64");
++  let found = false;
++  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
++    const fields = line.trim().split(/\s+/);
++    const marker = fields[0]?.startsWith("@") === true ? fields.shift() : null;
++    const [hosts, algorithm, encoded] = fields;
++    if (
++      algorithm !== (host.hostKeyType ?? "ssh-ed25519") ||
++      encoded !== expectedKey ||
++      hosts === undefined ||
++      hosts === ""
++    )
++      continue;
++    const patterns = hosts.split(",");
++    if (patterns.some((entry) => entry.startsWith("!") && matchesHost(entry.slice(1), endpoint)))
++      continue;
++    if (!patterns.some((entry) => !entry.startsWith("!") && matchesHost(entry, endpoint))) continue;
++    if (marker === "@revoked") throw new Error("SSH host key has been revoked");
++    if (marker == null) found = true;
++  }
++  if (!found)
++    throw new Error("SSH host key is missing or differs from the trusted known_hosts file");
++  return digest.toString("hex");
++}
++
++function matchesHost(entry: string, endpoint: string) {
++  if (!entry.startsWith("|1|")) return entry.toLowerCase() === endpoint.toLowerCase();
++  const [, , salt, expected] = entry.split("|");
++  if (salt === undefined || salt === "" || expected === undefined || expected === "") return false;
++  return (
++    createHmac("sha1", Buffer.from(salt, "base64")).update(endpoint).digest("base64") === expected
+   );
+-  const trusted = db
+-    .prepare("SELECT fingerprint FROM ssh_host_keys WHERE endpoint = ?")
+-    .get(endpoint);
+-  if (trusted?.fingerprint !== fingerprint) {
+-    throw new Error(
+-      "SSH server host key changed; verify the remote server identity before reconnecting",
+-    );
+-  }
+-  return fingerprint;
+ }
+diff --git a/server/utils/gateway/notifications/web-push/delivery.ts b/server/utils/gateway/notifications/web-push/delivery.ts
+--- a/server/utils/gateway/notifications/web-push/delivery.ts
++++ b/server/utils/gateway/notifications/web-push/delivery.ts
+@@ -18,7 +18,10 @@
+     subscriptions.map(async (subscription) => {
+       try {
+         await webPush.sendNotification(subscription, payload, {
+-          vapidDetails: { subject: "https://codex.cloudawn.top", ...keys },
++          vapidDetails: {
++            subject: process.env.WEB_PUSH_SUBJECT ?? "mailto:admin@localhost",
++            ...keys,
++          },
+           TTL: 60 * 60,
+           timeout: 10_000,
+           urgency: "normal",
+diff --git a/server/utils/gateway/realtime/connection.ts b/server/utils/gateway/realtime/connection.ts
+--- a/server/utils/gateway/realtime/connection.ts
++++ b/server/utils/gateway/realtime/connection.ts
+@@ -114,6 +114,8 @@
+   state.terminalOutputStream = undefined;
+   state.notificationUnsubscribe?.();
+   state.notificationUnsubscribe = undefined;
++  state.catalogUnsubscribe?.();
++  state.catalogUnsubscribe = undefined;
+   state.pinnedThreadsUnsubscribe?.();
+   state.pinnedThreadsUnsubscribe = undefined;
+   state.threadSectionsUnsubscribe?.();
+diff --git a/server/utils/gateway/realtime/handlers/auth.ts b/server/utils/gateway/realtime/handlers/auth.ts
+--- a/server/utils/gateway/realtime/handlers/auth.ts
++++ b/server/utils/gateway/realtime/handlers/auth.ts
+@@ -2,7 +2,7 @@
+ import type { RealtimeClientMessage } from "~~/shared/types";
+ import { userStore } from "../../auth/users";
+ import { notificationRealtimeEvents } from "../../notifications/notification-realtime-events";
+-import { pinnedThreadEvents } from "../../config/pinned-thread-events";
++import { catalogEvents, pinnedThreadEvents } from "../../config/pinned-thread-events";
+ import { sessionRevocationEvents } from "../../auth/session-events";
+ import { hashToken } from "../../storage/crypto";
+ import { subscribeTerminalEvents } from "./terminal";
+@@ -48,6 +48,9 @@
+     notificationUnsubscribe: notificationRealtimeEvents.subscribe(user.id, (notification) => {
+       sendRealtimePeerMessage(peer, { type: "notification.published", notification });
+     }),
++    catalogUnsubscribe: catalogEvents.subscribe(user.id, () => {
++      sendRealtimePeerMessage(peer, { type: "config.catalog.changed" });
++    }),
+     pinnedThreadsUnsubscribe: pinnedThreadEvents.subscribe(user.id, () => {
+       sendRealtimePeerMessage(peer, { type: "config.pinnedThreads.changed" });
+     }),
+diff --git a/server/utils/gateway/realtime/handlers/host-metrics.ts b/server/utils/gateway/realtime/handlers/host-metrics.ts
+--- a/server/utils/gateway/realtime/handlers/host-metrics.ts
++++ b/server/utils/gateway/realtime/handlers/host-metrics.ts
+@@ -14,7 +14,7 @@
+   request: Extract<RealtimeClientMessage, { type: "host.metrics.subscribe" }>,
+ ) {
+   const userId = authenticatedUserId(peer);
+-  const host = hostStore.get(request.hostId);
++  const host = hostStore.getWithSecret(request.hostId);
+   if (host === null) throw new Error(`Host ${request.hostId} not found`);
+   const subscriptions = stateFor(peer).hostMetricsUnsubscribers;
+   replaceSubscription(subscriptions, request.hostId, () =>
+diff --git a/server/utils/gateway/realtime/peer-state.ts b/server/utils/gateway/realtime/peer-state.ts
+--- a/server/utils/gateway/realtime/peer-state.ts
++++ b/server/utils/gateway/realtime/peer-state.ts
+@@ -23,6 +23,7 @@
+   terminalUnsubscribe?: () => void;
+   terminalOutputStream?: { dispose: () => void };
+   notificationUnsubscribe?: () => void;
++  catalogUnsubscribe?: () => void;
+   pinnedThreadsUnsubscribe?: () => void;
+   threadSectionsUnsubscribe?: () => void;
+   threadRuntimeStatusUnsubscribe?: () => void;
+diff --git a/server/utils/gateway/runtime/active-main-thread-monitor.ts b/server/utils/gateway/runtime/active-main-thread-monitor.ts
+--- a/server/utils/gateway/runtime/active-main-thread-monitor.ts
++++ b/server/utils/gateway/runtime/active-main-thread-monitor.ts
+@@ -10,6 +10,7 @@
+ } from "~~/shared/runtime/app-server";
+ import { recordFromUnknown } from "~~/shared/utils/records";
+ import { threadIdFromNotification } from "../protocol/thread-payload";
++import { catalogEvents } from "../config/pinned-thread-events";
+ import { currentGatewayUserId } from "../state/memory";
+ import type { AgentRpcClient } from "../agent/provider-adapter";
+ import { runtimeLog } from "./runtime-log";
+@@ -86,7 +87,13 @@
+ 
+     if (method === "thread/started") {
+       const thread = startedThread(message);
+-      if (thread !== null) threadMetadataStore.record(context.host.id, thread);
++      if (thread !== null) {
++        const fresh = threadMetadataStore.get(context.host.id, thread.id) === null;
++        threadMetadataStore.record(context.host.id, thread);
++        const userId = currentGatewayUserId();
++        if (fresh && userId !== null && !isAppServerSubAgentThread(thread))
++          catalogEvents.publish(userId);
++      }
+       // `thread/started` also announces newly-created idle threads. Resuming every announcement
+       // would materialize conversations that no Gateway browser is using. Status broadcasts cover
+       // later turns, so only an already-active main thread is eligible for monitor ownership here.
+@@ -95,6 +102,14 @@
+       return;
+     }
+ 
++    if (
++      method === "thread/name/updated" ||
++      method === "thread/archived" ||
++      method === "thread/unarchived"
++    ) {
++      const userId = currentGatewayUserId();
++      if (userId !== null) catalogEvents.publish(userId);
++    }
+     if (method === "thread/status/changed") {
+       const params = recordFromUnknown(recordFromUnknown(message)?.params);
+       if (runtimeStatusFromAppThreadStatus(params?.status) === "running") {
+diff --git a/server/utils/gateway/runtime/host-resource-lifecycle.ts b/server/utils/gateway/runtime/host-resource-lifecycle.ts
+--- a/server/utils/gateway/runtime/host-resource-lifecycle.ts
++++ b/server/utils/gateway/runtime/host-resource-lifecycle.ts
+@@ -1,3 +1,4 @@
++import { remoteHostIdentity } from "~~/shared/utils/workspace";
+ import { browserPreviewManager } from "../browser-preview/browser-preview-manager";
+ import { subAgentThreadStore } from "../state/sub-agent-threads";
+ import { threadMetadataStore } from "../state/thread-metadata";
+@@ -19,7 +20,7 @@
+     // A collector owns its transport configuration, including proxy/authentication. A credential
+     // edit must retire it even when the machine/account identity remains unchanged.
+     hostMetricsManager.removeHost(userId, previous.id);
+-    if (remoteIdentityFingerprint(previous) !== remoteIdentityFingerprint(next)) {
++    if (remoteHostIdentity(previous) !== remoteHostIdentity(next)) {
+       threadProjectDiscovery.invalidateHost(userId, previous.id);
+       clearThreadRuntime(userId, previous.id);
+       tmuxMonitorService.removeHost(userId, previous.id);
+@@ -53,13 +54,3 @@
+   // Remote transcripts/replay/pages have their own idle lifetime. Removing one user's Host
+   // releases only its connection lease; it must not erase the other users' shared conversation.
+ }
+-
+-// Credentials and proxies can rotate without changing the remote tmux server.
+-// These fields identify a different machine/user namespace and invalidate pane identities.
+-function remoteIdentityFingerprint(host: StoredHostRecord) {
+-  return JSON.stringify({
+-    sshHost: host.sshHost,
+-    username: host.username,
+-    port: host.port,
+-  });
+-}
+diff --git a/server/utils/gateway/runtime/host-runtime-fingerprint.ts b/server/utils/gateway/runtime/host-runtime-fingerprint.ts
+--- a/server/utils/gateway/runtime/host-runtime-fingerprint.ts
++++ b/server/utils/gateway/runtime/host-runtime-fingerprint.ts
+@@ -6,6 +6,9 @@
+     username: host.username,
+     port: host.port,
+     authMode: host.authMode,
++    hostKeyType: host.hostKeyType,
++    hostKeyFingerprint: host.hostKeyFingerprint,
++    passphrase: host.passphrase,
+     privateKeyPath: host.privateKeyPath,
+     privateKey: host.privateKey,
+     password: host.password,
+diff --git a/server/utils/gateway/state/hosts.ts b/server/utils/gateway/state/hosts.ts
+--- a/server/utils/gateway/state/hosts.ts
++++ b/server/utils/gateway/state/hosts.ts
+@@ -4,14 +4,38 @@
+ 
+ function sanitizeHost(host: StoredHostRecord): HostRecord {
+   return {
+-    ...host,
++    id: host.id,
++    name: host.name,
++    sshHost: host.sshHost,
++    username: host.username,
++    port: host.port,
++    authMode: host.authMode,
++    privateKeyPath: host.privateKeyPath,
++    hostKeyType: host.hostKeyType,
++    hostKeyFingerprint: host.hostKeyFingerprint,
++    proxyUrl: host.proxyUrl,
++    hasPrivateKey: Boolean(host.privateKey) || Boolean(host.privateKeyPath),
+     hasPassword: Boolean(host.password),
++    createdAt: host.createdAt,
++    updatedAt: host.updatedAt,
+   };
+ }
+ 
+ function normalizeHost(input: HostCreateInput, id = nextId(currentGatewayMemoryState().hosts)) {
+   const timestamp = nowIso();
+   const existing = currentGatewayMemoryState().hosts.find((host) => host.id === id);
++  const keyMode = input.authMode === "privateKey";
++  const keyPath = keyMode ? trimmedOrNull(input.privateKeyPath) : null;
++  // The API never returns private material. Blank secret fields retain it while editing.
++  // Selecting a key file replaces a pasted key. Changing auth mode discards the old secret.
++  const privateKey =
++    keyMode && keyPath === null ? (input.privateKey ?? existing?.privateKey ?? null) : null;
++  const password =
++    input.authMode === "password" ? (input.password ?? existing?.password ?? null) : null;
++  const keyReplaced = Boolean(input.privateKey) || keyPath !== (existing?.privateKeyPath ?? null);
++  const passphrase = keyMode
++    ? (input.passphrase ?? (keyReplaced ? null : (existing?.passphrase ?? null)))
++    : null;
+   return {
+     id,
+     name: input.name.trim(),
+@@ -19,11 +43,15 @@
+     username: trimmedOrNull(input.username),
+     port: input.port ?? null,
+     authMode: input.authMode,
+-    privateKeyPath: trimmedOrNull(input.privateKeyPath),
+-    privateKey: input.privateKey ?? null,
+-    password: input.password ?? null,
++    hostKeyType: input.hostKeyType ?? "ssh-ed25519",
++    hostKeyFingerprint: input.hostKeyFingerprint ?? null,
++    privateKeyPath: keyPath,
++    privateKey,
++    password,
++    passphrase,
+     proxyUrl: trimmedOrNull(input.proxyUrl),
+-    hasPassword: Boolean(input.password),
++    hasPrivateKey: Boolean(privateKey) || Boolean(keyPath),
++    hasPassword: Boolean(password),
+     createdAt: existing?.createdAt ?? timestamp,
+     updatedAt: timestamp,
+   };
+@@ -31,10 +59,12 @@
+ 
+ export const hostStore = {
+   replaceHosts(hosts: HostRecord[]) {
++    const ids = new Set(hosts.map((host) => host.id));
++    if (ids.size !== hosts.length) throw new Error("Duplicate host ID");
++    // Reimporting a redacted export preserves the matching host's server-side secrets.
+     currentGatewayMemoryState().hosts = hosts.map((host) => ({
+-      ...host,
+-      proxyUrl: trimmedOrNull(host.proxyUrl),
+-      hasPassword: Boolean(host.password),
++      ...normalizeHost(host, host.id),
++      createdAt: host.createdAt,
+     }));
+   },
+ 
+diff --git a/server/utils/gateway/state/memory.ts b/server/utils/gateway/state/memory.ts
+--- a/server/utils/gateway/state/memory.ts
++++ b/server/utils/gateway/state/memory.ts
+@@ -7,6 +7,7 @@
+ } from "~~/shared/types";
+ import { normalizeNotificationSettings } from "~~/shared/config";
+ import { trimmedOrNull } from "~~/shared/utils/strings";
++import { loadThreadIndex } from "../storage/thread-index";
+ import { AsyncLocalStorage } from "node:async_hooks";
+ 
+ export type StoredHostRecord = HostRecord;
+@@ -36,6 +37,7 @@
+ export interface GatewayMemoryState {
+   hosts: StoredHostRecord[];
+   projects: ProjectRecord[];
++  savedProjects: ProjectRecord[];
+   pinnedThreads: PinnedThreadRecord[];
+   notifications: GatewayConfig["notifications"];
+   threadMetadata: ThreadMetadataRecord[];
+@@ -50,6 +52,7 @@
+   return {
+     hosts: [],
+     projects: [],
++    savedProjects: [],
+     pinnedThreads: [],
+     notifications: normalizeNotificationSettings(),
+     threadMetadata: [],
+@@ -106,6 +109,9 @@
+ export function buildGatewayMemoryState(config: GatewayConfig): GatewayMemoryState {
+   return {
+     ...createGatewayMemoryState(),
++    savedProjects: [...(config.projects ?? [])],
++    projects: [...(config.projects ?? [])],
++    threadMetadata: loadThreadIndex(currentGatewayUserId()),
+     hosts: config.hosts.map((host) => ({
+       ...host,
+       proxyUrl: trimmedOrNull(host.proxyUrl),
+diff --git a/server/utils/gateway/state/projects.ts b/server/utils/gateway/state/projects.ts
+--- a/server/utils/gateway/state/projects.ts
++++ b/server/utils/gateway/state/projects.ts
+@@ -1,8 +1,7 @@
+ import type { ProjectCreateInput, ProjectRecord } from "~~/shared/types";
+ import { currentGatewayMemoryState, nowIso } from "./memory";
+ 
+-// Directory groups are navigation state, not a second persistent project catalog. Codex owns
+-// thread cwd; pins identify threads independently, so neither needs a Gateway-generated ID.
++// User-selected directories are durable. Other directory groups are discovered from native threads.
+ export const projectStore = {
+   pruneToHosts(hostIds: Set<number>) {
+     currentGatewayMemoryState().projects = this.list().filter((project) =>
+@@ -45,6 +44,18 @@
+     return project;
+   },
+ 
++  save(input: ProjectCreateInput) {
++    const project = this.create(input);
++    const state = currentGatewayMemoryState();
++    state.savedProjects = [
++      ...state.savedProjects.filter(
++        (p) => p.hostId !== project.hostId || p.remotePath !== project.remotePath,
++      ),
++      project,
++    ];
++    return project;
++  },
++
+   ensureForPath(hostId: number, remotePath: string): ProjectRecord {
+     const cwd = remotePath.trim();
+     return (
+diff --git a/server/utils/gateway/state/runtime-config.ts b/server/utils/gateway/state/runtime-config.ts
+--- a/server/utils/gateway/state/runtime-config.ts
++++ b/server/utils/gateway/state/runtime-config.ts
+@@ -12,6 +12,10 @@
+     hostStore.replaceHosts(config.hosts);
+     const hostIds = hostStore.hostIds();
+     projectStore.pruneToHosts(hostIds);
++    currentGatewayMemoryState().savedProjects = [];
++    for (const project of config.projects ?? []) {
++      if (hostIds.has(project.hostId)) projectStore.save(project);
++    }
+     threadMetadataStore.pruneToHosts(hostIds);
+     subAgentThreadStore.pruneToHosts(hostIds);
+     currentGatewayMemoryState().pinnedThreads = normalizePinnedThreads(
+@@ -34,10 +38,8 @@
+   export(): GatewayConfig {
+     return {
+       version: 2,
+-      hosts: hostStore.listWithSecret().map((host) => ({
+-        ...host,
+-        hasPassword: Boolean(host.password),
+-      })),
++      hosts: hostStore.list(),
++      projects: currentGatewayMemoryState().savedProjects,
+       pinnedThreads: currentGatewayMemoryState().pinnedThreads,
+       notifications: normalizeNotificationSettings(currentGatewayMemoryState().notifications),
+     };
+diff --git a/server/utils/gateway/state/thread-metadata.ts b/server/utils/gateway/state/thread-metadata.ts
+--- a/server/utils/gateway/state/thread-metadata.ts
++++ b/server/utils/gateway/state/thread-metadata.ts
+@@ -1,4 +1,5 @@
+-import { currentGatewayMemoryState, toTimestamp } from "./memory";
++import { persistThreadMetadata } from "../storage/thread-index";
++import { currentGatewayMemoryState, currentGatewayUserId, toTimestamp } from "./memory";
+ import { parentThreadIdFromMetadata, subAgentThreadStore } from "./sub-agent-threads";
+ import type { AppServerThread } from "~~/shared/types";
+ 
+@@ -49,7 +50,7 @@
+       if (existing === undefined) {
+         return;
+       }
+-      currentGatewayMemoryState().threadMetadata[index] = {
++      const next = {
+         ...existing,
+         ...metadata,
+         parentThreadId: metadata.parentThreadId ?? existing.parentThreadId,
+@@ -61,8 +62,12 @@
+         name: metadata.name ?? existing.name,
+         status: metadata.status,
+       };
++      currentGatewayMemoryState().threadMetadata[index] = next;
++      if (JSON.stringify(existing) !== JSON.stringify(next))
++        persistThreadMetadata(currentGatewayUserId(), next);
+     } else {
+       currentGatewayMemoryState().threadMetadata.push(metadata);
++      persistThreadMetadata(currentGatewayUserId(), metadata);
+     }
+   },
+ 
+diff --git a/server/utils/gateway/storage/crypto.ts b/server/utils/gateway/storage/crypto.ts
+--- a/server/utils/gateway/storage/crypto.ts
++++ b/server/utils/gateway/storage/crypto.ts
+@@ -95,10 +95,8 @@
+ 
+ function configEncryptionKey() {
+   const secret = process.env.CODEX_GATEWAY_CONFIG_SECRET ?? "";
+-  if (secret === "" && process.env.NODE_ENV === "production") {
+-    throw new Error("CODEX_GATEWAY_CONFIG_SECRET is required in production");
++  if (secret.length < 32) {
++    throw new Error("CODEX_GATEWAY_CONFIG_SECRET must contain at least 32 characters");
+   }
+-  return createHash("sha256")
+-    .update(secret === "" ? "codex-gateway-development-secret" : secret)
+-    .digest();
++  return createHash("sha256").update(secret).digest();
+ }
+diff --git a/server/utils/gateway/storage/database.ts b/server/utils/gateway/storage/database.ts
+--- a/server/utils/gateway/storage/database.ts
++++ b/server/utils/gateway/storage/database.ts
+@@ -104,6 +104,12 @@
+       PRIMARY KEY (user_id, host_id)
+     );
+ 
++    CREATE TABLE IF NOT EXISTS thread_index (
++      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
++      host_id INTEGER NOT NULL, thread_id TEXT NOT NULL, metadata TEXT NOT NULL,
++      PRIMARY KEY (user_id, host_id, thread_id)
++    );
++
+     CREATE TABLE IF NOT EXISTS ssh_host_keys (
+       endpoint TEXT PRIMARY KEY,
+       fingerprint TEXT NOT NULL,
+diff --git a/server/utils/gateway/storage/thread-index.ts b/server/utils/gateway/storage/thread-index.ts
+new file mode 100644
+--- /dev/null
++++ b/server/utils/gateway/storage/thread-index.ts
+@@ -0,0 +1,38 @@
++import { z } from "zod";
++import { decryptJson, encryptJson } from "./crypto";
++import { gatewayDatabase } from "./database";
++import type { ThreadMetadataRecord } from "../state/memory";
++
++const storedMetadata = z.object({
++  hostId: z.number().int(),
++  threadId: z.string(),
++  parentThreadId: z.string().nullable(),
++  agentNickname: z.string().nullable(),
++  agentRole: z.string().nullable(),
++  title: z.string().nullable(),
++  name: z.string().nullable(),
++  preview: z.string().nullable(),
++  cwd: z.string().nullable(),
++  recencyAt: z.number().nullable(),
++  updatedAt: z.number(),
++});
++// Keep only navigation metadata locally. Turns, item bodies and pending approvals belong to Codex.
++export function loadThreadIndex(userId: number | null): ThreadMetadataRecord[] {
++  if (userId === null) return [];
++  return gatewayDatabase()
++    .prepare("SELECT metadata FROM thread_index WHERE user_id = ?")
++    .all(userId)
++    .map((row) => ({
++      ...storedMetadata.parse(decryptJson(String(row.metadata))),
++      status: { type: "notLoaded" },
++    }));
++}
++
++export function persistThreadMetadata(userId: number | null, meta: ThreadMetadataRecord) {
++  if (userId === null) return;
++  gatewayDatabase()
++    .prepare(
++      "INSERT INTO thread_index(user_id,host_id,thread_id,metadata) VALUES (?,?,?,?) ON CONFLICT(user_id,host_id,thread_id) DO UPDATE SET metadata=excluded.metadata",
++    )
++    .run(userId, meta.hostId, meta.threadId, encryptJson(meta));
++}
+diff --git a/shared/runtime/realtime/server-message-schema.ts b/shared/runtime/realtime/server-message-schema.ts
+--- a/shared/runtime/realtime/server-message-schema.ts
++++ b/shared/runtime/realtime/server-message-schema.ts
+@@ -459,6 +459,7 @@
+     z
+       .object({ type: z.literal("notification.published"), notification: notificationSchema })
+       .strict(),
++    z.object({ type: z.literal("config.catalog.changed") }).strict(),
+     z.object({ type: z.literal("config.pinnedThreads.changed") }).strict(),
+     z
+       .object({
+diff --git a/shared/types/config.ts b/shared/types/config.ts
+--- a/shared/types/config.ts
++++ b/shared/types/config.ts
+@@ -1,4 +1,4 @@
+-import type { HostRecord } from "./records";
++import type { HostRecord, ProjectRecord } from "./records";
+ 
+ export interface PinnedThreadRecord {
+   hostId: number;
+@@ -24,6 +24,7 @@
+ export interface GatewayConfig {
+   version: 2;
+   hosts: HostRecord[];
++  projects?: ProjectRecord[];
+   pinnedThreads: PinnedThreadRecord[];
+   notifications: GatewayNotificationSettings;
+ }
+diff --git a/shared/types/realtime.ts b/shared/types/realtime.ts
+--- a/shared/types/realtime.ts
++++ b/shared/types/realtime.ts
+@@ -418,6 +418,9 @@
+       type: "config.pinnedThreads.changed";
+     }
+   | {
++      type: "config.catalog.changed";
++    }
++  | {
+       type: "thread.runtime.snapshot";
+       statuses: ThreadRuntimeStatusUpdate[];
+     }
+diff --git a/shared/types/records.ts b/shared/types/records.ts
+--- a/shared/types/records.ts
++++ b/shared/types/records.ts
+@@ -1,3 +1,12 @@
++export const hostKeyTypes = [
++  "ssh-ed25519",
++  "ecdsa-sha2-nistp256",
++  "ecdsa-sha2-nistp384",
++  "ecdsa-sha2-nistp521",
++  "ssh-rsa",
++] as const;
++export type HostKeyType = (typeof hostKeyTypes)[number];
++
+ export type HostAuthMode = "agent" | "privateKey" | "password";
+ 
+ export interface HostRecord {
+@@ -6,18 +15,22 @@
+   sshHost: string;
+   username: string | null;
+   port: number | null;
++  hostKeyType?: HostKeyType;
++  hostKeyFingerprint?: string | null;
++  passphrase?: string | null;
+   authMode: HostAuthMode;
+   privateKeyPath: string | null;
+   privateKey?: string | null;
+   password?: string | null;
+   proxyUrl: string | null;
++  hasPrivateKey?: boolean;
+   hasPassword: boolean;
+   createdAt: string;
+   updatedAt: string;
+ }
+ 
+ export interface ProjectRecord {
+-  /** Runtime directory group, identified by hostId + remotePath; never persisted. */
++  /** The native directory identity is the pair (hostId, remotePath). */
+   hostId: number;
+   name: string;
+   remotePath: string;
+@@ -30,6 +43,9 @@
+   sshHost: string;
+   username?: string | null;
+   port?: number | null;
++  hostKeyType?: HostKeyType;
++  hostKeyFingerprint?: string | null;
++  passphrase?: string | null;
+   authMode: HostAuthMode;
+   privateKeyPath?: string | null;
+   privateKey?: string | null;
+diff --git a/shared/utils/workspace.ts b/shared/utils/workspace.ts
+--- a/shared/utils/workspace.ts
++++ b/shared/utils/workspace.ts
+@@ -2,3 +2,18 @@
+ export function workspaceDirectoryKey(hostId: number, cwd: string) {
+   return `${hostId}:${encodeURIComponent(cwd)}`;
+ }
++
++export function remoteHostIdentity(
++  host: Pick<
++    import("../types").HostRecord,
++    "sshHost" | "username" | "port" | "hostKeyFingerprint" | "proxyUrl"
++  >,
++) {
++  return JSON.stringify([
++    host.sshHost,
++    host.username,
++    host.port ?? 22,
++    host.hostKeyFingerprint ?? null,
++    host.proxyUrl,
++  ]);
++}

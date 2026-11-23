@@ -1,3 +1,4 @@
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import type { DraftPluginUiOpenRequest } from "@/plugin-ui/contract.js";
 import { usePaneLayoutStore } from "@/v4/paneLayoutStore.js";
 import { useWorkbenchGroupStore } from "@/v4/workbenchGroupStore.js";
@@ -1824,6 +1825,13 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
   );
   // v4 pane 生命周期回调（稳定引用，供 memo 友好的 pane 宿主消费）：
   // createSession/fork 后接入既有选择路径；删除会话后回 draft。
+  useEffect(() => {
+    if (!selfHostedBuild) return;
+    const url = new URL(window.location.href);
+    if (activeTaskId) url.searchParams.set("thread", activeTaskId);
+    else url.searchParams.delete("thread");
+    window.history.replaceState(window.history.state, "", url);
+  }, [activeTaskId]);
   const handleV4SessionCreated = useCallback(
     (sessionId: string, origin?: "draft-promotion") => {
       if (origin === "draft-promotion") handleSidePaneDraftPromotion(sessionId);

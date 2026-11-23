@@ -1,3 +1,4 @@
+export {WebLoginPage} from "./WebLoginPage.js";
 export { createWebAuthService } from "#src/auth/webAuthService.js";
 export { WebRegionalLoginActions } from "#src/auth/WebRegionalLoginActions.js";
 export type { WebRegionalLoginActionsProps } from "#src/auth/WebRegionalLoginActions.js";

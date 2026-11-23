@@ -1,3 +1,4 @@
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { useSetInterfaceModeWithTelemetry } from "@/lib/appTelemetry.js";
 import { SidebarNativeTooltip, ControlHintTooltip } from "@/ControlHintTooltip.js";
 /* oxlint-disable eslint(max-lines) -- footer 聚合账户、主题、模式和快捷键菜单。 */
@@ -140,12 +141,12 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   const zoomOutShortcutLabel = useShortcutCommandLabel("zoomOut");
   const resetZoomShortcutLabel = useShortcutCommandLabel("resetZoom");
   const isRestoringOAuthSession = useZCodeStore((state) => state.isRestoringOAuthSession);
-  const profileBadge = getSidebarProfileBadge(user, intl.formatMessage);
+  const profileBadge = selfHostedBuild && !user ? "工作区账户" : getSidebarProfileBadge(user, intl.formatMessage);
   const avatarFallbackText = getAvatarFallbackText(user);
   const avatarKey = user?.avatarUrl ?? user?.id ?? "guest";
   const showAuthRestoreLoading = !user && isRestoringOAuthSession;
   const usageSummaryState = useWorkspaceSidebarFooterUsageSummaryState({
-    enabled: true,
+    enabled: !selfHostedBuild,
     workspaceIdentity,
     workspacePath,
   });
@@ -233,7 +234,7 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   return (
     // footer 被 Settings 复用，页面专属边距由调用方传入，避免修改共享默认样式。
     <footer className={cn("flex shrink-0 flex-col gap-2.5 px-4 pt-2 pb-4", className)}>
-      {banner}
+      {selfHostedBuild ? <Button type="button" size="sm" variant="ghost" className="justify-start" onClick={() => window.dispatchEvent(new Event("zcode-selfhost-manage"))}>SSH 工作区</Button> : banner}
       <div className="flex min-w-0 gap-2">
         <DropdownMenu open={profileMenuOpen} onOpenChange={setProfileMenuOpen}>
           <DropdownMenuTrigger asChild>
@@ -427,12 +428,12 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
               </DropdownMenuSub>
             ) : null}
             {/* Bugfix: 升级入口状态不再以菜单开关为生命周期边界。 */}
-            <WorkspaceSidebarFooterUsageSummaryContent
+            {!selfHostedBuild && <WorkspaceSidebarFooterUsageSummaryContent
               state={usageSummaryState}
               onUsageClick={usageButtonClick}
               onUpgradeClick={onUpgradeClick}
-            />
-            {user ? (
+            />}
+            {!selfHostedBuild && user ? (
               <DropdownMenuItem onSelect={() => openRewards?.()} data-testid="rewards-menu-item">
                 <Gift className="size-4" />
                 {intl.formatMessage({ id: "rewards.menuTitle" })}
@@ -444,7 +445,7 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
                 </Badge>
               </DropdownMenuItem>
             ) : null}
-            {onLogin && !user ? (
+            {!selfHostedBuild && onLogin && !user ? (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={onLogin} data-testid={TID_LOGIN_MENU_ITEM}>
@@ -453,8 +454,8 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
                 </DropdownMenuItem>
               </>
             ) : null}
-            {onLogout ? <DropdownMenuSeparator /> : null}
-            {onLogout ? (
+            {!selfHostedBuild && onLogout ? <DropdownMenuSeparator /> : null}
+            {!selfHostedBuild && onLogout ? (
               <DropdownMenuItem onSelect={onLogout} data-testid={TID_LOGOUT_BUTTON}>
                 <LogOut className="size-4" />
                 {intl.formatMessage({ id: "app.logout" })}

@@ -40,7 +40,8 @@
     "./conversation-telemetry/providerTelemetryIdentity": "./src/conversation-telemetry/providerTelemetryIdentity.ts",
     "./preinstalled-tools": "./src/preinstalled-tools/contract.ts",
     "./preinstalled-tools/node": "./src/preinstalled-tools/node.ts",
-    "./credential-security": "./src/credential-security/module.ts"
+    "./credential-security": "./src/credential-security/module.ts",
+    "./runtimeEnv": "./src/runtimeEnv.ts"
   },
   "scripts": {
     "lint": "oxlint",

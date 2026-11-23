@@ -33,3 +33,13 @@ packages/desktop/mock-cdn
 .env
 .env.*
 package-lock.json
+
+**/.git
+.data
+.selfhost
+ssh-keys
+.env
+.env.*
+**/__pycache__
+packages/web/dist
+!selfhost/gateway/package-lock.json

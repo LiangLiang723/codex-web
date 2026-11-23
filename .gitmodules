@@ -1,0 +1,3 @@
+[submodule "codex-gateway"]
+	path = upstream/codex-gateway
+	url = https://github.com/yunhaoli24/codex-gateway.git

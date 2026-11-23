@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "zcode": {
+    "url": "https://github.com/zai-org/ZCode.git",
+    "ref": "refs/tags/v4.0.0",
+    "commit": "a4b4445141eb7d3b3e99eada9292775383bfc44e",
+    "path": "."
+  },
+  "codex-gateway": {
+    "url": "https://github.com/yunhaoli24/codex-gateway.git",
+    "ref": "refs/heads/main",
+    "commit": "76200537c19f0c4075153c1458667a07e804db6c",
+    "path": "upstream/codex-gateway",
+    "sourceSha256": "823a30d7c38c26339bdd974aa9ca37d43915065681a4c5124bcfa56b8711d144"
+  }
+}

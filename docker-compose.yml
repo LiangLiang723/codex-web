@@ -1,0 +1,35 @@
+services:
+  codex-web:
+    image: ${CODEX_WEB_IMAGE:-zcode-selfhost:local}
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${CODEX_WEB_BIND:-127.0.0.1}:${CODEX_WEB_PORT:-33723}:3000"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      TZ: ${TZ:-Asia/Shanghai}
+      CODEX_GATEWAY_DB_PATH: /data/codex-web.db
+      CODEX_GATEWAY_CONFIG_SECRET: ${CODEX_GATEWAY_CONFIG_SECRET:?Run selfhost/setup.sh first}
+      CODEX_GATEWAY_KNOWN_HOSTS: /run/ssh-keys/known_hosts
+      CODEX_GATEWAY_MANAGE_CLI: ${CODEX_GATEWAY_MANAGE_CLI:-0}
+      BROWSER_PREVIEW_DOMAIN: ${BROWSER_PREVIEW_DOMAIN:-}
+    volumes:
+      - ${CODEX_WEB_DATA:-codex-data}:/data
+      - ${CODEX_WEB_KEYS:-./ssh-keys}:/run/ssh-keys:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "3"
+volumes:
+  codex-data:

@@ -1,15 +1,10 @@
+import type { ReactNode } from "react";
 import { ZCodeAppLogo } from "@zcode/ui/app-logo";
-import {
-  WebRegionalLoginActions,
-  type WebRegionalLoginActionsProps,
-} from "#src/auth/WebRegionalLoginActions.js";
 import { getWebAuthCopy } from "./webAuthLocale.js";
 
-interface WebLoginPageProps {
-  onLogin: WebRegionalLoginActionsProps["onLogin"];
-}
+type WebLoginPageProps = { local: { title: string; description: string; form: ReactNode } };
 
-export function WebLoginPage({ onLogin }: WebLoginPageProps) {
+export function WebLoginPage({ local }: WebLoginPageProps) {
   const copy = getWebAuthCopy();
 
   return (
@@ -19,11 +14,11 @@ export function WebLoginPage({ onLogin }: WebLoginPageProps) {
           <ZCodeAppLogo className="size-10" />
           <div className="min-w-0">
             <div className="text-ui-xs font-medium text-foreground">{copy.brand}</div>
-            <h1 className="text-ui-lg font-medium text-foreground">{copy.loginTitle}</h1>
+            <h1 className="text-ui-lg font-medium text-foreground">{local.title}</h1>
           </div>
         </div>
-        <p className="mb-5 text-ui-xs leading-6 text-foreground-subtle">{copy.loginDescription}</p>
-        <WebRegionalLoginActions onLogin={onLogin} />
+        <p className="mb-5 text-ui-xs leading-6 text-foreground-subtle">{local.description}</p>
+        {local.form}
       </section>
     </main>
   );

@@ -1,3 +1,4 @@
+import {selfHostedBuild} from "@zcode/shared/runtimeEnv";
 import { BufferWriter, serialize } from "@zcode/rpc";
 import { ServiceChannels } from "@zcode/shared";
 import {
@@ -87,7 +88,11 @@ function encodeBase64(bytes: Uint8Array): string {
 }
 
 async function checksum(bytes: Uint8Array): Promise<string> {
-  if (!globalThis.crypto?.subtle) throw new Error("fault.attachment.checksumUnavailable");
+  if (!globalThis.crypto?.subtle) {
+    if (!selfHostedBuild) throw new Error("fault.attachment.checksumUnavailable");
+    const {sha256} = await import("@noble/hashes/sha256");
+    return "sha256:"+Array.from(sha256(bytes), byte=>byte.toString(16).padStart(2,"0")).join("");
+  }
   // WebCrypto 的 BufferSource 要求 ArrayBuffer；复制也避免调用期间底层 view 被复用。
   const digest = await globalThis.crypto.subtle.digest("SHA-256", Uint8Array.from(bytes).buffer);
   const hex = [...new Uint8Array(digest)]

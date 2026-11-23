@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { build as bundleGatewayProtocol } from "esbuild";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,14 +9,6 @@ import tailwindcss from "@tailwindcss/vite";
 import { pdfJsCMapsPlugin } from "../ui/vite/pdfJsCMapsPlugin.js";
 import { thirdPartyNoticesVitePlugin } from "../../scripts/third-party-notices.mjs";
 import { resolveRemoteFrontendVersion } from "./vite/remoteFrontendVersion.mjs";
-// Bugfix: Vite 配置在 Node 加载期执行，不能导入 @zcode/shared 根入口。
-// 根入口包含 NodeNext 风格的源码 re-export，Node 会按真实文件查找 .js 并在 bootstrap 阶段失败。
-import {
-  resolveBigModelApiOrigin,
-  resolveRuntimeZCodeEndpointOrigin,
-  resolveZaiOAuthClientId,
-  resolveZaiOAuthOrigin,
-} from "@zcode/shared/zcodeEndpoint";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = resolve(HERE, "../..");
@@ -27,25 +21,93 @@ function resolveZCodeEnv(value: string | undefined): "test" | "production" {
   return value?.trim().toLowerCase() === "production" ? "production" : "test";
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   // `.env*` 只提供链接常量；当前产品环境由启动脚本或 CI 注入 ZCODE_ENV。
   // 启动脚本通过 process.env 显式选择 test/production；它必须优先于 .env 文件，
   // 否则 share:test 可能被 mode 的旧配置误解析到错误 endpoint。
   const env = { ...loadEnv(mode, REPO_ROOT, ""), ...process.env };
   const zcodeEnv = resolveZCodeEnv(env.ZCODE_ENV);
-  const endpointEnv = {
-    ...env,
-    ZCODE_ENV: zcodeEnv,
-  };
-  const zcodeEndpointOrigin = resolveRuntimeZCodeEndpointOrigin(endpointEnv);
-  const zaiOAuthOrigin = resolveZaiOAuthOrigin(endpointEnv);
-  // 远控与桌面/分享页一致，BigModel 授权域名必须跟随产品环境。
-  const bigmodelOAuthOrigin = resolveBigModelApiOrigin(endpointEnv);
-  // ZAI OAuth client_id 是公开标识，允许注入浏览器包；secret/token 不得走 VITE_。
-  const zaiOAuthClientId = resolveZaiOAuthClientId(endpointEnv);
 
   return {
-    plugins: [pdfJsCMapsPlugin(), react(), tailwindcss(), thirdPartyNoticesVitePlugin()],
+    plugins: [
+      ...[
+        {
+          name: "selfhost-web-entry",
+          resolveId(id: string) {
+            if (id === "virtual:zcode-projection-state") return "\0zcode-projection-state.js";
+            if (id === "virtual:gateway-terminal-stream") return "\0gateway-terminal-stream.js";
+          },
+          async load(id: string) {
+            if (id === "\0zcode-projection-state.js") {
+              const path = resolve(
+                REPO_ROOT,
+                "apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/projection-state.ts",
+              );
+              const module = await bundleGatewayProtocol({
+                entryPoints: [path],
+                tsconfigRaw: {},
+                bundle: true,
+                platform: "browser",
+                format: "esm",
+                write: false,
+              });
+              return module.outputFiles[0].text;
+            }
+            if (id !== "\0gateway-terminal-stream.js") return;
+            const dir = resolve(__dirname, "../../upstream/codex-gateway");
+            const built = await bundleGatewayProtocol({
+              stdin: {
+                contents:
+                  'export * from "./shared/runtime/terminal-stream"; export {applyCanonicalEventToHistory} from "./shared/thread-history/canonical-events"; export {timelinePageToTurns} from "./shared/thread-history/app-server-timeline"; export {mergeThreadTurns} from "./shared/thread-history/turns";',
+                resolveDir: dir,
+              },
+              alias: { "~~": dir },
+              tsconfigRaw: {},
+              platform: "browser",
+              format: "esm",
+              bundle: true,
+              write: false,
+            });
+            return built.outputFiles[0].text;
+          },
+          transformIndexHtml: {
+            order: "pre" as const,
+            handler: (html: string) => {
+              if (command !== "build") return html;
+              const scripts = Array.from(
+                html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi),
+                (match) =>
+                  "'sha256-" + createHash("sha256").update(match[1]).digest("base64") + "'",
+              );
+              const policy = [
+                "default-src 'self'",
+                "connect-src 'self'",
+                "script-src 'self' 'wasm-unsafe-eval' " + scripts.join(" "),
+                "worker-src 'self' blob:",
+                "style-src 'self' 'unsafe-inline'",
+                "font-src 'self' data:",
+                "img-src 'self' data: blob: https:",
+                "media-src 'self' blob: data:",
+                "frame-src 'self' blob:",
+                "object-src 'none'",
+                "base-uri 'self'",
+                "form-action 'self'",
+              ].join("; ");
+              return html.replace(
+                "<head>",
+                '<head><meta http-equiv="Content-Security-Policy" content="' +
+                  policy +
+                  '"><meta name="referrer" content="same-origin">',
+              );
+            },
+          },
+        },
+      ],
+      pdfJsCMapsPlugin(),
+      react(),
+      tailwindcss(),
+      thirdPartyNoticesVitePlugin(),
+    ],
     resolve: {
       alias: [
         // 修复 UI 组件库中的 @ 别名解析失败。
@@ -75,22 +137,11 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       proxy: {
-        // Web 登录本地调试时，OAuth token 交换必须先命中线上同源接口。
-        // 该专用代理放在 `/api` 通配代理之前，避免被转发到本地 server 导致 404。
-        "/api/v1/oauth": {
-          target: zcodeEndpointOrigin,
-          changeOrigin: true,
-          secure: true,
-        },
-        "/api/v1/remote": {
-          target: zcodeEndpointOrigin,
-          changeOrigin: true,
-          secure: true,
+        "/api": {
+          target: env.SELFHOST_GATEWAY_ORIGIN || "http://127.0.0.1:33724",
           ws: true,
+          changeOrigin: true,
         },
-        // 将 /ws 和 /api 请求代理到 server（默认 3030 端口）
-        "/ws": { target: "ws://localhost:3030", ws: true },
-        "/api": { target: "http://localhost:3030" },
       },
     },
     optimizeDeps: {
@@ -110,23 +161,17 @@ export default defineConfig(({ mode }) => {
       },
     },
     define: {
+      __ZCODE_SELFHOST__: "true",
       __ZCODE_VERSION__: JSON.stringify(
         resolveRemoteFrontendVersion(version, process.env.WEB_REMOTE_FRONTEND_VERSION),
       ),
       __ZCODE_MIN_COMPATIBLE_VERSION__: JSON.stringify(minCompatibleVersion),
       __ZCODE_COMMIT__: JSON.stringify(env.ZCODE_COMMIT || "unknown"),
       __ZCODE_ENV__: JSON.stringify(zcodeEnv),
-      "import.meta.env.VITE_ZCODE_BASE_URL": JSON.stringify(zcodeEndpointOrigin),
-      // 兼容旧 Web runtime 读取名；新代码统一读 VITE_ZCODE_BASE_URL。
-      "import.meta.env.VITE_ZCODE_ENDPOINT_ORIGIN": JSON.stringify(zcodeEndpointOrigin),
-      // 明确注入 OAuth 公开配置，避免 Web 端在不同 mode 下隐式依赖源码 fallback。
-      "import.meta.env.VITE_ZAI_OAUTH_CLIENT_ID": JSON.stringify(zaiOAuthClientId),
-      "import.meta.env.VITE_ZAI_OAUTH_ORIGIN": JSON.stringify(zaiOAuthOrigin),
-      "import.meta.env.VITE_BIGMODEL_OAUTH_ORIGIN": JSON.stringify(bigmodelOAuthOrigin),
     },
     build: {
       // 生产不在浏览器产物暴露 sourceMappingURL，避免客户端侧还原业务源码。
-      sourcemap: mode === "production" ? "hidden" : true,
+      sourcemap: false,
     },
   };
 });

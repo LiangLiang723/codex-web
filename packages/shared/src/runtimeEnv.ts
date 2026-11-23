@@ -1,3 +1,7 @@
+/** Replaced at build time, so the self-hosted renderer cannot start vendor account flows. */
+declare const __ZCODE_SELFHOST__: boolean;
+export const selfHostedBuild = typeof __ZCODE_SELFHOST__ !== "undefined" && __ZCODE_SELFHOST__;
+
 export const ZCODE_RUNTIME_ENV_KEY = "ZCODE_RUNTIME_ENV";
 export const ZCODE_HTTP_PROXY_ENV_KEY = "ZCODE_HTTP_PROXY";
 export const ZCODE_NO_PROXY_ENV_KEY = "ZCODE_NO_PROXY";
