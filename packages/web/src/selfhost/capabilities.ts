@@ -113,6 +113,7 @@ export async function extensionRequest(
       name: str(a.name),
       marketplace: str(m.name),
       description: str(rec(a.interface).shortDescription),
+      displayName: str(rec(a.interface).displayName) || undefined,
       version: str(a.version),
       enabled: a.enabled === true,
       installed: a.installed === true,
@@ -137,16 +138,27 @@ export async function extensionRequest(
     // The original picker inspects conflict IDs immediately after the asynchronous catalog resolves.
     // A marketplace summary and a reference entry are distinct ZCode protocol DTOs.
     const enabled = entries.filter((item) => item.enabled);
+    const found = await call("skills/list", dirs);
+    const group = array(found.data).find((item) => item.cwd === cwd);
+    const skills = array(group?.skills).filter((skill) => skill.enabled !== false);
     const plugins = enabled.map((item) => ({
       pluginId: item.id,
       name: item.name,
       marketplace: item.marketplace,
       description: item.description,
+      displayName: item.displayName,
       enabled: true,
       conflictingPluginIds: enabled
         .filter((other) => other.id !== item.id && other.name === item.name)
         .map((other) => other.id),
-      skillQualifiedNames: [] as string[],
+      skillQualifiedNames: skills
+        .filter((skill) => {
+          const marker = "/plugins/cache/" + item.marketplace + "/" + item.name + "/";
+          return str(skill.path).includes(marker);
+        })
+        .map((skill) => str(skill.name))
+        .filter(Boolean)
+        .map((name) => (name.startsWith(item.name + ":") ? name : item.name + ":" + name)),
       mcpServerNames: [] as string[],
       subagentNames: [] as string[],
     }));
@@ -156,21 +168,28 @@ export async function extensionRequest(
           const entry = plugins[index];
           if (!entry) continue;
           const market = markets.find((m) => m.name === entry.marketplace);
-          if (!market) continue;
+          // Remote marketplaces may need an internet request for plugin/read. The composer
+          // uses their installed summary and locally discovered skills; the detail panel can query the catalog.
+          if (!market || !market.path) continue;
           const key = JSON.stringify([id, cwd, entry.pluginId]);
           const info = await cachedPluginDetail(g, key, () =>
             call("plugin/read", {
               pluginName: entry.name,
-              ...(market.path
-                ? { marketplacePath: market.path }
-                : { remoteMarketplaceName: market.name }),
+              marketplacePath: market.path,
             }),
           );
           const detail = rec(info.plugin ?? info);
-          entry.skillQualifiedNames = array(detail.skills)
-            .filter((s) => s.enabled !== false)
-            .map((s) => entry.name + ":" + str(s.name))
-            .filter((name) => !name.endsWith(":"));
+          entry.skillQualifiedNames = [
+            ...new Set([
+              ...entry.skillQualifiedNames,
+              ...array(detail.skills)
+                .filter((skill) => skill.enabled !== false && str(skill.name))
+                .map((skill) => {
+                  const name = str(skill.name);
+                  return name.startsWith(entry.name + ":") ? name : entry.name + ":" + name;
+                }),
+            ]),
+          ];
           entry.mcpServerNames = Array.isArray(detail.mcpServers)
             ? detail.mcpServers
                 .map((s) => (typeof s === "string" ? s : str(rec(s).name)))

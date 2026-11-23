@@ -144,6 +144,17 @@ async function workspace(page, width, projects) {
   if (!cwd || !thread) return;
   const query = new URLSearchParams({ host: String(hostId), cwd, thread });
   let terminalId;
+  const remoteDetailReads = [];
+  page.on("request", (request) => {
+    if (
+      new URL(request.url()).pathname !== "/api/selfhost/capability" ||
+      request.method() !== "POST"
+    )
+      return;
+    const call = request.postDataJSON();
+    if (call?.method === "plugin/read" && call.params?.remoteMarketplaceName)
+      remoteDetailReads.push(call.params.remoteMarketplaceName);
+  });
   const watchedPaths = new Set();
   if (width >= 1300) {
     page.on("websocket", (socket) =>
@@ -175,13 +186,14 @@ async function workspace(page, width, projects) {
     "Remote installed plugin catalog returned " + pluginResponse.status(),
   );
   const pluginLabels = await pluginResponse.json();
-  const enabled = pluginLabels.value.marketplaces
-    .flatMap((m) => m.plugins)
-    .filter((p) => p.enabled);
-  if (enabled.length) {
-    const name = enabled[0].interface?.displayName || enabled[0].name;
+  // Check a real installed entry from each marketplace, including offline remote catalogs.
+  for (const market of pluginLabels.value.marketplaces) {
+    const first = market.plugins.find((plugin) => plugin.enabled);
+    if (!first) continue;
+    const name = first.interface?.displayName || first.name;
     await page.getByRole("option").filter({ hasText: name }).first().waitFor({ timeout: 75000 });
   }
+  assert.deepEqual(remoteDetailReads, [], "Opening the composer contacted remote plugin catalogs");
   await verify(page);
   await page.keyboard.press("Escape");
   const model = page.locator('button[aria-label^="OpenAI Codex/"]').first();
