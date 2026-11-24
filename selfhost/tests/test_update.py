@@ -22,9 +22,15 @@ args = sys.argv[1:]
 if args == ['compose', 'ps', '-q', 'codex-web']:
     print('web')
 elif args[:2] == ['compose', 'up']:
+    if state.get('fail_after_replace'):
+        state['current'] = 'zcode-selfhost:new'
+        state['health'] = 'unhealthy'
+        path.write_text(json.dumps(state))
+        sys.exit(1)
     if state.get('fail'):
         sys.exit(1)
     state['current'] = 'zcode-selfhost:new'
+    state['health'] = 'healthy'
 elif args[:3] == ['container', 'inspect', '--format'] and args[-1] == 'web':
     tag = state['current']
     print(state['health'], state['images'][tag], tag)
@@ -110,8 +116,25 @@ class UpdateCleanupTests(unittest.TestCase):
         result, state = self.update("--build")
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stderr, "")
-        self.assertEqual(state["images"], self.state["images"])
+        for tag, image in self.state["images"].items():
+            self.assertEqual(state["images"][tag], image)
         self.assertEqual(state["removed"], [])
+
+    def test_retry_after_container_replacement_keeps_last_healthy_until_acceptance(self):
+        self.state["fail_after_replace"] = True
+        first, self.state = self.update("--stage")
+        self.assertNotEqual(first.returncode, 0)
+        self.assertEqual(self.state["current"], "zcode-selfhost:new")
+        self.assertEqual(self.state["removed"], [])
+        self.state.pop("fail_after_replace")
+        retry, self.state = self.update("--stage")
+        self.assertEqual(retry.returncode, 0, retry.stderr)
+        self.assertEqual(self.state["removed"], [])
+        accepted, state = self.update("--cleanup")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertEqual(state["images"]["zcode-selfhost:rollback"], "old-id")
+        self.assertEqual(state["images"]["zcode-selfhost:new"], "new-id")
+        self.assertNotIn("zcode-selfhost:pending-rollback", state["images"])
 
     def test_cleanup_requires_a_healthy_service(self):
         self.state["health"] = "unhealthy"
