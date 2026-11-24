@@ -1,0 +1,291 @@
+diff --git a/server/utils/gateway/http/validation/threads.ts b/server/utils/gateway/http/validation/threads.ts
+index 535cbe5..7d7dc62 100644
+--- a/server/utils/gateway/http/validation/threads.ts
++++ b/server/utils/gateway/http/validation/threads.ts
+@@ -77,6 +77,7 @@ export const threadStartSchema = z.object({
+   hostId: z.coerce.number().int().positive(),
+   cwd: z.string().trim().nullable().optional(),
+   provider: agentProviderIdSchema.optional(),
++  projectId: z.uuid().optional(),
+   ...threadSettingFields,
+   sandbox: sandboxModeSchema.optional(),
+ });
+diff --git a/server/utils/gateway/realtime/handlers/thread-events.ts b/server/utils/gateway/realtime/handlers/thread-events.ts
+index 73fd443..bac58c6 100644
+--- a/server/utils/gateway/realtime/handlers/thread-events.ts
++++ b/server/utils/gateway/realtime/handlers/thread-events.ts
+@@ -7,6 +7,7 @@ import type { ThreadSubscriptionLease } from "../../runtime/controller-registry"
+ import { threadRuntimeEvents } from "../../runtime/thread-runtime-events";
+ import { gatewayEventStore } from "../../state/gateway-events";
+ import { hostStore } from "../../state/hosts";
++import { webThreadSource } from "../../../selfhost-thread-title";
+ import { bindGatewayUser } from "../../state/memory";
+ import {
+   runPeerScoped,
+@@ -92,6 +93,11 @@ export async function activateThread(
+       input.retryWriter,
+     );
+     if (pending.signal.aborted) return;
++    const activeTurn = result.history.thread.turns.at(-1);
++    const recoveryEvent =
++      activeTurn?.status === "inProgress" && eventEpoch === gatewayEventStore.epoch(input.hostId)
++        ? latestModelRecoveryEvent(input.hostId, input.threadId, String(activeTurn.id), lastEventId)
++        : undefined;
+     sendRealtimePeerMessage(peer, {
+       type: "thread.snapshot",
+       requestId: message.requestId,
+@@ -100,6 +106,7 @@ export async function activateThread(
+       lastEventId,
+       eventEpoch,
+       ...result,
++      recentEvents: recoveryEvent ? [...result.recentEvents, recoveryEvent] : result.recentEvents,
+     });
+     if (result.readOnly !== true) {
+       subscribeThreadEvents(peer, host, input.threadId, lastEventId, eventEpoch, {
+@@ -131,6 +138,42 @@ export async function activateThread(
+   }
+ }
+
++function latestModelRecoveryEvent(hostId: number, threadId: string, turnId: string, cursor: number) {
++  // 订阅游标会跳过已有事件。只带回活动轮次在该游标前仍有效的恢复通知，后续事件走原回放。
++  const latest = gatewayEventStore.list(hostId, threadId, 0, 500).findLast(({ id, event }) => {
++    if (id > cursor) return false;
++    switch (event.type) {
++      case "error.reported":
++        return event.params.turnId === turnId;
++      case "notice":
++        return (
++          event.source === "warning" &&
++          event.params.threadId === threadId &&
++          typeof event.params.message === "string" &&
++          event.params.message.startsWith("Falling back from WebSockets to HTTPS transport")
++        );
++      case "timeline.item.delta":
++        return event.turnId === turnId && event.channel !== "commandOutput" && event.delta.length > 0;
++      case "timeline.item.upsert":
++        return (
++          event.item.turnId === turnId &&
++          typeof event.item.type === "string" &&
++          event.item.type !== "userMessage" &&
++          (event.item.status === "inProgress" || event.item.type === "agentMessage")
++        );
++      case "turn.started":
++      case "turn.completed":
++        return true;
++      default:
++        return false;
++    }
++  });
++  return latest?.event.type === "notice" ||
++    (latest?.event.type === "error.reported" && latest.event.params.willRetry === true)
++    ? latest
++    : undefined;
++}
++
+ export async function startThread(
+   peer: RealtimePeer,
+   message: Extract<RealtimeClientMessage, { type: "thread.start" }>,
+@@ -139,7 +182,11 @@ export async function startThread(
+   const host = requireRecord(hostStore.getWithSecret(input.hostId), "Host not found");
+   const result = await threadBroker.startThread(
+     host,
+-    buildThreadStartParams(input),
++    {
++      ...buildThreadStartParams(input),
++      ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
++      threadSource: webThreadSource,
++    },
+     input.provider,
+   );
+   const threadId = String(result.thread.id);
+diff --git a/server/utils/gateway/runtime/host-rpc-session.ts b/server/utils/gateway/runtime/host-rpc-session.ts
+index b8fdbb6..ccd5456 100644
+--- a/server/utils/gateway/runtime/host-rpc-session.ts
++++ b/server/utils/gateway/runtime/host-rpc-session.ts
+@@ -10,6 +10,7 @@ import { mcpEventSubscriptions } from "./mcp-event-subscriptions";
+ import { stringFromUnknown, recordFromUnknown } from "~~/shared/utils/records";
+ import type { AgentRpcClient, ProviderAdapter } from "../agent/provider-adapter";
+ import { threadSectionEvents } from "./thread-section-events";
++import { isTemporaryTitleNotification } from "../../selfhost-thread-title";
+
+ export class HostRpcSession {
+   readonly client: AgentRpcClient;
+@@ -76,6 +77,7 @@ export class HostRpcSession {
+   }
+
+   private routeNotification(message: RpcEnvelope) {
++    if (isTemporaryTitleNotification(this.client, message)) return;
+     if (message.method === "thread/section/changed") {
+       const params = recordFromUnknown(message.params);
+       const threadId = stringFromUnknown(params?.threadId);
+diff --git a/server/utils/gateway/runtime/open-snapshot-events.ts b/server/utils/gateway/runtime/open-snapshot-events.ts
+index 1a46de3..981174e 100644
+--- a/server/utils/gateway/runtime/open-snapshot-events.ts
++++ b/server/utils/gateway/runtime/open-snapshot-events.ts
+@@ -132,12 +132,16 @@ function applySnapshotReducer(snapshot: ThreadOpenSnapshot, event: AgentEvent) {
+         ...snapshot,
+         tokenUsage: normalizeTokenUsage(event.tokenUsage) ?? snapshot.tokenUsage,
+       };
++    case "notice":
++      return event.source === "thread/name/updated"
++        ? { ...snapshot, thread: { ...snapshot.thread, name: typeof event.params.threadName === "string"
++          ? event.params.threadName : null } }
++        : snapshot;
+     case "error.reported":
+     case "gateway.error":
+     case "gateway.stderr":
+     case "mcp.eventStream.notification":
+     case "mcpServer.startupStatus.updated":
+-    case "notice":
+     case "serverRequest.requested":
+     case "serverRequest.resolved":
+     case "thread.goal.cleared":
+diff --git a/server/utils/gateway/runtime/thread-goals.ts b/server/utils/gateway/runtime/thread-goals.ts
+index 8b13abf..78a7b42 100644
+--- a/server/utils/gateway/runtime/thread-goals.ts
++++ b/server/utils/gateway/runtime/thread-goals.ts
+@@ -32,15 +32,13 @@ export class ThreadGoalService {
+   }
+
+   async getThreadGoal(host: HostRecord, threadId: string) {
+-    return this.registry.withScopedSubscription(host, threadId, (controller) =>
+-      controller.enqueue(() =>
+-        controller.client.request(
+-          "thread/goal/get",
+-          { threadId },
+-          120_000,
+-          parseThreadGoalGetResponse,
+-        ),
+-      ),
++    // 读取 Goal 无须取得 writer。历史已只读打开时，再 resume 会把整页变成写锁冲突。
++    const client = await this.registry.getHostClient(host);
++    return client.request(
++      "thread/goal/get",
++      { threadId },
++      120_000,
++      parseThreadGoalGetResponse,
+     );
+   }
+
+diff --git a/server/utils/gateway/runtime/thread-open-service.ts b/server/utils/gateway/runtime/thread-open-service.ts
+index bdcd8c9..6b408d2 100644
+--- a/server/utils/gateway/runtime/thread-open-service.ts
++++ b/server/utils/gateway/runtime/thread-open-service.ts
+@@ -52,7 +52,7 @@ export class ThreadOpenService {
+     retryWriter = false,
+   ) {
+     const cachedSnapshot = threadSnapshotStore.get(host.id, threadId);
+-    if (cachedSnapshot && !retryWriter) {
++    if (cachedSnapshot && (!retryWriter || cachedSnapshot.readOnly !== true)) {
+       if (cachedSnapshot.readOnly === true) {
+         return this.snapshotResult(host, threadId, cachedSnapshot, limit);
+       }
+diff --git a/server/utils/gateway/runtime/thread-settings.ts b/server/utils/gateway/runtime/thread-settings.ts
+index f669bf8..4ffa01b 100644
+--- a/server/utils/gateway/runtime/thread-settings.ts
++++ b/server/utils/gateway/runtime/thread-settings.ts
+@@ -2,6 +2,7 @@ import type { HostRecord, ThreadSettingsState, ThreadSettingsUpdateInput } from
+ import type { ControllerRegistry } from "./controller-registry";
+ import { buildAppServerCollaborationMode } from "../protocol/thread-payload";
+ import { parseTurnSettingsUpdateResponse } from "~~/shared/runtime/app-server";
++import { writeThreadName } from "../../selfhost-thread-title";
+
+ export class ThreadSettingsService {
+   constructor(private readonly registry: ControllerRegistry) {}
+@@ -73,6 +74,6 @@ export class ThreadSettingsService {
+
+   async renameThread(host: HostRecord, threadId: string, name: string) {
+     const client = await this.registry.getHostClient(host);
+-    return client.request("thread/name/set", { threadId, name });
++    return writeThreadName(client, threadId, name);
+   }
+ }
+diff --git a/server/utils/gateway/runtime/turn-commands.ts b/server/utils/gateway/runtime/turn-commands.ts
+index 003d08a..c2beb6d 100644
+--- a/server/utils/gateway/runtime/turn-commands.ts
++++ b/server/utils/gateway/runtime/turn-commands.ts
+@@ -11,6 +11,7 @@ import { trimmedOrFallback } from "~~/shared/utils/strings";
+ import { parseTurnStartResponse, parseTurnSteerResponse } from "~~/shared/runtime/app-server";
+ import { recordAcceptedUserMessage } from "./accepted-user-message";
+ import { sendWithUploadedFiles } from "./thread-attachments";
++import { watchFirstTitle, webThreadSource } from "../../selfhost-thread-title";
+
+ export class ThreadTurnCommandService {
+   constructor(
+@@ -24,16 +25,29 @@ export class ThreadTurnCommandService {
+       `gateway-${randomUUID()}`,
+     );
+     return this.registry.withScopedSubscription(host, threadId, async (controller) => {
+-      const result = await controller.enqueue(() =>
+-        sendWithUploadedFiles(controller.client, host.id, threadId, input.files, () =>
+-          controller.client.request(
+-            "turn/start",
+-            buildTurnStartParams(threadId, clientUserMessageId, input),
+-            120_000,
+-            parseTurnStartResponse,
+-          ),
+-        ),
+-      );
++      const result = await controller.enqueue(async () => {
++        const snapshot = controller.getOpenSnapshot();
++        const thread = snapshot?.thread;
++        const title = thread?.threadSource === webThreadSource && !thread.name && !thread.preview &&
++          !snapshot?.history?.thread?.turns?.length
++          ? watchFirstTitle(controller.client, thread, input.text)
++          : undefined;
++        try {
++          const accepted = await sendWithUploadedFiles(controller.client, host.id, threadId, input.files, () =>
++            controller.client.request(
++              "turn/start",
++              buildTurnStartParams(threadId, clientUserMessageId, input),
++              120_000,
++              parseTurnStartResponse,
++            ),
++          );
++          title?.accept(String(accepted.turn?.id ?? ""));
++          return accepted;
++        } catch (error) {
++          title?.stop();
++          throw error;
++        }
++      });
+       const turnId = result.turn?.id === undefined ? "" : String(result.turn.id);
+       if (turnId !== "") {
+         recordAcceptedUserMessage({
+diff --git a/shared/runtime/realtime/client-message-schema.ts b/shared/runtime/realtime/client-message-schema.ts
+index f93fd9d..cdf073c 100644
+--- a/shared/runtime/realtime/client-message-schema.ts
++++ b/shared/runtime/realtime/client-message-schema.ts
+@@ -195,6 +195,7 @@ export const realtimeClientMessageSchema: z.ZodType<RealtimeClientMessage> = z.d
+         ...requestIdField,
+         hostId: positiveId,
+         cwd: nullableString,
++        projectId: z.uuid().optional(),
+         provider: agentProviderIdSchema.optional(),
+         model: nullableString,
+         effort: nullableString,
+diff --git a/shared/thread-history/app-server-timeline.ts b/shared/thread-history/app-server-timeline.ts
+index f1eb31c..c750bc3 100644
+--- a/shared/thread-history/app-server-timeline.ts
++++ b/shared/thread-history/app-server-timeline.ts
+@@ -55,6 +55,8 @@ function timelineEntryTurn(
+   return {
+     ...turn,
+     status: entry.status,
++    // 通知与历史页都带着失败原因。保留它才能在重新打开失败会话时恢复提醒。
++    error: entry.error,
+     completedAt: entry.completedAt,
+     startedAt: entry.startedAt,
+     durationMs: entry.durationMs,
+diff --git a/shared/types/realtime.ts b/shared/types/realtime.ts
+index fe9182d..ff0d010 100644
+--- a/shared/types/realtime.ts
++++ b/shared/types/realtime.ts
+@@ -176,6 +176,7 @@ export type RealtimeClientMessage =
+       requestId: string;
+       hostId: number;
+       cwd?: string | null;
++      projectId?: string;
+       provider?: AgentProviderId;
+       model?: string | null;
+       effort?: ReasoningEffort | null;

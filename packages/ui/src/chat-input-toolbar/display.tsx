@@ -13,6 +13,7 @@ import {
   type ZCodeConfigSelectValue,
   type ZCodeProvider,
 } from "@zcode/shared";
+import { codexConnectionCode } from "@zcode/shared/zcode-protocol-v4";
 import {
   TID_CHAT_MODE_SELECT_ITEM,
   TID_CHAT_MODE_SELECT_TRIGGER,
@@ -146,6 +147,12 @@ export function ChatApiRetryStatus({
     if (!apiRetry) {
       return null;
     }
+    if (apiRetry.error === codexConnectionCode.httpsFallback) {
+      return intl.formatMessage({ id: "chat.codexModelHttpsFallback" });
+    }
+    if (apiRetry.error === codexConnectionCode.retry && apiRetry.maxRetries === 0) {
+      return intl.formatMessage({ id: "chat.codexModelRetry" });
+    }
 
     // 当前 ZCode Agent 只会推送某一刻的 retryDelayMs 快照，不会每秒递减。
     // 继续把这个值渲染成“X 秒后继续”会给用户造成倒计时在卡住的错觉。
@@ -156,7 +163,9 @@ export function ChatApiRetryStatus({
         id:
           apiRetry.error === zcodeProviderRuntimeHeadersErrorCode.configNetwork
             ? "chat.configReadRetryStatus"
-            : "chat.apiRetryStatus",
+            : apiRetry.error === codexConnectionCode.retry
+              ? "chat.codexModelRetryStatus"
+              : "chat.apiRetryStatus",
       },
       {
         attempt: formatter.format(apiRetry.attempt),
@@ -176,6 +185,7 @@ export function ChatApiRetryStatus({
 
   return (
     <span
+      role="status"
       className="inline-flex h-7 items-center whitespace-nowrap px-1 text-ui-base"
       title={retryTitle}
     >

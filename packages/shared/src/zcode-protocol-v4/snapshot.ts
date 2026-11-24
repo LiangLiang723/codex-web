@@ -123,6 +123,13 @@ export const sessionErrorInfoSchema = z.object({
 });
 export type SessionErrorInfo = z.infer<typeof sessionErrorInfoSchema>;
 
+export const codexConnectionCode = {
+  retry: "codex.streamRetry",
+  httpsFallback: "codex.httpsFallback",
+  failed: "codex.modelConnectionFailed",
+  timeout: "codex.modelConnectionTimeout",
+} as const;
+
 export const apiRetryStateSchema = z.object({
   attempt: z.number(),
   maxAttempts: z.number(),
@@ -183,6 +190,7 @@ export const sessionMetaStateSchema = z.object({
   title: z.string(),
   // default = 未命名；generated = 模型自动生成；custom = 用户显式重命名（不再被自动标题覆盖）。
   titleSource: z.enum(["default", "generated", "custom"]),
+  readOnlyReason: z.literal("activeWriter").optional(),
 });
 export type SessionMetaState = z.infer<typeof sessionMetaStateSchema>;
 
@@ -526,6 +534,8 @@ export const rowsWindowSchema = z.object({
   totalCount: z.number(),
   // 全序第一行 rowId；window 首行等于它 ⇔ 已到顶（游标分页判定）。
   firstRowId: z.number().nullable(),
+  // 接入原生游标时，firstRowId 是已读页面的首行，远端可另有未读历史。
+  hasMoreBefore: z.boolean().optional(),
 });
 export type RowsWindow = z.infer<typeof rowsWindowSchema>;
 

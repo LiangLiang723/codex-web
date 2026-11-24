@@ -1,7 +1,7 @@
 import "./bootstrap.js";
 import { useCallback, useEffect, useMemo, useState, useRef, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
-import { Root, ZCodeIntlProvider, AppErrorBoundary, Button } from "@zcode/ui";
+import { Root, ZCodeIntlProvider, useZCodeIntl, AppErrorBoundary, Button } from "@zcode/ui";
 import { Input } from "@zcode/ui/input";
 import { z } from "zod";
 import { createWebPlatform } from "#src/platform/index.js";
@@ -15,6 +15,16 @@ import { openWorkspace } from "./services.js";
 import "../styles.css";
 
 const tokenKey = "selfhost.auth";
+const hostConnectionEvent = z.object({
+  hostId: z.number(),
+  status: z.enum(["connecting", "connected", "failed", "mfaRequired"]),
+});
+const hostConnectionMessages = {
+  connecting: "selfhost.network.sshConnecting",
+  failed: "selfhost.network.sshFailed",
+  mfaRequired: "selfhost.network.sshMfaRequired",
+} as const;
+
 function Login({ onLogin }: { onLogin: (token: string) => void }) {
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
@@ -67,6 +77,7 @@ function Workbench({
   logout: () => void;
   account: () => void;
 }) {
+  const { intl } = useZCodeIntl();
   const [catalog, setCatalog] = useState<{ hosts: Host[]; projects: Project[] } | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [route, setRoute] = useState(location.search);
@@ -79,6 +90,10 @@ function Workbench({
   }, []);
   const [opened, setOpened] = useState<Awaited<ReturnType<typeof openWorkspace>> | null>(null);
   const [error, setError] = useState("");
+  const [webReconnecting, setWebReconnecting] = useState(false);
+  const [hostConnections, setHostConnections] = useState<
+    Record<number, keyof typeof hostConnectionMessages | "connected">
+  >({});
   const query = new URLSearchParams(route),
     hostId = Number(query.get("host")),
     cwd = query.get("cwd") ?? "",
@@ -146,11 +161,27 @@ function Workbench({
   useEffect(() => {
     let active = true;
     void refresh().catch((e) => active && setError(String(e)));
-    void gateway.connect().catch((e) => active && setError(String(e)));
     const off = gateway.on((m) => {
       if (m.type === "config.catalog.changed")
         void refresh().catch((e) => active && setError(String(e)));
+      else if (m.type === "disconnected") {
+        setWebReconnecting(true);
+        setHostConnections({});
+      } else if (m.type === "ready") {
+        setWebReconnecting(false);
+        void gateway.send({ type: "host.lifecycle.subscribe" }).catch(() => {});
+      } else if (m.type === "host.lifecycle") {
+        const parsed = hostConnectionEvent.safeParse(m.event);
+        if (parsed.success) {
+          const { hostId, status } = parsed.data;
+          setHostConnections((current) =>
+            current[hostId] === status ? current : { ...current, [hostId]: status },
+          );
+        }
+      }
     });
+    // 已打开的工作区应在实时连接恢复时继续使用原会话。
+    void gateway.connect().catch(() => {});
     return () => {
       active = false;
       off();
@@ -202,6 +233,20 @@ function Workbench({
     }),
     [selectedId, selectedName, selectedAvatar, navigate, manage, account, logout],
   );
+  const sshStatus = host && hostConnections[host.id];
+  const noticeMessage = webReconnecting
+    ? intl.formatMessage({ id: "selfhost.network.webReconnecting" })
+    : host && sshStatus && sshStatus !== "connected"
+      ? intl.formatMessage({ id: hostConnectionMessages[sshStatus] }, { host: host.name })
+      : null;
+  const connectionNotice = noticeMessage && (
+    <div
+      className="pointer-events-none fixed inset-x-3 top-[max(0.5rem,env(safe-area-inset-top))] z-40 mx-auto w-fit max-w-[calc(100%_-_1.5rem)] rounded-lg border border-border bg-popover px-3 py-2 text-ui-sm text-popover-foreground shadow-sm"
+      role="status"
+    >
+      {noticeMessage}
+    </div>
+  );
   if (error)
     return (
       <WebLoginPage
@@ -227,21 +272,24 @@ function Workbench({
       <WebLoginPage
         local={{
           title: "正在打开工作区",
-          description: host?.name ?? "正在读取服务器配置…",
+          description: noticeMessage ?? host?.name ?? "正在读取服务器配置…",
           form: null,
         }}
       />
     );
   if (!host || !cwd || !opened)
     return (
-      <Catalog
-        gateway={gateway}
-        hosts={catalog.hosts}
-        refresh={refresh}
-        logout={logout}
-        account={account}
-        select={select}
-      />
+      <>
+        <Catalog
+          gateway={gateway}
+          hosts={catalog.hosts}
+          refresh={refresh}
+          logout={logout}
+          account={account}
+          select={select}
+        />
+        {connectionNotice}
+      </>
     );
   const services = opened.services;
   const switcher: NonNullable<Parameters<typeof Root>[0]["webRemoteControlWorkspaceSwitcher"]> = {
@@ -290,6 +338,7 @@ function Workbench({
         supportsEmbeddedBrowser={false}
         webRemoteControlFeatureEnabled={false}
       />
+      {connectionNotice}
       {editingId === host.id && (
         <HostForm
           key={host.id}

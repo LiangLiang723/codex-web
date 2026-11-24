@@ -255,6 +255,7 @@ function logSubagentProjectionTransition(
 export function hasOlderRows(snapshot: ConversationSnapshot | null): boolean {
   if (!snapshot) return false;
   const first = snapshot.rows.window[0];
+  if (first && snapshot.rows.hasMoreBefore) return true;
   if (!first || snapshot.rows.firstRowId === null) return false;
   return first.rowId > snapshot.rows.firstRowId;
 }
@@ -1343,9 +1344,22 @@ export class ConversationProjectionStore {
       // 防止把权威侧已移除的历史行复活；下次触发按新窗口重新拉。
       if (current.rows.window[0]?.rowId !== beforeRowId) return;
       const window = mergeOlderRows(current.rows.window, this.shareRows(result.rows));
-      if (window === null) return;
+      const cursorFinished = current.rows.hasMoreBefore === true && !result.hasMore;
+      if (window === null && !cursorFinished) return;
       this.setState({
-        snapshot: { ...current, rows: { ...current.rows, window } },
+        snapshot: {
+          ...current,
+          rows: {
+            ...current.rows,
+            window: window ?? current.rows.window,
+            ...(cursorFinished
+              ? {
+                  hasMoreBefore: false,
+                  firstRowId: (window ?? current.rows.window)[0]?.rowId ?? null,
+                }
+              : {}),
+          },
+        },
       });
     } catch (error) {
       // query 只读且可重发：失败不进 error 态，留给下次触发重试。
@@ -1425,6 +1439,7 @@ export class ConversationProjectionStore {
 
         const older = result.rows.filter((row) => row.rowId < beforeRowId);
         const nextBeforeRowId = older[0]?.rowId;
+        if (nextBeforeRowId === undefined && !result.hasMore) break;
         if (nextBeforeRowId === undefined || nextBeforeRowId >= beforeRowId) {
           logger.warn("[v4-store] 完整问题目录 rows/range 未推进游标，停止补拉", {
             beforeRowId,

@@ -24,17 +24,23 @@ const remoteChannels = new Set([
   "commands",
   "output-style",
 ]);
-function modelView(models: RemoteModel[], preference: unknown) {
+function modelView(models: RemoteModel[], preference: unknown, hostDefault: Message = {}) {
   const input = rec(preference);
   const model =
-    models.find((v) => v.model === input.modelId) ?? models.find((v) => v.isDefault) ?? models[0];
+    models.find((v) => v.model === input.modelId) ??
+    models.find((v) => v.model === hostDefault.model) ??
+    models.find((v) => v.isDefault) ??
+    models[0];
   const selection = model
     ? {
         providerId,
         modelId: model.model,
         options: {
           reasoningLevel:
-            str(rec(input.options).reasoningLevel) || model.defaultReasoningEffort || "",
+            str(rec(input.options).reasoningLevel) ||
+            (model.model === hostDefault.model ? str(hostDefault.effort) : "") ||
+            model.defaultReasoningEffort ||
+            "",
         },
       }
     : undefined;
@@ -83,11 +89,15 @@ function projectForDirectory(projects: Project[], directory: unknown) {
 }
 function projectRow(project: Project, position: number) {
   return {
-    id: project.remotePath,
+    id: project.id ?? project.remotePath,
     hostId: "local",
     name: project.name,
     nameOverridden: true,
-    roots: [{ rootPath: project.remotePath, isPrimary: true, position: 0 }],
+    roots: (project.roots ?? [project.remotePath]).map((rootPath, index) => ({
+      rootPath,
+      isPrimary: index === 0,
+      position: index,
+    })),
     position,
     pinned: false,
     deleted: false,
@@ -107,6 +117,22 @@ export async function openWorkspace(
     gateway.request("/api/selfhost/settings", settingsSchema),
   ]);
   let preferences = initialPrefs;
+  const projectDefaults = new Map<string, Promise<Message>>();
+  function defaultModelView(path: string, selection: unknown) {
+    let pending = projectDefaults.get(path);
+    if (!pending) {
+      // model/list 默认强度是目录里的推荐值，Codex 自己的分层配置可能不同。
+      pending = gateway
+        .call("project.defaults.read", { hostId, cwd: path })
+        .then((value) => rec(value.defaults))
+        .catch(() => {
+          projectDefaults.delete(path);
+          return {};
+        });
+      projectDefaults.set(path, pending);
+    }
+    return pending.then((defaults) => modelView(models, selection, defaults));
+  }
   type Listener = { arg: unknown; fn: (value: unknown) => void };
   const listeners = new Map<string, Set<Listener>>();
   // ZCode subscribes after create() resolves. Retain the snapshot and any intervening PTY output.
@@ -124,7 +150,16 @@ export async function openWorkspace(
     const target = typeof path === "string" && path.startsWith("/") ? path : cwd;
     let bridge = bridges.get(target);
     if (!bridge) {
-      bridge = new SessionBridge(gateway, hostId, target, models, emit);
+      bridge = new SessionBridge(
+        gateway,
+        hostId,
+        target,
+        models,
+        emit,
+        async (projectId) =>
+          (await gateway.projects(hostId)).find((project) => project.nativeId === projectId)
+            ?.nativeId,
+      );
       bridges.set(target, bridge);
     }
     return bridge;
@@ -268,7 +303,10 @@ export async function openWorkspace(
       return;
     }
     if (channel === "model-selection" && method === "getView")
-      return modelView(models, p.selection ?? preferences.defaultModelSelection);
+      return defaultModelView(
+        str(p.workspacePath) || cwd,
+        p.selection ?? preferences.defaultModelSelection,
+      );
     if (channel === "provider-settings" && method === "getView")
       return { ...modelView(models, undefined), templates: [] };
     if (
@@ -296,33 +334,54 @@ export async function openWorkspace(
       if (method === "getAccountAvailability") return { china: false, global: false };
     }
     if (channel === "project") {
-      const projects = await gateway.projects(hostId);
-      const mapped = projects.map(projectRow);
-      if (method === "readProjects") return mapped;
       if (method === "readTree") {
-        const threads = await bridge.threads();
+        const [catalog, threads] = await Promise.all([
+          gateway.projectCatalog(hostId),
+          bridge.threads(),
+        ]);
+        const projects = catalog.items;
+        const byId = new Map(
+          projects.map((project) => [project.id ?? project.remotePath, project]),
+        );
         return {
-          projects: mapped,
+          projects: projects.map(projectRow),
           tasks: threads.map((t) => {
-            const owner = projectForDirectory(projects, t.cwd);
+            // 老 Mac 只有项目被迁移到 app-server；使用已保存的桌面归属，
+            // 否则从目录猜测会把手动移过项目的会话又显示到原目录。
+            const stored = catalog.memberships[str(t.id)];
+            const owner =
+              typeof t.projectId === "string"
+                ? byId.get(t.projectId)
+                : stored === null
+                  ? undefined
+                  : stored !== undefined
+                    ? byId.get(stored)
+                    : projectForDirectory(projects, t.cwd);
             return {
               ...bridge.meta(t),
               hostId: "local",
-              workspacePath: owner?.remotePath ?? str(t.cwd),
+              workspacePath: str(t.cwd),
               cwd: str(t.cwd),
-              projectId: owner?.remotePath ?? null,
+              projectId: owner ? (owner.id ?? owner.remotePath) : null,
               pinned: false,
               archived: false,
             };
           }),
         };
       }
+      const projects = await gateway.projects(hostId);
+      if (method === "readProjects") return projects.map(projectRow);
       if (method === "prepareSession" || method === "resolveSessionDirectories") {
-        const selected = projectForDirectory(projects, p.projectId ?? p.workspacePath ?? cwd);
+        const selected =
+          p.projectId === null
+            ? undefined
+            : (projects.find((project) => (project.id ?? project.remotePath) === p.projectId) ??
+              projectForDirectory(projects, p.workspacePath ?? cwd));
+        const roots = selected?.roots ?? [];
         return {
-          projectId: selected?.remotePath ?? null,
+          projectId: selected ? (selected.id ?? selected.remotePath) : null,
           workspacePath: selected?.remotePath ?? cwd,
-          additionalDirectories: [],
+          additionalDirectories: roots.slice(1),
         };
       }
       if (method === "readDirectory") {
@@ -341,7 +400,7 @@ export async function openWorkspace(
           name: str(p.name) || path.split("/").pop() || path,
         };
         await gateway.request("/api/projects", z.unknown(), "POST", value);
-        return projectRow(value, mapped.length);
+        return projectRow(value, projects.length);
       }
     }
     if (channel === "file-watcher") {
@@ -471,7 +530,8 @@ export async function openWorkspace(
       }
       if (method === "getTaskConfigOptions") return [];
       if (method === "getTaskModelSelection")
-        return modelView(models, preferences.defaultModelSelection).effectiveSelection;
+        return (await defaultModelView(scope, preferences.defaultModelSelection))
+          .effectiveSelection;
     }
     if (
       channel === "task-groups" ||

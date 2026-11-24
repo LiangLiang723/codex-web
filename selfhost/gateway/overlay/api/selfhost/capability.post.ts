@@ -31,5 +31,14 @@ const body = z
 export default defineGatewayEventHandler(async (event) => {
   const { hostId, method, params } = await readValidatedBody(event, (v) => body.parse(v));
   const host = requireRecord(hostStore.getWithSecret(hostId), "Host not found");
+  if (method === "thread/name/set") {
+    const { threadId, name } = z
+      .object({
+        threadId: z.string().trim().min(1),
+        name: z.string().trim().min(1).max(200),
+      })
+      .parse(params);
+    return { value: await threadBroker.renameThread(host, threadId, name) };
+  }
   return { value: await threadBroker.selfhostCapability(host, method, params) };
 });

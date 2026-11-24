@@ -5630,7 +5630,42 @@ nodes:
       - "Existing Runtime snapshots stay frozen; restart creates a new owner. Desktop and mobile subscribe to the same workspace-scoped notification."
       - "An in-flight directory publication finishes or rolls back before releasing its lock; late results cannot restore capabilities."
 
+  - id: "capability.selfhost-codex-continuity"
+    kind: "capability"
+    label: "Native Codex projects, history and first-turn titles through the SSH gateway"
+    aliases: ["Web Mac 项目归属", "active writer", "Codex 自动命名", "SSH 模型重连"]
+    docs: ["specs/selfhost-codex/README.md", "packages/web/src/selfhost/CONTRACT.md"]
+    codeSeeds:
+      - symbol: "refreshProjects"
+        file: "selfhost/gateway/overlay/utils/selfhost-projects.ts"
+      - symbol: "watchFirstTitle"
+        file: "selfhost/gateway/overlay/utils/selfhost-thread-title.ts"
+      - symbol: "SessionBridge"
+        file: "packages/web/src/selfhost/sessionBridge.ts"
+    invariants:
+      - "The selected Codex host owns threads, writers and saved names. The browser projects the current host catalog and replayable history."
+      - "A writer conflict allows stored history. Browser pagination only queries older pages after the initial snapshot."
+      - "Title sampling runs after the accepted first turn completes. The native name is reread before an automatic write."
+
+  - id: "surface.selfhost-codex-conversation"
+    kind: "ui-surface"
+    label: "Desktop and phone self-hosted Codex conversations"
+    codeSeeds:
+      - symbol: "openWorkspace"
+        file: "packages/web/src/selfhost/services.ts"
+      - symbol: "SessionPane"
+        file: "packages/ui/src/v4/SessionPane.tsx"
+
 edges:
+  - from: "capability.selfhost-codex-continuity"
+    to: "surface.selfhost-codex-conversation"
+    type: "implemented-in"
+    rank: "must-inspect"
+  - from: "capability.selfhost-codex-continuity"
+    to: "surface.project-task-list"
+    type: "projects-to"
+    rank: "must-inspect"
+    condition: "Self-hosted project and conversation metadata enter the shared sidebar through openWorkspace."
   - from: "capability.archive-permanent-deletion"
     to: "surface.archive-management"
     type: "implemented-in"

@@ -13,6 +13,7 @@ import {
   MEDIA_BUDGET_CURRENT_IMAGE_TOO_LARGE_ERROR_CODE,
   MEDIA_BUDGET_CURRENT_VIDEO_TOO_LARGE_ERROR_CODE,
 } from "@zcode/shared";
+import { codexConnectionCode } from "@zcode/shared/zcode-protocol-v4";
 import {
   TID_CHAT_ERROR_DETAILS_BUTTON,
   TID_CHAT_ERROR_BANNER,
@@ -58,6 +59,8 @@ const LOCALIZED_ERROR_CODES = new Set([
   // 历史任务模型不可用要按稳定 code 本地化，避免英文界面显示中文提示。
   "ZCODE_RUNTIME_MODEL_UNAVAILABLE",
   "ZCODE_BIGMODEL_TEAM_PLAN_MEMBER_REQUIRED",
+  codexConnectionCode.timeout,
+  codexConnectionCode.failed,
 ]);
 
 const MODEL_CONFIG_MISSING_CODES = new Set([
@@ -210,6 +213,9 @@ export function ChatErrorBanner({
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const actionButtonClassName = "shrink-0";
   const requestConfigError = Boolean(resolveRequestSecurityErrorMessageId(error));
+  const codexConnectionError =
+    error.code === codexConnectionCode.timeout || error.code === codexConnectionCode.failed;
+  const wrapMessage = requestConfigError || codexConnectionError;
   const iconButtonClassName = "shrink-0";
   const localizedErrorMessage = resolveChatErrorBannerDisplayMessage(
     error,
@@ -286,6 +292,7 @@ export function ChatErrorBanner({
       <div
         data-testid={TID_CHAT_ERROR_BANNER}
         data-error-code={error.code}
+        role={codexConnectionError ? "alert" : undefined}
         className={cn(
           "w-full flex flex-wrap items-center gap-2 rounded-xl bg-surface backdrop-blur-md border-[0.5px] border-border py-2 pl-3 pr-2",
         )}
@@ -294,7 +301,7 @@ export function ChatErrorBanner({
         <div
           className={cn(
             "flex min-w-0 flex-1 items-center gap-2 text-ui-base text-foreground",
-            requestConfigError && "basis-full",
+            wrapMessage && "basis-full",
           )}
         >
           {hookBlocked ? (
@@ -309,7 +316,7 @@ export function ChatErrorBanner({
           <div
             className={cn(
               "min-w-0 font-medium",
-              requestConfigError ? "whitespace-normal break-words" : "truncate",
+              wrapMessage ? "whitespace-normal break-words" : "truncate",
             )}
           >
             {localizedErrorMessage}

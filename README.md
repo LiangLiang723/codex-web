@@ -52,7 +52,7 @@ sh selfhost/update.sh --no-build
 - **SSH 私钥** 可粘贴到表单，服务端用 AES-GCM 加密持久化。也可将专用密钥置于只读挂载的 `ssh-keys/`，填入相对文件名。`compose.identity.yml` 可将单个密钥挂载为 `default`。密钥口令只写不回显。
 - **主机身份** 用远端控制台或可信记录核对 SHA256 指纹，也可挂载可信 OpenSSH `ssh-keys/known_hosts`。身份未知或指纹不匹配时拒绝连接。经 SOCKS5 隧道同样校验最终 SSH 主机。
 
-「SSH 工作区」每张卡对应一台主机。「进入工作区」会读取该主机的原生项目和会话，在工作区侧栏按项目展示。首次连接没有项目时使用远程用户的家目录。「打开目录」也可以直接输入远程绝对路径。通过「编辑」可更改工作区名称、选择预设图标或上传头像。同一登录账号的各台设备共用这些设置。也可在工作区左下角菜单选择「编辑工作区」。
+「SSH 工作区」每张卡对应一台主机。「进入工作区」会读取该主机的原生项目和会话，按原生项目的保存顺序展示。已归属的会话随项目展示，无项目的会话保留在任务区。首次连接没有项目时使用远程用户的家目录。「打开目录」也可以直接输入远程绝对路径。通过「编辑」可更改工作区名称、选择预设图标或上传头像。同一登录账号的各台设备共用这些设置。也可在工作区左下角菜单选择「编辑工作区」。
 
 在主机列表顶部或工作区左下角菜单打开「账号设置」，输入当前密码后可单独修改用户名或密码，也可同时修改两者。修改成功后各设备重新登录，原有 SSH 主机和项目仍归原账号 ID。
 
@@ -60,6 +60,7 @@ sh selfhost/update.sh --no-build
 
 - 模型菜单、思考强度、Lexical 输入框、文件引用、会话列表和消息时间线使用 upstream ZCode 组件。模型来自选中主机的 `model/list`。
 - Thread 和 Turn 由官方 CLI 创建。历史来自远端 Codex，网页地址保留原生 Thread ID。断开浏览器后，后台任务仍由远端 app-server 处理。支持流式输出、工具调用、Plan Mode、权限审批和重新进入同一会话。
+- 另一端持有写锁时，Web 正常显示历史并提供重新连接。Web 创建的会话在首轮完成后生成短标题，通过 Codex 原生接口保存。
 - 桌面和手机沿用 ZCode v4 的输入框状态栏。Git 更改、目标、计划进度和后台活动按真实数据出现，点开相应胶囊可查看详情。
 - 文件浏览与 Git 使用 ZCode 原服务，经校验身份的 SSH 通道在远端执行。终端复用 Gateway 的远程 PTY。展开的远程目录通过 Codex 的 `fs/watch` 更新文件树。
 - 插件、Skills 和 MCP 通过选中主机的 Codex 接口读取。输入框使用 `plugin/installed` 加载已安装插件，浏览插件市场时再查询市场目录。支持工作流文件的读取、元数据编辑、移动和删除。ZCode 的动态工作流脚本运行器尚未接入 Codex。自动化界面可保存任务，由中心调度器发起 Codex Thread 和 Turn。
@@ -68,6 +69,8 @@ sh selfhost/update.sh --no-build
 ## 远程执行链路
 
 浏览器向中心服务鉴权，中心通过校验主机身份的 SSH 连接远端官方 Codex。Gateway 通过 `codex app-server proxy` 接到那台机器上已运行的 daemon，并使用 WebSocket 与 Codex RPC。网页登录令牌用于中心服务，模型认证、服务商与出站网络由远端 Codex 配置决定。
+
+如果同一台 Mac 上桌面回复很快，Web 却反复显示模型重连，检查 SSH 启动的 Codex daemon 是否继承该主机已有的 `HTTPS_PROXY`。代理环境在进程启动时读取。确认该 daemon 没有运行中的轮次后，从能访问已有代理的环境执行 `codex app-server daemon restart`，再用同模型、同推理强度复测首字和完成耗时。
 
 普通输入会裁去首尾空白，作为原生 `text` 输入发送。模型、推理强度、推理摘要、权限和 Plan 模式走独立协议字段，Web 的协作模式设置传入 `developer_instructions: null`。用户主动选择的代码批注、网页元素等上下文按 ZCode 输入框规则序列化，附件和图片通过原生附件与图片通道传送。Codex 自带的模式指令和项目指令由远端 CLI 加载。
 
@@ -94,10 +97,15 @@ sh selfhost/serve.sh
 python3 selfhost/upstreams.py status
 python3 selfhost/upstreams.py check
 python3 -m unittest discover -s selfhost/tests
+node selfhost/tests/session-resync.mjs
 ```
+
+流式恢复验收使用本机 Chrome，在两种 Web 窗口宽度下模拟帧装配故障。
 
 使用临时测试账号时，`SELFHOST_TEST_ROTATE_ACCOUNT=1` 验证改名、改密及旧会话撤销。`SELFHOST_TEST_IDENTITY=1` 在专用 QA 主机上验证多浏览器头像和名称同步。`SELFHOST_TEST_COMPAT_HOST` 可指定另一台已有原生会话的主机，验证不同 Codex 版本的项目发现。MCP 浏览器验收可用 `SELFHOST_TEST_MCP_THREAD` 指定已收到 `selfhost/tests/fixtures/mcp-confirmation.mjs` 请求的独立测试 Thread。
 
 桌面与手机回归脚本为 `selfhost/tests/browser.mjs`。设置 `SELFHOST_TEST_URL`、`SELFHOST_TEST_USER`、`SELFHOST_TEST_PASSWORD_FILE`、`SELFHOST_TEST_HOST`、`SELFHOST_TEST_CWD` 和 `SELFHOST_TEST_THREAD`，选择至少有一轮已完成对话的测试 Thread，在已安装 Chrome 的开发机执行 `node selfhost/tests/browser.mjs`。`SELFHOST_TEST_PANEL=1` 验证有 Git 更改的测试项目的 v4 状态栏。`SELFHOST_TEST_FILE_WATCH=1` 会在指定的测试项目创建并清理临时文件，验证文件树随远端变动刷新。`SELFHOST_TEST_MUTATE=1` 会创建、编辑并删除仅属于本次测试的临时主机。
+
+`SELFHOST_TEST_SESSION_FOCUS=1` 可单独运行会话验收。`SELFHOST_TEST_WRITER_THREAD` 指定由另一端持有且已有历史的测试会话。`SELFHOST_TEST_AUTO_TITLE=1` 在指定测试目录创建一条合成会话，验证原生项目归属和标题后归档该会话。
 
 后续升级、完整 SHA 和取舍清单见 [上游同步说明](selfhost/UPSTREAMS.md)、[上游版本锁](selfhost/upstreams.lock.json) 和 [功能盘点](selfhost/FEATURE-AUDIT.zh.md)。源码遵循上游许可。[ZCode](LICENSE) · [Codex Gateway](upstream/codex-gateway/LICENSE) · [第三方许可](THIRD-PARTY-NOTICES.md)

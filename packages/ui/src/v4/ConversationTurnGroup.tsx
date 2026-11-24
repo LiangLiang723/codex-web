@@ -30,7 +30,11 @@ import {
   TID_CHAT_LOADING,
   testId,
 } from "@zcode/shared/test-ids";
-import type { ApiRetryState, ConversationRowTarget } from "@zcode/shared/zcode-protocol-v4";
+import {
+  codexConnectionCode,
+  type ApiRetryState,
+  type ConversationRowTarget,
+} from "@zcode/shared/zcode-protocol-v4";
 import { ChatLoading } from "@/components/ai-elements/chat-loading.js";
 import { ChatApiRetryStatus } from "@/chat-input-toolbar/display.js";
 import { cn } from "@/components/lib/utils.js";
@@ -194,7 +198,10 @@ function toRetryStatus(apiRetry: ApiRetryState): ZCodeApiRetryStatus {
   const attempt = Math.max(1, Math.floor(apiRetry.attempt));
   // v4 maxAttempts 包含首次请求，而展示口径是重试次数；直接展示会把
   // 默认 10 次重试写成 1/11。
-  const maxRetries = Math.max(Math.floor(apiRetry.maxAttempts) - 1, attempt);
+  const maxRetries =
+    apiRetry.reasonCode === codexConnectionCode.retry && apiRetry.maxAttempts === 0
+      ? 0
+      : Math.max(Math.floor(apiRetry.maxAttempts) - 1, attempt);
   return {
     kind: "api_retry",
     attempt,
@@ -216,13 +223,18 @@ function TurnChatLoadingSlot({
 }) {
   const { intl, locale } = useZCodeIntl();
   const retryStatus = useMemo(() => (apiRetry ? toRetryStatus(apiRetry) : null), [apiRetry]);
+  // 自托管由 Codex 决定首次通知的时机。再套一层 ZCode 门槛会吞掉已经报告的连接异常。
+  const nativeRecovery =
+    apiRetry?.reasonCode === codexConnectionCode.retry ||
+    apiRetry?.reasonCode === codexConnectionCode.httpsFallback;
   // 配置读取尚未发出模型请求，首次恢复就显示进度，避免用户误以为消息已发送。
   // 其余前两次短暂恢复对用户等价于普通加载；保留 apiRetry 运行态，但只在
   // 第三次重试开始后显示计数。必须在 retry/loading 分支前收敛，否则会留下空 slot，
   // 而不是回退到 ChatLoading。
   const visibleRetryStatus =
     retryStatus &&
-    (apiRetry?.reasonCode === zcodeProviderRuntimeHeadersErrorCode.configNetwork ||
+    (nativeRecovery ||
+      apiRetry?.reasonCode === zcodeProviderRuntimeHeadersErrorCode.configNetwork ||
       retryStatus.attempt >= MIN_VISIBLE_API_RETRY_ATTEMPT)
       ? retryStatus
       : null;

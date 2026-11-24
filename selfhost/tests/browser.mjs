@@ -284,6 +284,98 @@ async function workspace(page, width, projects) {
     );
   await verify(page);
 }
+async function writerHistory(page, threadId) {
+  const params = new URLSearchParams({ host: String(hostId), cwd, thread: threadId });
+  let firstPaint = false;
+  const deferred = [];
+  await page.routeWebSocket("**/api/realtime", (browserSocket) => {
+    const upstream = browserSocket.connectToServer();
+    browserSocket.onMessage((message) => {
+      if (
+        !firstPaint &&
+        typeof message === "string" &&
+        JSON.parse(message).type === "thread.timeline.load"
+      ) {
+        deferred.push(() => upstream.send(message));
+        return;
+      }
+      upstream.send(message);
+    });
+  });
+  await page.goto(base + "/?" + params);
+  await page.getByTestId("v4-workspace-readonly-notice").waitFor({ timeout: 45000 });
+  assert.equal(await page.getByText(/already has an active writer/).count(), 0);
+  assert.equal(await page.locator('[contenteditable="true"]').count(), 0);
+  // The pane painted with all earlier-page requests held by the test.
+  firstPaint = true;
+  for (const release of deferred) release();
+  await verifyNativeRecovery(page, hostId, threadId, true);
+}
+
+async function newThreadTitle(page, projects) {
+  const params = new URLSearchParams({ host: String(hostId), cwd });
+  const prompt = "请为压扁的纸盒写一句分类提示，回答只需一句话。";
+  const timing = {};
+  page.on("websocket", (socket) => {
+    socket.on("framesent", ({ payload }) => {
+      if (typeof payload === "string" && JSON.parse(payload).type === "turn.start")
+        timing.sent = performance.now();
+    });
+    socket.on("framereceived", ({ payload }) => {
+      if (typeof payload !== "string") return;
+      const message = JSON.parse(payload);
+      if (message.type === "turn.start.accepted") timing.accepted = performance.now();
+      if (
+        message.event?.event?.type === "timeline.item.delta" &&
+        message.event.event.channel === "agentMessage"
+      )
+        timing.firstText ??= performance.now();
+    });
+  });
+  await page.goto(base + "/?" + params);
+  const project = projects.find((entry) => entry.remotePath === cwd && entry.nativeId);
+  if (project) {
+    await page.getByTestId("composer-workspace-trigger").click();
+    await page
+      .getByTestId("composer-project-menu")
+      .locator('[data-project-id="' + project.nativeId + '"]')
+      .click();
+  }
+  const composer = page.locator('[contenteditable="true"]').first();
+  await composer.fill(prompt);
+  await composer.press("Enter");
+  await page.waitForURL((url) => Boolean(url.searchParams.get("thread")), { timeout: 45000 });
+  const id = new URL(page.url()).searchParams.get("thread");
+  await page.waitForFunction(
+    async ({ hostId, id, prompt, projectId }) => {
+      const r = await fetch("/api/threads?" + new URLSearchParams({ hostId, limit: 25 }), {
+        headers: { Authorization: "Bearer " + localStorage.getItem("selfhost.auth") },
+      });
+      if (!r.ok) return false;
+      const { data } = await r.json();
+      const thread = data.find((entry) => entry.id === id);
+      const fallback = Array.from(prompt).slice(0, 36).join("");
+      return Boolean(
+        thread?.name &&
+        thread.name !== fallback &&
+        Array.from(thread.name).length <= 36 &&
+        (!projectId || thread.projectId === projectId),
+      );
+    },
+    { hostId, id, prompt, projectId: project?.nativeId },
+    { timeout: 90000, polling: 1500 },
+  );
+  assert(timing.accepted >= timing.sent);
+  console.log("Web send accepted in " + Math.round(timing.accepted - timing.sent) + "ms");
+  if (timing.firstText !== undefined)
+    console.log("Web first text in " + Math.round(timing.firstText - timing.sent) + "ms");
+  await api(page, "/api/selfhost/capability", {
+    hostId,
+    method: "thread/archive",
+    params: { threadId: id },
+  });
+}
+
 try {
   if (process.env.SELFHOST_TEST_ROTATE_ACCOUNT === "1")
     await verifyAccount(browser, base, username, password);
@@ -314,7 +406,7 @@ try {
           assert(username.startsWith("qa-"));
           await verifyWorkspaceIdentity({ page, browser, base, hostId, cwd, login, api });
         }
-        await workspace(page, width, roots);
+        if (process.env.SELFHOST_TEST_SESSION_FOCUS !== "1") await workspace(page, width, roots);
         if (width === 390 && process.env.SELFHOST_TEST_MCP_THREAD)
           await verifyElicitation(page, {
             base,
@@ -325,6 +417,10 @@ try {
             mode: process.env.SELFHOST_TEST_MCP_MODE || "form",
           });
         if (width >= 1300 && thread) await verifyNativeRecovery(page, hostId, thread);
+        if (process.env.SELFHOST_TEST_WRITER_THREAD)
+          await writerHistory(page, process.env.SELFHOST_TEST_WRITER_THREAD);
+        if (width >= 1300 && process.env.SELFHOST_TEST_AUTO_TITLE === "1")
+          await newThreadTitle(page, roots);
         assert.deepEqual(errors, []);
         console.log(width + "px passed (" + roots.length + " remote projects)");
       } finally {

@@ -17,8 +17,11 @@ export const hostSchema = z.object({
 });
 export const projectSchema = z.object({
   hostId: z.number(),
+  id: z.string().optional(),
+  nativeId: z.string().optional(),
   name: z.string(),
   remotePath: z.string(),
+  roots: z.array(z.string()).optional(),
   source: z.enum(["registered", "saved", "thread"]).optional(),
   aliases: z.array(z.string()).optional(),
 });
@@ -122,13 +125,59 @@ export class Gateway {
     if (this.closed) return Promise.reject(new Error("Gateway session closed"));
     if (this.dialing) return this.dialing;
     if (this.socket?.readyState === WebSocket.OPEN) return Promise.resolve();
+    clearTimeout(this.timer);
     const ws = new WebSocket(
       (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/api/realtime",
     );
     this.socket = ws;
     ws.binaryType = "arraybuffer";
     this.dialing = new Promise<void>((resolve, reject) => {
-      const handshake = setTimeout(() => ws.close(), 15000);
+      let healthInterval: ReturnType<typeof setInterval> | undefined;
+      let probe: { nonce: string; timeout: ReturnType<typeof setTimeout> } | undefined;
+      const clearProbe = () => {
+        clearTimeout(probe?.timeout);
+        probe = undefined;
+      };
+      const checkConnection = () => {
+        if (document.hidden || probe || this.closed || ws.readyState !== WebSocket.OPEN) return;
+        const nonce = wireId();
+        probe = { nonce, timeout: setTimeout(disconnect, 4000) };
+        ws.send(JSON.stringify({ type: "ping", nonce }));
+      };
+      const disconnect = (event?: CloseEvent) => {
+        clearTimeout(handshake);
+        clearInterval(healthInterval);
+        clearProbe();
+        window.removeEventListener("focus", checkConnection);
+        document.removeEventListener("visibilitychange", checkConnection);
+        if (this.socket !== ws) return;
+        this.socket = undefined;
+        this.dialing = undefined;
+        // 代理静默断线时浏览器可能迟迟收不到 close 帧，心跳超时直接进入现有重连路径。
+        if (!event) ws.close();
+        reject(new Error("Gateway disconnected"));
+        for (const req of this.pending.values()) {
+          clearTimeout(req.timer);
+          req.reject(new Error("Connection lost. Check remote state before retrying."));
+        }
+        this.pending.clear();
+        if (
+          event?.code === 1008 &&
+          ["Invalid or expired session", "Session revoked"].includes(event.reason)
+        ) {
+          this.closed = true;
+          this.sessionExpired();
+        }
+        if (this.closed) return;
+        for (const cb of this.watchers) cb({ type: "disconnected" });
+        this.timer = setTimeout(
+          () => {
+            void this.connect().catch(() => {});
+          },
+          Math.min(10000, 500 * 2 ** Math.min(this.failures++, 5)),
+        );
+      };
+      const handshake = setTimeout(disconnect, 15000);
       ws.onopen = () => ws.send(JSON.stringify({ type: "auth.authenticate", token: this.token }));
       ws.onmessage = ({ data }) => {
         if (this.socket !== ws) return;
@@ -146,7 +195,14 @@ export class Gateway {
           clearTimeout(handshake);
           this.dialing = undefined;
           this.failures = 0;
+          healthInterval ??= setInterval(checkConnection, 20000);
+          window.addEventListener("focus", checkConnection);
+          document.addEventListener("visibilitychange", checkConnection);
           resolve();
+        }
+        if (msg.type === "pong") {
+          if (probe && msg.nonce === probe.nonce) clearProbe();
+          return;
         }
         const id = msg.requestId;
         if (typeof id === "string") {
@@ -161,35 +217,8 @@ export class Gateway {
         }
         for (const cb of this.watchers) cb(msg);
       };
-      ws.onerror = () => ws.close();
-      ws.onclose = (event) => {
-        clearTimeout(handshake);
-        if (this.socket !== ws) return;
-        reject(new Error("Gateway disconnected"));
-        this.socket = undefined;
-        this.dialing = undefined;
-        for (const req of this.pending.values()) {
-          clearTimeout(req.timer);
-          req.reject(new Error("Connection lost. Check remote state before retrying."));
-        }
-        this.pending.clear();
-        if (
-          event.code === 1008 &&
-          ["Invalid or expired session", "Session revoked"].includes(event.reason)
-        ) {
-          this.closed = true;
-          this.sessionExpired();
-        }
-        if (!this.closed) {
-          for (const cb of this.watchers) cb({ type: "disconnected" });
-          this.timer = setTimeout(
-            () => {
-              void this.connect().catch(() => {});
-            },
-            Math.min(10000, 500 * 2 ** Math.min(this.failures++, 5)),
-          );
-        }
-      };
+      ws.onerror = () => disconnect();
+      ws.onclose = disconnect;
     });
     return this.dialing;
   }
@@ -233,6 +262,16 @@ export class Gateway {
     return this.request(
       "/api/selfhost/projects?hostId=" + hostId + (force ? "&refresh=1" : ""),
       z.array(projectSchema),
+    );
+  }
+  projectCatalog(hostId: number) {
+    return this.request(
+      "/api/selfhost/projects?" +
+        new URLSearchParams({ hostId: String(hostId), organization: "1" }),
+      z.object({
+        items: z.array(projectSchema),
+        memberships: z.record(z.string(), z.string().nullable()),
+      }),
     );
   }
   async models(hostId: number) {

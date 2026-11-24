@@ -6,12 +6,16 @@ import {
   encodeTopicWireFrames,
   measureTopicNotificationEnvelopeBytes,
   commandEnvelopeSchema,
+  type V4ConversationResyncResult,
 } from "@zcode/shared/zcode-protocol-v4";
 import { Gateway, wireId, type Message, type RemoteModel } from "./gateway.js";
 import {
+  applyCodexRecoveryEvent,
   array,
+  nativeHistoryRowStart,
   nativeMode,
   num,
+  prependNativeHistoryPage,
   projectThread,
   providerId,
   rec,
@@ -21,11 +25,7 @@ import {
 } from "./threadProjection.js";
 import { z } from "zod";
 import { codexRequest } from "./capabilities.js";
-import {
-  applyCanonicalEventToHistory,
-  timelinePageToTurns,
-  mergeThreadTurns,
-} from "virtual:gateway-terminal-stream";
+import { applyCanonicalEventToHistory } from "virtual:gateway-terminal-stream";
 type Subscription = {
   kind: "conversation" | "index" | "config";
   session?: string;
@@ -41,6 +41,9 @@ type Subscription = {
   epochId?: string;
   timer?: ReturnType<typeof setTimeout>;
   queued?: Message[];
+  generation: number;
+  older?: Promise<void>;
+  oldestRowId: number;
 };
 type Emit = (channel: string, event: string, value: unknown) => void;
 
@@ -57,6 +60,7 @@ export class SessionBridge {
     readonly cwd: string,
     readonly models: RemoteModel[],
     private readonly emit: Emit,
+    private readonly nativeProjectId: (id: string) => Promise<string | undefined>,
   ) {
     this.disposeEvents = gateway.on((msg) => {
       if (msg.type === "thread.event") {
@@ -64,10 +68,7 @@ export class SessionBridge {
           id = str(event.threadId);
         if (num(event.hostId) !== this.hostId) return;
         for (const sub of this.subscriptions.values()) {
-          if (
-            sub.kind === "index" &&
-            ["turn.completed", "thread.name.updated"].includes(str(rec(event.event).type))
-          ) {
+          if (sub.kind === "index" && rec(event.event).type === "turn.completed") {
             this.defer(sub, 300);
             continue;
           }
@@ -91,6 +92,8 @@ export class SessionBridge {
             continue;
           if (msg.type === "config.catalog.changed" && sub.kind === "conversation") continue;
           if (sub.session) this.opened.delete(sub.session);
+          sub.generation += 1;
+          sub.queued = [];
           sub.activation = undefined;
           this.defer(sub);
         }
@@ -99,11 +102,13 @@ export class SessionBridge {
   }
   dispose() {
     this.disposeEvents();
-    for (const sub of this.subscriptions.values())
+    for (const sub of this.subscriptions.values()) {
+      clearTimeout(sub.timer);
       if (sub.session)
         void this.gateway
           .send({ type: "thread.unsubscribe", hostId: this.hostId, threadId: sub.session })
           .catch(() => {});
+    }
     this.subscriptions.clear();
   }
   private defer(sub: Subscription, delay = 40) {
@@ -120,19 +125,28 @@ export class SessionBridge {
     if (id && id <= (sub.lastId ?? 0)) return;
     if (id) sub.lastId = id;
     const event = rec(envelope.event);
+    if (event.type === "notice" && event.source === "thread/name/updated") {
+      info.thread = { ...rec(info.thread), name: rec(event.params).threadName ?? null };
+    }
+    applyCodexRecoveryEvent(info, envelope, sub.session);
     if (event.type === "thread.goal.updated") info.goal = event.goal;
     if (event.type === "thread.goal.cleared") info.goal = null;
     if (event.type === "turn.plan.updated") info.nativePlan = event;
-    if (event.type === "thread.settings.updated") info.threadSettings = event.settings;
+    if (event.type === "thread.settings.updated") info.threadSettings = event.threadSettings;
     const history = applyCanonicalEventToHistory(info.history, info.thread, sub.session, event);
     if (history) info.history = history;
     this.defer(sub);
   }
   async threads(cwd?: string, search?: string) {
-    const query = new URLSearchParams({ hostId: String(this.hostId), limit: "100" });
+    const query = new URLSearchParams({
+      hostId: String(this.hostId),
+      limit: "100",
+      useRemoteStateIndexOnly: "true",
+    });
     if (cwd) query.set("cwd", cwd);
     if (search) query.set("searchTerm", search);
     const all = new Map<string, Message>();
+    const seen = new Set<string>();
     let cursor: string | null = null;
     do {
       if (cursor) query.set("cursor", cursor);
@@ -145,6 +159,8 @@ export class SessionBridge {
       );
       for (const t of page.data) all.set(str(t.id), t);
       cursor = page.nextCursor;
+      if (cursor && seen.has(cursor)) throw Error("Codex 返回了重复的会话游标");
+      if (cursor) seen.add(cursor);
     } while (cursor);
     return [...all.values()];
   }
@@ -173,13 +189,24 @@ export class SessionBridge {
     if (sub.kind === "conversation" && sub.session) {
       const id = sub.session;
       if (!sub.activation) {
+        const generation = sub.generation;
         const info = await this.activation(id);
+        if (generation !== sub.generation || !this.subscriptions.has(sub.subscriptionId)) return;
         this.opened.delete(id);
         sub.activation = info;
         sub.lastId = num(info.lastEventId);
         sub.epochId = str(info.eventEpoch);
         for (const event of sub.queued ?? []) this.applyEvent(sub, event);
         sub.queued = [];
+        // 历史与 Goal 是独立读取。Goal 慢或旧版缺少 Goal 方法时先渲染会话。
+        void this.gateway
+          .call("thread.goal.get", { hostId: this.hostId, threadId: id })
+          .then((goal) => {
+            if (sub.activation !== info || info.goal !== undefined) return;
+            info.goal = goal.goal ?? null;
+            this.defer(sub);
+          })
+          .catch(() => {});
       }
       const info = sub.activation;
       const turns = array(rec(rec(info.history).thread).turns);
@@ -195,11 +222,7 @@ export class SessionBridge {
         sub.rowIds,
       );
       const visible = projection.rows.window.slice(-100);
-      projection.rows = {
-        ...projection.rows,
-        window: visible,
-        firstRowId: visible[0]?.rowId ?? null,
-      };
+      projection.rows.window = visible;
       snapshot = projection;
     } else if (sub.kind === "index") {
       const sessions = (await this.threads(this.cwd)).map((t) => ({
@@ -261,6 +284,7 @@ export class SessionBridge {
           await this.publish(sub);
         } while (sub.dirty && this.subscriptions.has(sub.subscriptionId));
       } catch (e) {
+        if (!this.subscriptions.has(sub.subscriptionId)) return;
         this.emit("zcode-agent", "onAgentRuntimeRestarted", {
           workspacePath: this.cwd,
           error: String(e),
@@ -276,50 +300,58 @@ export class SessionBridge {
     if (cached) return cached;
     const promise = (async () => {
       const scope = { hostId: this.hostId, threadId: id };
-      const info = await this.gateway.call("thread.activate", { ...scope, limit: 100 });
-      const goal = await this.gateway.call("thread.goal.get", scope).catch((error) => {
-        if (
-          /not supported|method not found|unsupported|not enabled|unknown method/i.test(
-            String(error),
-          )
-        )
-          return null;
-        throw error;
+      const info = await this.gateway.call("thread.activate", {
+        ...scope,
+        limit: 100,
+        retryWriter: true,
       });
-      info.goal = goal?.goal ?? null;
       info.nativePlan = array(info.recentEvents)
         .map((e) => rec(e.event))
         .findLast((e) => e.type === "turn.plan.updated");
-      const seen = new Set<string>();
-      let cursor = str(info.oldestTimelineCursor);
-      while (cursor && !seen.has(cursor)) {
-        seen.add(cursor);
-        const page = await this.gateway.call("thread.timeline.load", {
-          ...scope,
-          cursor,
-          limit: 100,
-        });
-        info.history = mergeThreadTurns(
-          info.history,
-          info.thread,
-          id,
-          timelinePageToTurns(page),
-          "prepend",
-        );
-        cursor = str(page.nextCursor);
-      }
+      for (const event of array(info.recentEvents)) applyCodexRecoveryEvent(info, event, id);
       return info;
     })();
     this.opened.set(id, promise);
     try {
       return await promise;
     } catch (error) {
-      this.opened.delete(id);
+      if (this.opened.get(id) === promise) this.opened.delete(id);
       throw error;
     }
   }
+
+  private loadOlder(sub: Subscription, info: Message, threadId: string) {
+    if (sub.older) return sub.older;
+    const cursor = str(info.oldestTimelineCursor);
+    const pending = this.gateway
+      .call("thread.timeline.load", {
+        hostId: this.hostId,
+        threadId,
+        cursor,
+        limit: 100,
+      })
+      .then((page) => {
+        if (sub.activation !== info || !this.subscriptions.has(sub.subscriptionId)) return;
+        const next = str(page.nextCursor);
+        if (next === cursor) throw Error("Codex 返回了重复的历史游标");
+        sub.oldestRowId = prependNativeHistoryPage(
+          info,
+          page,
+          threadId,
+          this.models,
+          sub.rowIds,
+          sub.oldestRowId,
+        );
+      })
+      .finally(() => {
+        if (sub.older === pending) sub.older = undefined;
+      });
+    sub.older = pending;
+    return pending;
+  }
   async lifecycle(session: string) {
-    await this.activation(session);
+    if (![...this.subscriptions.values()].some((sub) => sub.session === session && sub.activation))
+      await this.activation(session);
     return { sessionId: session, state: "ready", generation: 1, revision: 0, lastError: null };
   }
   async handle(method: string, p: Message): Promise<unknown> {
@@ -333,7 +365,7 @@ export class SessionBridge {
       const info = sub?.activation ?? (await this.activation(session));
       const seq = sub?.ordinal ?? 1,
         epoch = sub?.epoch ?? this.epoch;
-      const snapshot = projectThread(
+      let snapshot = projectThread(
         info,
         session,
         epoch,
@@ -343,11 +375,24 @@ export class SessionBridge {
       );
       const versions = { atSeq: seq, atRevision: seq, atLogEpoch: epoch };
       if (method === "conversationRowsRangeV4") {
-        const all = snapshot.rows.window.filter(
+        let rows = snapshot.rows.window.filter(
           (r) => typeof p.beforeRowId !== "number" || r.rowId < p.beforeRowId,
         );
         const limit = Math.max(1, num(p.limit, 100));
-        return { ...versions, rows: all.slice(-limit), hasMore: all.length > limit };
+        while (sub && rows.length < limit && info.oldestTimelineCursor) {
+          await this.loadOlder(sub, info, session);
+          if (!this.subscriptions.has(sub.subscriptionId) || sub.activation !== info)
+            throw Error("Codex 历史快照已更新");
+          snapshot = projectThread(info, session, epoch, seq, this.models, sub.rowIds);
+          rows = snapshot.rows.window.filter(
+            (r) => typeof p.beforeRowId !== "number" || r.rowId < p.beforeRowId,
+          );
+        }
+        return {
+          ...versions,
+          rows: rows.slice(-limit),
+          hasMore: rows.length > limit || Boolean(info.oldestTimelineCursor),
+        };
       }
       if (method === "conversationPlansV4")
         return {
@@ -427,6 +472,8 @@ export class SessionBridge {
         busy: false,
         dirty: false,
         rowIds: new Map(),
+        generation: 0,
+        oldestRowId: nativeHistoryRowStart,
       };
       this.subscriptions.set(sub.subscriptionId, sub);
       this.schedule(sub);
@@ -435,6 +482,7 @@ export class SessionBridge {
     if (method.startsWith("unsubscribe")) {
       const sub = this.subscriptions.get(str(p.subscriptionId));
       this.subscriptions.delete(str(p.subscriptionId));
+      if (sub) clearTimeout(sub.timer);
       if (
         sub?.session &&
         !Array.from(this.subscriptions.values()).some((s) => s.session === sub.session)
@@ -448,9 +496,12 @@ export class SessionBridge {
     }
     if (method.startsWith("resync")) {
       const sub = this.subscriptions.get(str(p.subscriptionId));
-      if (!sub) throw Error("Unknown subscription");
+      if (!sub) throw Error("fault.subscription.notOwned");
       this.schedule(sub);
-      return { mode: "snapshot", subscriptionId: sub.subscriptionId };
+      // 补同步接收端通过 result.ack 核对订阅；平铺响应会让正在流式输出的会话进入错误页。
+      return {
+        ack: { subscriptionId: sub.subscriptionId, mode: "snapshot", logEpoch: sub.epoch },
+      } satisfies V4ConversationResyncResult;
     }
     if (method === "sendConversationCommandV4") {
       const command = commandEnvelopeSchema.parse(p.envelope);
@@ -461,6 +512,7 @@ export class SessionBridge {
         command.sessionId,
         rec(command.payload),
         command.commandId,
+        str(p.projectId),
       ).then(
         (result) => ({
           commandId: command.commandId,
@@ -488,6 +540,7 @@ export class SessionBridge {
     sessionId: string | null,
     p: Message,
     commandId: string,
+    projectId: string,
   ): Promise<unknown> {
     const config = rec(p.config),
       first = rec(p.firstInput),
@@ -500,6 +553,7 @@ export class SessionBridge {
         cwd: this.cwd,
         model,
         effort,
+        ...(projectId ? { projectId: await this.nativeProjectId(projectId) } : {}),
         ...(config.mode ? nativeMode(config.mode) : {}),
       });
       const id = str(created.threadId);
@@ -517,6 +571,11 @@ export class SessionBridge {
       return { type: "createSession", sessionId: id, ...(input ? { input } : {}) };
     }
     if (!sessionId) throw Error("No native thread selected");
+    const opened = [...this.subscriptions.values()].find(
+      (sub) => sub.session === sessionId,
+    )?.activation;
+    if (opened?.readOnly === true && type !== "forkAssistant")
+      throw Error("此会话由另一端持有，释放后请重新连接");
     if (type === "sendText") return this.sendText(sessionId, p, commandId);
     if (type === "sendGoalCommand" || type === "pauseGoal" || type === "resumeGoal") {
       const scope = { hostId: this.hostId, threadId: sessionId };
@@ -670,12 +729,8 @@ export class SessionBridge {
     throw Error("This operation is unavailable for the selected Codex CLI: " + type);
   }
   private async sendText(id: string, p: Message, commandId: string) {
-    const model =
-      str(rec(p.modelSelection).modelId) ||
-      this.models.find((m) => m.isDefault)?.model ||
-      this.models[0]?.model;
+    const model = str(rec(p.modelSelection).modelId) || undefined;
     const effort = str(rec(rec(p.modelSelection).options).reasoningLevel) || undefined;
-    if (!model) throw Error("No remote Codex model is available");
     const running = this.lastTurn.get(id);
     if (running && (p.requestedDelivery === "guide" || !p.requestedDelivery)) {
       await this.gateway.call("turn.steer", {
@@ -694,10 +749,11 @@ export class SessionBridge {
       size: num(a.bytes),
       isImage: str(a.mime).startsWith("image/"),
     }));
+    const active = [...this.subscriptions.values()].find((sub) => sub.session === id)?.activation;
+    const modeModel = model || str(rec(active?.threadSettings).model);
     const result = await this.gateway.call("turn.start", {
       hostId: this.hostId,
       threadId: id,
-      cwd: this.cwd,
       files,
       images: files.filter((f) => f.isImage).map((f) => ({ path: f.path })),
       text: str(p.text),
@@ -705,10 +761,18 @@ export class SessionBridge {
       model,
       effort,
       ...(p.mode ? { approvalPolicy: nativeMode(p.mode).approvalPolicy } : {}),
-      collaborationMode: {
-        mode: p.planEnabled ? "plan" : "default",
-        settings: { model, reasoningEffort: effort ?? null, developerInstructions: null },
-      },
+      ...(typeof p.planEnabled === "boolean" && modeModel
+        ? {
+            collaborationMode: {
+              mode: p.planEnabled ? "plan" : "default",
+              settings: {
+                model: modeModel,
+                reasoningEffort: effort ?? null,
+                developerInstructions: null,
+              },
+            },
+          }
+        : {}),
     });
     this.lastTurn.set(id, str(rec(result.turn).id));
     return { type: "inputAccepted", delivery: "startNow", inputId: commandId };

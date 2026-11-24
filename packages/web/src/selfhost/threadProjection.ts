@@ -3,13 +3,17 @@ import {
   computeInputRouting,
   createInitialConversationSnapshot,
 } from "virtual:zcode-projection-state";
-import type {
-  ConversationRow,
-  ConversationSnapshot,
-  PendingInteraction,
-  SessionPhase,
+import {
+  codexConnectionCode,
+  type ApiRetryState,
+  type ConversationRow,
+  type ConversationSnapshot,
+  type PendingInteraction,
+  type SessionErrorInfo,
+  type SessionPhase,
 } from "@zcode/shared/zcode-protocol-v4";
 import type { Message, RemoteModel } from "./gateway.js";
+import { timelinePageToTurns, mergeThreadTurns } from "virtual:gateway-terminal-stream";
 
 export function rec(v: unknown): Message {
   return typeof v === "object" && v !== null && !Array.isArray(v)
@@ -39,6 +43,36 @@ function plain(value: unknown): string {
   return "";
 }
 export const providerId = "codex-ssh";
+export const nativeHistoryRowStart = 2 ** 40;
+function nativeHistoryRowKey(turnId: string, entityId: string) {
+  return JSON.stringify([turnId, entityId]);
+}
+export function prependNativeHistoryPage(
+  info: Message,
+  page: Message,
+  threadId: string,
+  registry: RemoteModel[],
+  rowIds: Map<string, number>,
+  oldestRowId: number,
+) {
+  const turns = timelinePageToTurns(page);
+  const previous = projectThread(
+    { history: { thread: { id: threadId, turns } } },
+    threadId,
+    "",
+    0,
+    registry,
+    new Map(),
+  ).rows.window;
+  const keys = previous
+    .map((row) => nativeHistoryRowKey(row.turnId ?? "", row.entityId ?? ""))
+    .filter((key) => !rowIds.has(key));
+  const start = oldestRowId - keys.length;
+  for (const [index, key] of keys.entries()) rowIds.set(key, start + index);
+  info.history = mergeThreadTurns(info.history, info.thread, threadId, turns, "prepend");
+  info.oldestTimelineCursor = str(page.nextCursor);
+  return start;
+}
 export function threadName(t: Message) {
   return str(t.name) || str(t.title) || str(t.preview) || str(t.id);
 }
@@ -62,6 +96,88 @@ export function threadPhase(status: unknown): SessionPhase {
       return "completedSuccess";
   }
 }
+
+export function applyCodexRecoveryEvent(info: Message, envelope: Message, threadId: string) {
+  const event = rec(envelope.event);
+  if (event.type === "turn.started") {
+    info.apiRetry = null;
+    return;
+  }
+  const params = rec(event.params);
+  const fallback =
+    event.type === "notice" &&
+    event.source === "warning" &&
+    params.threadId === threadId &&
+    str(params.message).startsWith("Falling back from WebSockets to HTTPS transport");
+  const modelDelta =
+    event.type === "timeline.item.delta" && event.channel !== "commandOutput" && str(event.delta);
+  const item = event.type === "timeline.item.upsert" ? rec(event.item) : null;
+  const modelItem =
+    item &&
+    typeof item.type === "string" &&
+    item.type !== "userMessage" &&
+    (item.status === "inProgress" || item.type === "agentMessage");
+  if (
+    !fallback &&
+    !modelDelta &&
+    !modelItem &&
+    event.type !== "error.reported" &&
+    event.type !== "turn.completed"
+  ) return;
+
+  const turns = rec(rec(info.history).thread).turns;
+  const active = rec(Array.isArray(turns) ? turns.at(-1) : null);
+  if (active.status !== "inProgress") return;
+  if (event.type === "turn.completed" && rec(event.turn).id === active.id) info.apiRetry = null;
+  if (modelDelta && event.turnId === active.id) info.apiRetry = null;
+  if (modelItem && item.turnId === active.id) info.apiRetry = null;
+  if (!fallback && (event.type !== "error.reported" || params.turnId !== active.id)) return;
+  if (!fallback && params.willRetry !== true) {
+    info.apiRetry = null;
+    return;
+  }
+
+  // Codex 可能在第二次尝试才发出第一条重试通知，部分错误也没有计数。
+  const count = /^Reconnecting(?:\.\.\.|…)\s+(\d+)\/(\d+)$/i.exec(
+    str(rec(params.error).message).trim(),
+  );
+  info.apiRetry = {
+    attempt: count ? Number(count[1]) : 0,
+    maxAttempts: count ? Number(count[2]) + 1 : 0,
+    nextRetryAt: Date.parse(str(envelope.createdAt)) || Date.now(),
+    reasonCode: fallback ? codexConnectionCode.httpsFallback : codexConnectionCode.retry,
+  } satisfies ApiRetryState;
+}
+
+function codexTurnConnectionError(turn: Message, at: number): SessionErrorInfo | null {
+  const error = rec(turn.error);
+  const message = str(error.message);
+  const details = `${message}\n${str(error.additionalDetails)}`;
+  const timedOut = /\b(?:timed?\s*out|deadline exceeded)\b/i.test(details);
+  const kind = rec(error.codexErrorInfo);
+  const network =
+    [
+      "httpConnectionFailed",
+      "responseStreamConnectionFailed",
+      "responseStreamDisconnected",
+      "responseTooManyFailedAttempts",
+    ].some((code) => Object.hasOwn(kind, code)) ||
+    /\b(?:stream disconnected|connection (?:closed|reset|refused)|network error|error sending request)\b/i.test(
+      details,
+    ) ||
+    (timedOut &&
+      (/\b(?:stream|connection|connect|websocket|network)\b/i.test(details) ||
+        /^(?:timed?\s*out|deadline exceeded)[.!]?$/i.test(message.trim())));
+  if (!network) return null;
+  return {
+    code: timedOut ? codexConnectionCode.timeout : codexConnectionCode.failed,
+    message: timedOut ? "Model connection timed out." : "Model connection failed.",
+    source: "network",
+    recoverable: true,
+    at: time(turn.completedAt, time(turn.startedAt, at)),
+  };
+}
+
 export function projectThread(
   activation: Message,
   id: string,
@@ -71,8 +187,9 @@ export function projectThread(
   rowIds: Map<string, number>,
 ): ConversationSnapshot {
   const history = rec(activation.history),
-    thread = { ...rec(activation.thread), ...rec(history.thread) },
-    turns = array(thread.turns);
+    stored = rec(history.thread),
+    thread = { ...stored, ...rec(activation.thread) },
+    turns = array(stored.turns ?? thread.turns);
   const settings = rec(activation.threadSettings ?? history.settings),
     collaboration = rec(settings.collaborationMode);
   const result = createInitialConversationSnapshot(id, epoch);
@@ -93,6 +210,7 @@ export function projectThread(
   result.meta = {
     title: threadName(thread),
     titleSource: typeof thread.name === "string" ? "custom" : "generated",
+    ...(activation.readOnly === true ? { readOnlyReason: "activeWriter" } : {}),
   };
   result.config = {
     ...result.config,
@@ -113,10 +231,11 @@ export function projectThread(
   const interactions: PendingInteraction[] = [];
   const created = time(thread.createdAt, 0);
   const base = (turnId: string, entityId: string, at: number) => {
-    const key = JSON.stringify([turnId, entityId]);
+    const key = nativeHistoryRowKey(turnId, entityId);
     let rowId = rowIds.get(key);
     if (rowId === undefined) {
-      rowId = rowIds.size + 1;
+      // 游标之后可能还有旧页，给更早的行保留编号空间且不移动已发布的行。
+      rowId = nativeHistoryRowStart + rowIds.size;
       rowIds.set(key, rowId);
     }
     return { rowId, entityId, turnId, productTurnId: turnId, createdAt: at, createdAtSeq: rowId };
@@ -331,13 +450,24 @@ export function projectThread(
   }
   const last = turns.at(-1);
   const phase = last ? threadPhase(last.status) : "draft";
-  result.rows = { window: rows, totalCount: rows.length, firstRowId: rows[0]?.rowId ?? null };
+  rows.sort((a, b) => a.rowId - b.rowId);
+  result.rows = {
+    window: rows,
+    totalCount: rows.length,
+    firstRowId: rows[0]?.rowId ?? null,
+    hasMoreBefore: Boolean(activation.oldestTimelineCursor),
+  };
   result.control = {
     ...result.control,
     phase,
     canStop: phase === "running",
     stopState: phase === "running" ? "stoppable" : "idle",
     stopTargetKind: phase === "running" ? "assistant" : "unknown",
+    lastError: last && phase === "error" ? codexTurnConnectionError(last, created) : null,
+    apiRetry:
+      phase === "running" && activation.apiRetry
+        ? (activation.apiRetry as ApiRetryState)
+        : null,
   };
   result.pendingInteractions = interactions;
   const context = {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
 /** Conformance check from ZCode's public nonCliAcpRetirement suite, exercised against a real SSH account. */
-export async function verifyNativeRecovery(page, hostId, threadId) {
+export async function verifyNativeRecovery(page, hostId, threadId, readOnly = false) {
   const invalidId = randomUUID();
   const result = await page.evaluate(
     async ({ hostId, threadId, invalidId }) => {
@@ -41,7 +41,7 @@ export async function verifyNativeRecovery(page, hostId, threadId) {
         await ready;
         return {
           close: () => ws.close(),
-          open(id) {
+          request(type, id) {
             const requestId = String(++connect.sequence);
             return new Promise((resolve, reject) => {
               const timer = setTimeout(() => {
@@ -52,7 +52,7 @@ export async function verifyNativeRecovery(page, hostId, threadId) {
                 clearTimeout(timer);
                 resolve(value);
               });
-              ws.send(JSON.stringify({ type: "thread.activate", requestId, hostId, threadId: id }));
+              ws.send(JSON.stringify({ type, requestId, hostId, threadId: id }));
             });
           },
         };
@@ -61,14 +61,15 @@ export async function verifyNativeRecovery(page, hostId, threadId) {
       const a = await connect();
       let original;
       try {
-        original = await a.open(threadId);
+        original = await a.request("thread.activate", threadId);
       } finally {
         a.close();
       }
       const b = await connect();
       try {
-        const missing = await b.open(invalidId);
-        const restored = await b.open(threadId);
+        const missing = await b.request("thread.activate", invalidId);
+        const restored = await b.request("thread.activate", threadId);
+        const goal = await b.request("thread.goal.get", threadId);
         const complete = (m) =>
           (m.history?.thread?.turns ?? []).filter((t) => t.status === "completed").map((t) => t.id);
         return {
@@ -78,6 +79,8 @@ export async function verifyNativeRecovery(page, hostId, threadId) {
           reloadedId: restored.history?.thread?.id,
           originalTurns: complete(original),
           restoredTurns: complete(restored),
+          readOnly: restored.readOnly,
+          goalType: goal.type,
         };
       } finally {
         b.close();
@@ -89,6 +92,8 @@ export async function verifyNativeRecovery(page, hostId, threadId) {
   assert.equal(result.missingHistory, false);
   assert.equal(result.initialId, threadId);
   assert.equal(result.reloadedId, threadId);
+  assert.equal(Boolean(result.readOnly), readOnly);
+  if (readOnly) assert.equal(result.goalType, "thread.goal.snapshot");
   assert(result.originalTurns.length > 0, "Select a real Thread containing a completed turn");
   for (const id of result.originalTurns)
     assert(result.restoredTurns.includes(id), "Lost completed native turn " + id);

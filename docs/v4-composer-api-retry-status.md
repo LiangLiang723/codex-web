@@ -77,6 +77,8 @@ ProductProjection.control.apiRetry
 mobile replayable 的恢复一致性。`attempt <= 2` 且当前 turn 被权限/问答/maintenance
 阻塞时，仍遵守现有 gating，不额外显示 generic loading。
 
+自托管 SSH Codex 的重试由原生 App Server 报告。该链路使用同一槽位，从收到首条重试通知时展示原生次数或纯文本进度，也展示传输回退。详见[自托管连接异常提示](../specs/selfhost-codex/README.md#连接异常提示)。
+
 ## State lifecycle
 
 ```text

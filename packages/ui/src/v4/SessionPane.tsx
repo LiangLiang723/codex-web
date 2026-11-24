@@ -87,6 +87,7 @@ import type {
 } from "@zcode/services";
 import { useCodingPlanBillingDiscountFromService } from "@/CodingPlanBillingDiscount.js";
 import { toast } from "@/components/ui/toast.js";
+import { Button } from "@/components/ui/button.js";
 import { cn } from "@/components/lib/utils.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { DEFAULT_CODE_PREVIEW_SETTINGS } from "@/lib/codePreviewSettings.js";
@@ -744,12 +745,6 @@ export function SessionPane({
     worktreeRoot: sessionWorktreeRoot,
     worktreeAvailable,
   } = useTaskWorktreePlacement({ workspacePath, workspaceIdentity, remoteSessionId, sessionId });
-  const readOnly = workspaceReadOnly || !worktreeAvailable;
-  const readOnlyReason =
-    workspaceReadOnlyReason ??
-    (worktreeAvailable
-      ? undefined
-      : intl.formatMessage({ id: "workspaceSidebar.unavailableLocalDirectory" }));
   const newTaskComposerScope = useMemo(
     () => resolveComposerScope(composerProjectId, workspaceIdentity, composerClientNamespace),
     [composerProjectId, workspaceIdentity, composerClientNamespace],
@@ -800,6 +795,15 @@ export function SessionPane({
   const [lease, setLease] = useSessionPaneLease(sessionId, layer);
   const state = useConversationProjection(lease);
   const snapshot = state.snapshot;
+  const writerConflict = snapshot?.meta.readOnlyReason === "activeWriter";
+  const readOnly = workspaceReadOnly || !worktreeAvailable || writerConflict;
+  const readOnlyReason =
+    workspaceReadOnlyReason ??
+    (writerConflict
+      ? intl.formatMessage({ id: "chat.threadActiveWriter" })
+      : worktreeAvailable
+        ? undefined
+        : intl.formatMessage({ id: "workspaceSidebar.unavailableLocalDirectory" }));
   useEffect(() => {
     if (!lease || lease.sessionId !== sessionId || readOnly || selectionSideChat || !onRefreshGit)
       return;
@@ -6589,6 +6593,16 @@ export function SessionPane({
           className="w-full min-w-0 break-words rounded-xl border border-border bg-surface px-4 py-3 text-ui-base text-foreground-subtle"
         >
           {readOnlyReason}
+          {writerConflict && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2 block"
+              onClick={handleRetrySubscribe}
+            >
+              {intl.formatMessage({ id: "remote.conversation.reconnect" })}
+            </Button>
+          )}
         </div>
       ) : null}
     </>
