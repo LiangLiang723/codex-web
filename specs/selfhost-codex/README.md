@@ -291,4 +291,22 @@ sequenceDiagram
 
 SH-RELEASE 验收覆盖健康更新后清理废弃标签、已有容器和回滚引用、其他项目镜像和失败更新保留现场。持久数据卷、数据库、配置、密钥及备份由服务端部署独立管理。
 
+## 会话文本复制
+
+Markdown 表格、代码块、消息和链接复制写入当前设备剪贴板。表格保留现有 Markdown 文本格式，包括表头、分隔行、各数据行与单元格转义。代码块和消息保留已有文本内容。Markdown 链接菜单与分享成功结果复制各自的完整 URL。空内容保留当前剪贴板。
+
+`IPlatformService.writeClipboardText` 管理文本写入。安全上下文使用浏览器 Clipboard API；局域网 HTTP 缺少该 API 时在原点击或键盘激活中同步执行浏览器的文本复制命令，保留焦点和选区。只读分享的共享渲染器使用同一个浏览器实现。浏览器拒绝写入时显示本地化失败提示。成功反馈只在浏览器确认写入后展示。
+
+```mermaid
+flowchart LR
+    Click[用户点击或键盘激活] --> Text[渲染器生成原有复制文本]
+    Text --> Clipboard[当前设备的剪贴板]
+    Clipboard -->|写入成功| Success[现有成功反馈]
+    Clipboard -->|拒绝或不支持| Failure[本地化失败提示]
+```
+
+SH-CLIPBOARD 浏览器验收使用 `node selfhost/tests/clipboard.mjs`。1480px 和 390px 在非安全 HTTP 与安全上下文均点选表格、代码块和消息复制并实际粘贴，核对 Unicode、换行和成功反馈。桌面右键和手机长按后，用链接菜单复制完整 URL。拒绝写入时显示失败，粘贴仍得到原有内容。私有分享页验证复用的表格和代码块复制，以及复制后的焦点与选区。分享成功结果用受控的已发布状态验证复制链接。
+
+验收使用 Chromium Headless Shell 的内存剪贴板。可运行 `pnpm exec playwright-core install chromium --only-shell` 安装，也可用 `SELFHOST_CLIPBOARD_HEADLESS_SHELL` 指定已安装的 Headless Shell。
+
 参考 [OpenAI App Server 协议](https://learn.chatgpt.com/docs/app-server)、[Codex CLI 项目协议](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/app-server-protocol/src/protocol/common.rs)、[Codex CLI 的自动命名](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/tui/src/app/thread_title.rs)。

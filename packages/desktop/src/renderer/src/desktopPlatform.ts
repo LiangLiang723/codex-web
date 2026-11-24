@@ -1,4 +1,4 @@
-import { recordArmsCustomEventForE2E } from "@zcode/ui";
+import { recordArmsCustomEventForE2E, writeBrowserClipboardText } from "@zcode/ui";
 import {
   DesktopCommandIds,
   buildLocalMediaPreviewUrl,
@@ -30,6 +30,7 @@ export function createDesktopPlatform(options: {
       ),
     canSelectFilePath: true,
     canOpenLocalFiles: true,
+    writeClipboardText: writeBrowserClipboardText,
     pluginSandbox: createDesktopPluginSandboxPlatform(),
     createLocalMediaPreviewUrl: buildLocalMediaPreviewUrl,
     isLocalDevelopmentRuntime: options.isLocalDevelopmentRuntime,

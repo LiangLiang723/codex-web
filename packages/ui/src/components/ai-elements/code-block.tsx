@@ -22,7 +22,9 @@ import {
 } from "react";
 import type { BundledTheme } from "shiki";
 import { CodeViewer } from "@/components/ui/code-viewer.js";
+import { toast } from "@/components/ui/toast.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
+import { useWriteClipboardText } from "@/hooks/usePlatform.js";
 import { FileDisplayIcon, resolveFileDisplayDescriptor } from "@/lib/fileDisplay.js";
 import { isMermaidLanguage, shouldRenderMermaidCodeBlock } from "@/lib/mermaidLanguage.js";
 import {
@@ -490,25 +492,25 @@ export const CodeBlockCopyButton = ({
   const timeoutRef = useRef<number>(0);
   const { code } = useContext(CodeBlockContext);
   const { intl } = useZCodeIntl();
+  const writeClipboardText = useWriteClipboardText();
   const label = title ?? intl.formatMessage({ id: "codeBlock.copyCode" });
 
   const copyToClipboard = useCallback(async () => {
-    if (typeof window === "undefined" || !navigator?.clipboard?.writeText) {
-      onError?.(new Error("Clipboard API not available"));
+    if (isCopied) return;
+
+    try {
+      await writeClipboardText(code);
+    } catch (error) {
+      if (onError) onError(error instanceof Error ? error : new Error(String(error)));
+      else toast(intl.formatMessage({ id: "chat.message.copy.failed" }));
       return;
     }
 
-    try {
-      if (!isCopied) {
-        await navigator.clipboard.writeText(code);
-        setIsCopied(true);
-        onCopy?.();
-        timeoutRef.current = window.setTimeout(() => setIsCopied(false), timeout);
-      }
-    } catch (error) {
-      onError?.(error as Error);
-    }
-  }, [code, onCopy, onError, timeout, isCopied]);
+    setIsCopied(true);
+    window.clearTimeout(timeoutRef.current);
+    timeoutRef.current = window.setTimeout(() => setIsCopied(false), timeout);
+    onCopy?.();
+  }, [code, intl, isCopied, onCopy, onError, timeout, writeClipboardText]);
 
   useEffect(
     () => () => {

@@ -856,6 +856,9 @@ export interface IPlatformService {
   /** 桌面通过原生另存为对话框写入；Web 在当前浏览器发起下载。 */
   saveFile?(payload: SaveFileRequest): Promise<SaveFileResult>;
 
+  /** 在用户激活期间将非空文本写入当前客户端的剪贴板。写入失败时拒绝 Promise。 */
+  writeClipboardText?(text: string): Promise<void>;
+
   /**
    * 用 Chromium 打印引擎把当前 webContents 的 print 媒体版面输出为 PDF（矢量文本）。
    * 页面尺寸由 renderer 注入的 @page CSS 决定（preferCSSPageSize）；仅 Desktop 实现。

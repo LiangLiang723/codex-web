@@ -96,7 +96,8 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { requestTaskNavigation } from "@/store/zcodeSessionStoreNavigation.js";
 import { useOptionalProjectDirectory } from "@/project-sidebar/ProjectDirectoryProvider.js";
 import type { ProjectTask } from "@/project-sidebar/contract.js";
-import { useOptionalPlatform } from "@/hooks/usePlatform.js";
+import { useOptionalPlatform, useWriteClipboardText } from "@/hooks/usePlatform.js";
+import { toast } from "@/components/ui/toast.js";
 import { reportAppTelemetryEvent } from "@/lib/appTelemetry.js";
 import { runUserAction, runUserActionAsync } from "@/lib/userActionTelemetry.js";
 import { logger } from "@/logger.js";
@@ -288,18 +289,29 @@ const CopyRowAction = memo(function CopyRowAction({
   tooltip?: string;
 }) {
   const [copied, setCopied] = useState(false);
-  const handleCopy = useCallback(() => {
-    if (!text || !navigator.clipboard) return;
-    void runUserActionAsync({
-      input: { featureId: "conversation.history.feedback", action: "copy", trigger: "button" },
-      operation: () => navigator.clipboard.writeText(text),
-      completed: { resultSource: "platform_result" },
-      failureStage: "clipboard_write",
-    }).then(() => {
+  const copiedTimer = useRef<number>(0);
+  const { intl } = useZCodeIntl();
+  const writeClipboardText = useWriteClipboardText();
+  useEffect(() => () => window.clearTimeout(copiedTimer.current), []);
+
+  const handleCopy = useCallback(async () => {
+    if (!text) return;
+    window.clearTimeout(copiedTimer.current);
+    setCopied(false);
+    try {
+      await runUserActionAsync({
+        input: { featureId: "conversation.history.feedback", action: "copy", trigger: "button" },
+        operation: () => writeClipboardText(text),
+        completed: { resultSource: "platform_result" },
+        failureStage: "clipboard_write",
+      });
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
-    });
-  }, [text]);
+      window.clearTimeout(copiedTimer.current);
+      copiedTimer.current = window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      toast(intl.formatMessage({ id: "chat.message.copy.failed" }));
+    }
+  }, [intl, text, writeClipboardText]);
   return (
     <MessageAction
       aria-label={label}

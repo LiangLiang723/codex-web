@@ -104,7 +104,8 @@ import type { CodePreviewSettings } from "@/lib/codePreviewSettings.js";
 import { DEFAULT_CODE_PREVIEW_SETTINGS } from "@/lib/codePreviewSettings.js";
 import { useZCodeStore } from "@/store/StoreProvider.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
-import { useOptionalPlatform, usePlatform } from "@/hooks/usePlatform.js";
+import { useOptionalPlatform, usePlatform, useWriteClipboardText } from "@/hooks/usePlatform.js";
+import { toast } from "@/components/ui/toast.js";
 import { FileApplicationChoices, FileSaveAsMenuItem } from "@/file-menu/index.js";
 import { useFileApplications } from "@/file-menu/index.js";
 import { useWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
@@ -1548,6 +1549,7 @@ function MessageExternalLink({
 }: MessageExternalLinkProps) {
   const { intl } = useZCodeIntl();
   const platform = useOptionalPlatform();
+  const writeClipboardText = useWriteClipboardText();
   const handleOpen = useCallback(
     (options: { forceExternal?: boolean; forceInApp?: boolean } = {}) => {
       // 交互语义：本机/私网白名单只决定左键单击的默认目标；右键的两个打开动作各自强制一个目标。
@@ -1584,11 +1586,10 @@ function MessageExternalLink({
   );
   const handleCopyLink = async () => {
     try {
-      if (!navigator.clipboard?.writeText) {
-        throw new Error("clipboard-unavailable");
-      }
-      await navigator.clipboard.writeText(href);
+      await writeClipboardText(href);
+      toast(intl.formatMessage({ id: "chat.message.copy.copied" }));
     } catch (error) {
+      toast(intl.formatMessage({ id: "chat.message.copy.failed" }));
       logger.warn("[MessageExternalLink] 复制链接失败", {
         error: error instanceof Error ? error.message : String(error),
       });

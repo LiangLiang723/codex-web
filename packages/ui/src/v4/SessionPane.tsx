@@ -97,7 +97,7 @@ import { WORKSPACE_FILE_DRAG_MIME } from "@/lib/workspaceFileDrag.js";
 import { buildChatSessionScrollMemoryKey } from "@/lib/chatSessionScrollMemory.js";
 import type { MessageFileLinkTarget } from "@/components/ai-elements/message.js";
 import { useServices } from "@/hooks/useServices.js";
-import { useOptionalPlatform } from "@/hooks/usePlatform.js";
+import { useOptionalPlatform, useWriteClipboardText } from "@/hooks/usePlatform.js";
 import { browserGlobalNoticeStore } from "@/global-notice/globalNoticeStore.js";
 import {
   HIGHSPEED_SEND_WAIT_BUDGET_MS,
@@ -726,6 +726,7 @@ export function SessionPane({
     fileRewindPreview,
   } = useV4Conversation();
   const platform = useOptionalPlatform();
+  const writeClipboardText = useWriteClipboardText();
   const {
     conversationShareService,
     highspeedCardService,
@@ -6122,16 +6123,16 @@ export function SessionPane({
   ]);
 
   const handleCopyPublishedShare = useCallback(async () => {
-    if (!publishedShareUrl || !navigator.clipboard?.writeText) return false;
+    if (!publishedShareUrl) return false;
     try {
-      await navigator.clipboard.writeText(publishedShareUrl);
+      await writeClipboardText(publishedShareUrl);
       toast(intl.formatMessage({ id: "conversationShare.copySucceeded" }));
       return true;
     } catch {
       toast(intl.formatMessage({ id: "conversationShare.copyFailed" }));
       return false;
     }
-  }, [intl, publishedShareUrl]);
+  }, [intl, publishedShareUrl, writeClipboardText]);
 
   const handleOpenPublishedShare = useCallback(() => {
     if (!publishedShareUrl || !onOpenBrowserUrl) return;

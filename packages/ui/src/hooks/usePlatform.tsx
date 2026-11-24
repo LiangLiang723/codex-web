@@ -6,6 +6,7 @@
  */
 import { createContext, useContext, useCallback, type ReactNode } from "react";
 import type { IPlatformService, RemoteTarget } from "@zcode/shared";
+import { writeBrowserClipboardText } from "@/lib/browserEnvironment.js";
 
 const PlatformContext = createContext<IPlatformService | null>(null);
 
@@ -30,6 +31,11 @@ export function usePlatform(): IPlatformService {
 export function useOptionalPlatform(): IPlatformService | null {
   const ctx = useContext(PlatformContext);
   return ctx;
+}
+
+export function useWriteClipboardText() {
+  // 只读分享页也渲染同一套 Markdown，但不会挂载工作区的 PlatformProvider。
+  return useOptionalPlatform()?.writeClipboardText ?? writeBrowserClipboardText;
 }
 
 /** 选择目录的便捷 hook */

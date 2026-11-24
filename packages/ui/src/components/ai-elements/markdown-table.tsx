@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dialog.js";
 import { toast } from "@/components/ui/toast.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
+import { useWriteClipboardText } from "@/hooks/usePlatform.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 
 type MarkdownTableNodeProp = {
@@ -400,6 +401,7 @@ export type MarkdownTableProps = ComponentProps<"table"> & MarkdownTableNodeProp
 
 export function MarkdownTable({ className, children, node: _node, ...props }: MarkdownTableProps) {
   const { intl } = useZCodeIntl();
+  const writeClipboardText = useWriteClipboardText();
   const [previewOpen, setPreviewOpen] = useState(false);
   const [expandedScrollEnabled, setExpandedScrollEnabled] = useState(false);
   const [canToggleExpandedScroll, setCanToggleExpandedScroll] = useState(false);
@@ -1076,25 +1078,13 @@ export function MarkdownTable({ className, children, node: _node, ...props }: Ma
   );
 
   const handleCopyMarkdown = useCallback(async () => {
-    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
-      toast(
-        intl.formatMessage({ id: "markdownTable.copyFailed" }, { error: "clipboard-unavailable" }),
-      );
-      return;
-    }
-
     try {
-      await navigator.clipboard.writeText(buildMarkdownTableText(getRows()));
+      await writeClipboardText(buildMarkdownTableText(getRows()));
       toast(intl.formatMessage({ id: "markdownTable.copySucceeded" }));
-    } catch (error) {
-      toast(
-        intl.formatMessage(
-          { id: "markdownTable.copyFailed" },
-          { error: error instanceof Error ? error.message : String(error) },
-        ),
-      );
+    } catch {
+      toast(intl.formatMessage({ id: "markdownTable.copyFailed" }));
     }
-  }, [getRows, intl]);
+  }, [getRows, intl, writeClipboardText]);
 
   const handleDownloadCsv = useCallback(() => {
     if (

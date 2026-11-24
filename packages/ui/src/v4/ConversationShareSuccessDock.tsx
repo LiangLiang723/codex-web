@@ -170,9 +170,7 @@ export function ConversationShareSuccessDock({
           data-testid="conversation-share-copy-link"
           onClick={() => {
             void Promise.resolve(onCopy())
-              .then((success) => {
-                if (success) setCopied(true);
-              })
+              .then((success) => setCopied(success === true))
               .catch(() => setCopied(false));
           }}
         >
