@@ -25,7 +25,7 @@ const prompt =
 const sendSelector = 'button[aria-label="发送"]';
 const replySelector = '[class~="group/assistant-row"] [data-conversation-selectable="true"]';
 
-// The QA account and directory retain the synthetic Thread and any file created for this run.
+// Use a dedicated QA account and directory for the synthetic Thread and optional file rewind.
 assert(username, "Set SELFHOST_TEST_USER to the dedicated QA account");
 assert(Number.isInteger(hostId) && hostId > 0, "Set SELFHOST_TEST_HOST to the QA host ID");
 assert(cwd && posix.isAbsolute(cwd) && cwd !== "/", "Set SELFHOST_TEST_CWD to the QA directory");
@@ -150,11 +150,10 @@ async function readWorkspace(page, channel, method, args) {
 }
 
 async function verifyRewind(page, allowApply) {
-  const fixture = posix.join(cwd, patchFile);
   const fixtureExists = async () => {
-    const [item] = await readWorkspace(page, "file", "checkFilesExist", [{ paths: [fixture] }]);
-    assert.equal(item.path, fixture);
-    return item.exists;
+    // 文件推荐的存在性查询有缓存。读取远端目录才能核对撤销后的当前工作树。
+    const entries = await readWorkspace(page, "file", "readdir", [{ path: cwd }]);
+    return entries.some((entry) => entry.name === patchFile);
   };
   const responseFor = (operation) =>
     page.waitForResponse((response) => {
