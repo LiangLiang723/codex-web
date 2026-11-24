@@ -1,0 +1,125 @@
+--- a/server/utils/gateway/http/validation/threads.ts
++++ b/server/utils/gateway/http/validation/threads.ts
+@@ -14,7 +14,16 @@
+   limit: z.coerce.number().int().min(1).max(100).default(30),
+   cursor: z.string().trim().nullable().optional(),
+   useRemoteStateIndexOnly: z.coerce.boolean().optional(),
+-});
++  sortKey: z.enum(["created_at", "updated_at"]).optional(),
++  discoverProjects: z.enum(["true", "false"]).transform(value => value === "true").optional(),
++  includedThreadIds: z.string()
++    .transform(value => [...new Set(value.split(",").map(id => id.trim()))])
++    .pipe(z.array(z.string().min(1).max(128)).min(1).max(100))
++    .optional(),
++}).refine(
++  query => query.includedThreadIds === undefined || (query.limit === 100 && !query.cursor),
++  "An includedThreadIds request reads one complete batch of up to 100 threads.",
++);
+ 
+ export const threadOpenSchema = z.object({
+   hostId: z.coerce.number().int().positive(),
+--- a/server/api/threads/index.get.ts
++++ b/server/api/threads/index.get.ts
+@@ -13,7 +13,9 @@
+ import { threadSnapshotStore } from "../../utils/gateway/state/thread-snapshots";
+ import { withAllThreadSources } from "../../utils/gateway/protocol/thread-list";
+ import { threadProjectDiscovery } from "../../utils/gateway/runtime/thread-project-discovery";
+-import type { AppServerThread, GatewayThread } from "~~/shared/types";
++import type { AppServerThread, GatewayThread, HostRecord } from "~~/shared/types";
++import type { ThreadListPage } from "../../utils/gateway/runtime/thread-catalog";
++import { readSelfhostThreadSummary } from "../../utils/selfhost-thread-summary";
+ import { trimmedOrNull } from "~~/shared/utils/strings";
+ import { gatewayThreadFromAppServer } from "../../utils/gateway/protocol/gateway-thread";
+ 
+@@ -39,8 +41,10 @@
+     cwd: trimmedOrNull(query.cwd) ?? undefined,
+     searchTerm: trimmedOrNull(query.searchTerm) ?? undefined,
+     useStateDbOnly: query.useRemoteStateIndexOnly ?? false,
++    ...(query.sortKey === undefined ? {} : { sortKey: query.sortKey }),
++    ...(query.includedThreadIds === undefined ? {} : { includedThreadIds: query.includedThreadIds }),
+   });
+-  const page = await threadBroker.listThreads(host, listParams);
++  const page = await readThreadListPage(host, listParams);
+   if (!query.archived && userId !== undefined && discoveryGeneration !== null) {
+     const current = threadProjectDiscovery.indexPageIfCurrent(
+       userId,
+@@ -48,7 +52,12 @@
+       discoveryGeneration,
+       page,
+     );
+-    if (current && shouldDiscoverHostProjects(query)) {
++    if (
++      current &&
++      query.discoverProjects !== false &&
++      query.includedThreadIds === undefined &&
++      shouldDiscoverHostProjects(query)
++    ) {
+       threadProjectDiscovery.schedule(userId, host, page, listParams, discoveryGeneration);
+     }
+   }
+@@ -60,9 +69,13 @@
+     host.id,
+     page.data,
+     query.archived ? [] : threadSnapshotStore.listForHost(host.id).map(record => record.snapshot.thread)
+-      .filter(thread => query.archived === undefined || (!thread.path && !thread.preview && thread.turns.length === 0)),
++      .filter(thread =>
++        (!query.includedThreadIds || query.includedThreadIds.includes(thread.id)) &&
++        (query.archived === undefined || (!thread.path && !thread.preview && thread.turns.length === 0)),
++      ),
+     indexedThreads,
+     query.searchTerm ?? null,
++    query.sortKey,
+   );
+   // Directory groups describe Codex conversations, including history from a removed cwd.
+   // Listing them needs no SFTP existence check; actual file operations report their own errors.
+@@ -72,6 +85,27 @@
+     projects,
+   };
+ });
++
++async function readThreadListPage(
++  host: HostRecord,
++  params: Record<string, unknown> & { includedThreadIds?: string[]; archived?: boolean; cwd?: string },
++): Promise<ThreadListPage> {
++  const page = await threadBroker.listThreads(host, params);
++  if (!params.includedThreadIds) return page;
++  const selected = new Set(params.includedThreadIds);
++  if (!page.nextCursor && page.data.every(thread => selected.has(thread.id))) return page;
++
++  // 0.170 忽略原生 ID 筛选字段。按选定 ID 查元数据和 rollout 归档位置，避免继续扫描索引。
++  const threads = await Promise.all(params.includedThreadIds.map(id => readSelfhostThreadSummary(host, id)));
++  return {
++    data: threads.filter((thread): thread is AppServerThread => {
++      if (!thread || (params.cwd && thread.cwd !== params.cwd)) return false;
++      const archived = thread.path?.split(/[\\/]/u).at(-2) === "archived_sessions";
++      return archived === (params.archived === true);
++    }),
++    nextCursor: null,
++  };
++}
+ 
+ function shouldDiscoverHostProjects(query: {
+   cwd?: string | null;
+@@ -91,6 +125,7 @@
+   cachedThreads: AppServerThread[],
+   indexedThreads: ReturnType<typeof threadMetadataStore.list>,
+   searchTerm: string | null,
++  sortKey?: "created_at" | "updated_at",
+ ) {
+   const metadataById = new Map(indexedThreads.map((thread) => [thread.id, thread]));
+   const threadsById = new Map(remoteThreads.map((thread) => [thread.id, thread]));
+@@ -115,9 +150,9 @@
+         .filter((value): value is string => typeof value === "string")
+         .some((value) => String(value).toLowerCase().includes(normalizedSearch));
+     })
+-    .sort(
+-      (left, right) =>
+-        Number(right.recencyAt ?? right.updatedAt ?? 0) -
+-        Number(left.recencyAt ?? left.updatedAt ?? 0),
+-    ) satisfies GatewayThread[];
++    .sort((left, right) => {
++      if (sortKey === "created_at") return right.createdAt - left.createdAt || left.id.localeCompare(right.id);
++      if (sortKey === "updated_at") return right.updatedAt - left.updatedAt || left.id.localeCompare(right.id);
++      return Number(right.recencyAt ?? right.updatedAt ?? 0) - Number(left.recencyAt ?? left.updatedAt ?? 0);
++    }) satisfies GatewayThread[];
+ }

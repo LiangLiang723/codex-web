@@ -1,0 +1,54 @@
+--- a/server/utils/gateway/realtime/handlers/files.ts
++++ b/server/utils/gateway/realtime/handlers/files.ts
+@@ -55,6 +55,7 @@
+       if (event.type === "changed") {
+         sendRealtimePeerMessage(peer, {
+           type: "file.watch.changed",
++          subscriptionId: request.requestId,
+           hostId: host.id,
+           cwd: request.cwd,
+           threadId: request.threadId,
+@@ -68,6 +69,7 @@
+       releaseLeases();
+       sendRealtimePeerMessage(peer, {
+         type: "file.watch.closed",
++        subscriptionId: request.requestId,
+         hostId: host.id,
+         cwd: request.cwd,
+         threadId: request.threadId,
+--- a/shared/runtime/realtime/server-message-schema.ts
++++ b/shared/runtime/realtime/server-message-schema.ts
+@@ -566,6 +566,7 @@
+     z
+       .object({
+         type: z.literal("file.watch.changed"),
++        subscriptionId: nonEmptyString.optional(),
+         ...threadScopeFields,
+         cwd: nonEmptyString,
+         rootPath: nonEmptyString,
+@@ -575,6 +576,7 @@
+     z
+       .object({
+         type: z.literal("file.watch.closed"),
++        subscriptionId: nonEmptyString.optional(),
+         ...threadScopeFields,
+         cwd: nonEmptyString,
+       })
+--- a/shared/types/realtime.ts
++++ b/shared/types/realtime.ts
+@@ -681,6 +681,7 @@
+     }
+   | {
+       type: "file.watch.changed";
++      subscriptionId?: string;
+       hostId: number;
+       cwd: string;
+       threadId: string;
+@@ -689,6 +690,7 @@
+     }
+   | {
+       type: "file.watch.closed";
++      subscriptionId?: string;
+       hostId: number;
+       cwd: string;
+       threadId: string;

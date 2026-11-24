@@ -1,4 +1,8 @@
-import { ContextMentionOptionContent } from "@/mentions/components/ContextMentionOptionContent.js";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
+import {
+  ContextMentionOptionContent,
+  SkillMentionOptionContent,
+} from "@/mentions/components/ContextMentionOptionContent.js";
 import { useFileMentionProvider } from "@/mentions/providers/fileMentionProvider.js";
 import { useSessionsMentionProvider } from "@/mentions/providers/sessionsMentionProvider.js";
 import {
@@ -21,6 +25,7 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { MentionPanel, type MentionPanelSection } from "@/mentions/components/MentionPanel.js";
 import { PluginMentionOptionContent } from "@/mentions/components/PluginMentionOptionContent.js";
 import { usePluginsMentionProvider } from "@/mentions/providers/pluginsMentionProvider.js";
+import { useSkillsMentionProvider } from "@/mentions/providers/skillsMentionProvider.js";
 
 /**
  * 「添加」分区里紧随附件之后的命令快捷项，选中即插入与 `/` 面板相同的命令标签。
@@ -87,6 +92,17 @@ export function ChatPromptActionMenu({
     intl.formatMessage({ id: "chat.mention.plugins.title" }),
   );
   const provider = useChatViewActiveTaskProvider(sessionId, workspacePath, workspaceIdentity);
+  const skills = useSkillsMentionProvider(
+    workspacePath,
+    workspaceIdentity,
+    sessionId,
+    provider,
+    "",
+    selfHostedBuild && open && !disabled && showPlugins,
+    false,
+    intl.formatMessage({ id: "chat.mention.skills.empty" }),
+    intl.formatMessage({ id: "chat.mention.skills.title" }),
+  );
   const slashCommands = useSlashCommands(workspacePath, workspaceIdentity);
   const files = useFileMentionProvider(
     workspacePath,
@@ -116,7 +132,11 @@ export function ChatPromptActionMenu({
       errorText: group.error?.message ?? null,
     })),
   );
-  const mentionItems = [...plugins.items, ...contextGroups.flatMap((group) => group.items)];
+  const mentionItems = [
+    ...plugins.items,
+    ...skills.items,
+    ...contextGroups.flatMap((group) => group.items),
+  ];
   const attachmentCount = attachmentAction ? 1 : 0;
   const options = [
     ...(attachmentAction ? [{ disabled: false }] : []),
@@ -179,6 +199,22 @@ export function ChatPromptActionMenu({
         content: <PluginMentionOptionContent item={item} />,
       })),
     },
+    ...(selfHostedBuild && showPlugins
+      ? [
+          {
+            id: "skills",
+            title: skills.title,
+            emptyText: skills.emptyText,
+            loading: skills.loading,
+            loadingText: intl.formatMessage({ id: "chat.mention.category.loading" }),
+            errorText: skills.error?.message,
+            options: skills.items.map((item) => ({
+              ...item,
+              content: <SkillMentionOptionContent item={item} />,
+            })),
+          },
+        ]
+      : []),
     ...contextGroups.map((group) => ({
       id: group.id,
       title: group.title,

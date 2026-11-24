@@ -1,0 +1,37 @@
+--- a/server/utils/gateway/protocol/thread-payload.ts
++++ b/server/utils/gateway/protocol/thread-payload.ts
+@@ -1,3 +1,4 @@
++import { nativeUserInputItems } from "../../selfhost-native-turn-input";
+ import type {
+   ApprovalPolicy,
+   ThreadCollaborationMode,
+@@ -16,27 +17,8 @@
+ import { recordFromUnknown } from "~~/shared/utils/records";
+ import type { TurnStartInput } from "../runtime/types";
+ 
+-export function buildUserInput(input: { text: string; images?: TurnStartInput["images"] }) {
+-  const userInput: Array<Record<string, unknown>> = [];
+-  if (input.text.trim() !== "") {
+-    userInput.push({ type: "text", text: input.text, text_elements: [] });
+-  }
+-  for (const image of input.images ?? []) {
+-    if (image.url !== null && image.url !== undefined && image.url !== "") {
+-      userInput.push({
+-        type: "image",
+-        url: image.url,
+-        detail: image.detail,
+-      });
+-    } else if (image.path !== null && image.path !== undefined && image.path !== "") {
+-      userInput.push({
+-        type: "localImage",
+-        path: image.path,
+-        detail: image.detail,
+-      });
+-    }
+-  }
+-  return userInput;
++export function buildUserInput(input: Pick<TurnStartInput, "text" | "images" | "files">) {
++  return nativeUserInputItems(input);
+ }
+ 
+ export function buildTurnStartParams(

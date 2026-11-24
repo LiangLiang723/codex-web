@@ -169,6 +169,7 @@ import { parseModelPickerValue } from "@/lib/zcodeSessionProjection.js";
 import { prepareComposerRecentReceipt } from "@/lib/composerRecent.js";
 import { useComposerClientNamespace } from "@/hooks/useServices.js";
 import {
+  V4_DRAFT_SCOPE_ROOT,
   readPendingTaskDraft,
   resolveComposerScope,
   composerScopeKey,
@@ -234,7 +235,11 @@ import { projectPendingGuideQueue } from "@/v4/pendingGuideProjection.js";
 import { ConversationQuotaBanner } from "@/v4/ConversationQuotaBanner.js";
 import { PendingCommandRecoveryBanner } from "@/v4/PendingCommandRecoveryBanner.js";
 import { AgentRuntimeExitBanner, useAgentRuntimeExitNotice } from "@/v4/AgentRuntimeExitBanner.js";
-import { ComposerStatusRow, ConversationStatusPanel } from "@/v4/ConversationStatusPanel.js";
+import {
+  ComposerStatusRow,
+  ConversationStatusPanel,
+  SelfhostConversationStatusPanel,
+} from "@/v4/ConversationStatusPanel.js";
 import { SessionSubscriptionErrorPanel } from "@/v4/SessionSubscriptionErrorPanel.js";
 import { ConversationTimeline } from "@/v4/ConversationTimeline.js";
 import type { ConversationLatestTurnSummary } from "@/v4/conversationTimelineLiveTail.js";
@@ -310,6 +315,8 @@ import { formatManagedWorktreeError } from "@/managed-worktrees/index.js";
 import { createConfigCommandBarrier } from "@/v4/configCommandBarrier.js";
 import { recordV4CommandAck } from "@/v4/commandAckObservability.js";
 import { pendingCommandRegistry } from "@/v4/pendingCommandRegistry.js";
+import { isPendingCommandForWorkspace } from "@/v4/pendingCommandWorkspace.js";
+import { commandEnvelopeSchema } from "@zcode/shared/zcode-protocol-v4";
 import type {
   ChatSearchResultHighlightRequest,
   ConversationFindMatchState,
@@ -752,11 +759,22 @@ export function SessionPane({
   const composerDraftGeneration = useZCodeSessionStore(
     (store) => store.getWorkspaceState(workspacePath, workspaceIdentity).draftFocusVersion,
   );
+  const [nativePendingDraft, setNativePendingDraft] = useState<string | null>(null);
   const pendingAtEntry = useMemo(() => {
-    if (sessionId !== null || newTaskComposerScope.projectId !== null) return null;
+    if (sessionId !== null) return null;
+    if (selfHostedBuild) {
+      const pendingCreates = pendingCommandRegistry.list(null).filter((entry) =>
+        entry.replay.kind === "input" && entry.replay.type === "createSession" &&
+        isPendingCommandForWorkspace(entry, workspacePath, workspaceIdentity) &&
+        (entry.clientContext?.projectId ?? null) === newTaskComposerScope.projectId,
+      );
+      const native = pendingCreates.find((entry) => entry.commandId === nativePendingDraft) ?? pendingCreates[0];
+      if (native) return native;
+    }
+    if (newTaskComposerScope.projectId !== null) return null;
     const pending = readPendingTaskDraft(newTaskComposerScope);
     return pending?.workspacePath === workspacePath && pending.commandId ? pending : null;
-  }, [sessionId, workspacePath, newTaskComposerScope, composerDraftGeneration]);
+  }, [sessionId, workspacePath, workspaceIdentity, newTaskComposerScope, composerDraftGeneration, nativePendingDraft]);
   const [resolvedDraftCommand, setResolvedDraftCommand] = useState<string | null>(null);
   const recoveringDraft =
     pendingAtEntry?.commandId !== resolvedDraftCommand ? pendingAtEntry : null;
@@ -796,10 +814,11 @@ export function SessionPane({
   const state = useConversationProjection(lease);
   const snapshot = state.snapshot;
   const writerConflict = snapshot?.meta.readOnlyReason === "activeWriter";
-  const readOnly = workspaceReadOnly || !worktreeAvailable || writerConflict;
+  const providerMismatch = snapshot?.meta.readOnlyReason === "modelProviderMismatch";
+  const readOnly = workspaceReadOnly || !worktreeAvailable || writerConflict || providerMismatch;
   const readOnlyReason =
     workspaceReadOnlyReason ??
-    (writerConflict
+    (providerMismatch ? intl.formatMessage({id:"chat.threadProviderMismatch"}) : writerConflict
       ? intl.formatMessage({ id: "chat.threadActiveWriter" })
       : worktreeAvailable
         ? undefined
@@ -2171,7 +2190,9 @@ export function SessionPane({
               await attempt();
             }
           : undefined;
-      if (commitCreatedTask) {
+      // SSH 原生接纳的 Thread 已可打开。等待侧栏索引会让别名目录的首发卡在草稿，
+      // 甚至无法看到该轮的首次审批。分组继续以实际 Thread ID 提交。
+      if (commitCreatedTask && !selfHostedBuild) {
         await commitCreatedTask(
           { taskId: createdSessionId, workspacePath, workspaceIdentity },
           commit,
@@ -2416,6 +2437,10 @@ export function SessionPane({
             // provider_not_ready 在 Host getClient 前确定性拒绝，CLI 不可能已经
             // admission。unknown 查询只保留待确认状态，因此必须在此明确清除被拒绝的记录。
             pendingCommandRegistry.rejectCommand(envelope.sessionId, envelope.commandId);
+          }
+          if (selfHostedBuild && error instanceof Error && error.name === "NativeDeliveryPending") {
+            pendingCommandRegistry.markNativeDeliveryPending(envelope);
+            if (envelope.sessionId === null) setNativePendingDraft(envelope.commandId);
           }
           recordV4CommandAck({
             type,
@@ -2702,7 +2727,7 @@ export function SessionPane({
   );
   const handleOpenSubagentDirectory = useCallback(
     (request: import("@/lib/workspaceSidePane.js").OpenSubagentDirectorySideTabRequest) => {
-      if (compactForRemoteControl) return;
+      if (compactForRemoteControl && !selfHostedBuild) return;
       onOpenSubagentDirectory?.({
         ...request,
         rootSessionId: request.rootSessionId ?? rootSessionId ?? request.parentSessionId,
@@ -3565,6 +3590,7 @@ export function SessionPane({
     if (!recoveringDraft?.commandId || !remoteAvailable) return;
     let current = true;
     const commandId = recoveringDraft.commandId;
+    if (selfHostedBuild) pendingCommandRegistry.markNativeDeliveryPending({ sessionId: null, commandId });
     const off = pendingCommandRegistry.subscribeResolution(commandId, (resolution) => {
       if (!current) return;
       if (
@@ -5067,9 +5093,11 @@ export function SessionPane({
   ensureDraftPrewarmConfigBeforeSendRef.current = ensureDraftPrewarmConfigBeforeSend;
 
   const followupModeSyncKeyRef = useRef<string | null>(null);
+  const nativeFollowupAvailable = snapshot?.availability.setFollowupMode.allowed;
   useEffect(() => {
     const targetSessionId = sessionId ?? prewarmSessionId;
     if (!targetSessionId || !appFollowupMode || snapshotRevision === null) return;
+    if (selfHostedBuild && nativeFollowupAvailable !== true) return;
     if (snapshotSessionId !== targetSessionId) return;
     if (snapshotFollowupMode === appFollowupMode) {
       followupModeSyncKeyRef.current = `${targetSessionId}:${appFollowupMode}:synced`;
@@ -5088,6 +5116,7 @@ export function SessionPane({
     appFollowupMode,
     configCommandBarrier,
     dispatchConfigCas,
+    nativeFollowupAvailable,
     prewarmSessionId,
     sessionId,
     snapshotFollowupMode,
@@ -5552,7 +5581,7 @@ export function SessionPane({
   const forkToWorktreeSupport = useWorktreeSupport(
     workspacePath,
     workspaceIdentity,
-    forkActionsEnabled && !compactForRemoteControl,
+    forkActionsEnabled && !compactForRemoteControl && !selfHostedBuild,
   );
   // 辅助对话复用主对话的注释能力：注释写入本 pane（子会话）自己的 composer，不再排除辅助对话。
   const selectionCommentSupported = useSelectionCommentSupport(
@@ -5727,7 +5756,7 @@ export function SessionPane({
     if (next.size === pendingSubagentStopsRef.current.size) return;
     pendingSubagentStopsRef.current = next;
     setPendingSubagentStops(next);
-  }, [sessionId, subagents.running]);
+  }, [sessionId, subagents.revision, subagents.running]);
   const panelPendingSubagentStops = useMemo(
     () =>
       new Set(
@@ -6232,7 +6261,17 @@ export function SessionPane({
     [],
   );
 
-  const recoverableCommand = recoverableCommands[0] ?? null;
+  const recoverableCommand = recoverableCommands.find((entry) => entry.recovery !== "nativeDeliveryPending" ||
+    (entry.sessionId === sessionId && (entry.sessionId !== null ||
+      (entry.clientContext?.projectId ?? null) === newTaskComposerScope.projectId))) ?? null;
+  const nativeDeliveryPending = recoverableCommand?.recovery === "nativeDeliveryPending";
+  const handleCheckNativeDelivery = useCallback(() => {
+    if (!recoverableCommand || recoverableCommand.recovery !== "nativeDeliveryPending") return;
+    const { commandId, sessionId: originalSessionId } = recoverableCommand;
+    void layer.queryCommands({ commands: [{ commandId, sessionId: originalSessionId }] })
+      .then((result) => pendingCommandRegistry.applyQuery(result))
+      .catch((error) => logger.warn("[v4-pending-command] Codex 发送结果仍待确认", error));
+  }, [layer, recoverableCommand]);
   const handleDismissPendingRecovery = useCallback(() => {
     if (!recoverableCommand) return;
     pendingCommandRegistry.dismissRecovery(
@@ -6242,6 +6281,18 @@ export function SessionPane({
   }, [recoverableCommand]);
   const handleResendPendingCommand = useCallback(() => {
     if (!recoverableCommand) return;
+    if (recoverableCommand.recovery === "nativeDeliveryPending") {
+      const { commandId, sessionId: originalSessionId, clientId, issuedAt, replay, clientContext } = recoverableCommand;
+      if (originalSessionId !== null || replay.kind !== "input" || replay.type !== "createSession") return;
+      // 原生发送结果未知时沿用旧命令身份。Gateway 只在已绑定的 Thread 尚未发出首轮时继续。
+      const envelope = commandEnvelopeSchema.parse({
+        commandId, clientId, issuedAt, sessionId: null, type: replay.type, payload: replay.payload,
+      });
+      void sendCommand(envelope, { projectId: clientContext?.projectId })
+        .then((ack) => pendingCommandRegistry.applyAck(envelope, ack))
+        .catch((error) => logger.warn("[v4-pending-command] Codex 首发仍待确认", error));
+      return;
+    }
     const replay = pendingCommandRegistry.consumeReplay({
       sessionId: recoverableCommand.sessionId,
       commandId: recoverableCommand.commandId,
@@ -6290,7 +6341,7 @@ export function SessionPane({
         // 新 command 已先写入 registry；本次 transport 失败仍可在下次连接继续对账。
         logger.warn("[v4-pending-command] 用户确认重发失败", error);
       });
-  }, [dispatchCommand, handleDraftSessionCreated, recoverableCommand, workspaceKey]);
+  }, [dispatchCommand, handleDraftSessionCreated, recoverableCommand, sendCommand, workspaceKey]);
 
   // subagent 右侧 child tab 是观察视图；复用普通 SessionPane 时
   // 若仍创建 composer，会让用户误以为可以直接向 child session 继续输入。
@@ -6298,8 +6349,25 @@ export function SessionPane({
     quotaBanner.state.visible &&
     !quotaBanner.dismissed &&
     (!projectedComposerError || quotaBanner.takesOverError || quotaBanner.state.blocksSubmit);
-  const statusCapsules = !isDraft ? (
-    <ConversationStatusPanel
+  const StatusPanel = selfHostedBuild ? SelfhostConversationStatusPanel : ConversationStatusPanel;
+  const writtenPlan = selfHostedBuild && sessionId && onOpenPlanDetail
+    ? snapshot?.rows.window.findLast((row) =>
+      row.kind === "toolCall" && row.toolName === "ExitPlanMode" && row.status === "success",
+    )
+    : undefined;
+  const sessionStatus = !isDraft ? (
+    <StatusPanel
+      key={selfHostedBuild ? `selfhost-status:${sessionId}` : undefined}
+      mobile={compactForRemoteControl}
+      sources={snapshot?.sources}
+      writtenPlan={sessionId && writtenPlan?.kind === "toolCall" && writtenPlan.output?.text
+        ? {
+          parentSessionId: sessionId,
+          toolCallId: writtenPlan.toolCallId,
+          markdown: writtenPlan.output.text,
+        }
+        : undefined}
+      onOpenPlan={onOpenPlanDetail ? handleOpenPlanDetail : undefined}
       workspacePath={workspacePath}
       gitCwd={sessionCwd}
       workspaceIdentity={workspaceIdentity}
@@ -6351,7 +6419,7 @@ export function SessionPane({
       pendingSubagentStops={panelPendingSubagentStops}
       onOpenSubagentSession={onOpenSubagentSession ? handleOpenSubagentSession : undefined}
       onOpenSubagentDirectory={
-        onOpenSubagentDirectory && !compactForRemoteControl
+        onOpenSubagentDirectory && (selfHostedBuild || !compactForRemoteControl)
           ? handleOpenSubagentDirectory
           : undefined
       }
@@ -6366,6 +6434,7 @@ export function SessionPane({
       }
     />
   ) : null;
+  const statusCapsules = selfHostedBuild ? null : sessionStatus;
 
 
   const pendingGuideProjection = snapshot ? projectPendingGuideQueue(snapshot.queue) : null;
@@ -6377,7 +6446,7 @@ export function SessionPane({
         key="conversation-queue"
         queue={visibleQueue}
         onDeleteItem={handleDeleteQueueItem}
-        onEditItem={composerEdit.beginQueueItemEdit}
+        onEditItem={selfHostedBuild ? undefined : composerEdit.beginQueueItemEdit}
         pendingEditQueueItemId={composerEdit.pendingLockQueueItemId}
         editorId={composerEdit.editorId}
         activeEditQueueItemId={
@@ -6388,9 +6457,9 @@ export function SessionPane({
         activeEditLockConfirmed={composerEdit.editSession?.lockConfirmed ?? false}
         onReleaseEditLock={composerEdit.releaseQueueItemEditLock}
         onFocusEditInComposer={composerEdit.requestEditFocus}
-        onSendNow={handleSendQueuedNow}
-        onMoveItem={handleReorderQueueItem}
-        onResume={handleResumeQueue}
+        onSendNow={selfHostedBuild ? undefined : handleSendQueuedNow}
+        onMoveItem={selfHostedBuild ? undefined : handleReorderQueueItem}
+        onResume={selfHostedBuild ? undefined : handleResumeQueue}
       />
     ) : null;
   const composerNode = readOnly ? null : (
@@ -6422,6 +6491,7 @@ export function SessionPane({
         composerSubmissionReady &&
         runtimeReady &&
         !recoveringDraft &&
+        !nativeDeliveryPending &&
         !modelSelectionPending
       }
       stageComposerContent={stageComposerContent}
@@ -6459,7 +6529,9 @@ export function SessionPane({
       modelSelectionState={modelSelectionRead.state}
       modelSelectionReload={modelSelectionRead.reload}
       modelSelectionRefresh={modelSelectionRead.refresh}
-      attachmentSessionId={effectiveSessionId}
+      // 自托管关闭会话预热后，草稿附件曾一直等待 sessionId。Gateway 按主机和 uploadId
+      // 定位上传事务，用现有草稿标记即可启动这条队列。
+      attachmentSessionId={effectiveSessionId ?? (selfHostedBuild ? V4_DRAFT_SCOPE_ROOT : null)}
       attachmentPut={attachmentPut}
       onRuntimeRestart={onRuntimeRestart}
       onRuntimeLifecycle={onRuntimeLifecycle}
@@ -6495,12 +6567,13 @@ export function SessionPane({
       onSelectThought={handleSelectThought}
       onSwitchMode={handleSwitchMode}
       onRecoverCustomModelSelection={handleRecoverCustomModelSelection}
-      onSendCompressionCommand={handleSendCompressionCommand}
+      onSendCompressionCommand={selfHostedBuild && snapshot?.availability.compact.allowed !== true
+        ? undefined : handleSendCompressionCommand}
       modelGuide={modelGuide}
       error={composerError}
       onDismissError={handleDismissComposerError}
       onRetryInitialization={handleRetrySubscribe}
-      onRetryError={retryConfigReadEnabled ? handleRetryConfigRead : undefined}
+      onRetryError={composerError?.code === "codex.historyRecoveryFailed" ? handleRetrySubscribe : retryConfigReadEnabled ? handleRetryConfigRead : undefined}
       onOpenModelSettings={handleOpenModelSettings}
       onOpenModelUpgrade={handleOpenModelUpgrade}
       modelConfigTarget={modelConfigTarget}
@@ -6593,7 +6666,7 @@ export function SessionPane({
           className="w-full min-w-0 break-words rounded-xl border border-border bg-surface px-4 py-3 text-ui-base text-foreground-subtle"
         >
           {readOnlyReason}
-          {writerConflict && (
+          {(writerConflict || providerMismatch) && (
             <Button
               variant="outline"
               size="sm"
@@ -6628,9 +6701,11 @@ export function SessionPane({
         <PendingCommandRecoveryBanner
           entry={recoverableCommand}
           onResend={
-            recoverableCommand.replay.kind === "input" ? handleResendPendingCommand : undefined
+            recoverableCommand.replay.kind === "input" && (!nativeDeliveryPending || recoverableCommand.sessionId === null)
+              ? handleResendPendingCommand : undefined
           }
-          onDismiss={handleDismissPendingRecovery}
+          onDismiss={nativeDeliveryPending ? undefined : handleDismissPendingRecovery}
+          onCheck={nativeDeliveryPending ? handleCheckNativeDelivery : undefined}
         />
       ) : null}
       {/* Bugfix: v4 权限/问答等待态只是 runtime 的阻塞交互，必须和 composer
@@ -6789,6 +6864,7 @@ export function SessionPane({
             compactForRemoteControl && "min-w-0",
           )}
         >
+          {selfHostedBuild && !shareSelectionPanelVisible ? sessionStatus : null}
           {sessionId && !compactForRemoteControl ? (
             <ConversationSharePopover
               key={sessionId}

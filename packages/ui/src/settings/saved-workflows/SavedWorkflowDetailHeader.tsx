@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { usePlatform } from "@/hooks/usePlatform.js";
 import {
   AutomationMoreHorizontalIcon,
   AutomationRunNowIcon,
@@ -53,6 +54,7 @@ export function SavedWorkflowDetailHeader({
   onDelete,
 }: SavedWorkflowDetailHeaderProps) {
   const { intl } = useZCodeIntl();
+  const canLaunch = !usePlatform().sshWorkspace;
   return (
     <div className="flex items-start justify-between gap-4">
       <div className="flex min-w-0 flex-col gap-1.5">
@@ -72,17 +74,19 @@ export function SavedWorkflowDetailHeader({
         {description ? <p className="text-ui-base text-foreground-subtle">{description}</p> : null}
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <Button
-          type="button"
-          size="lg"
-          data-icon="inline-start"
-          data-testid={TID_WORKFLOW_DETAIL_RUN}
-          disabled={busy || !entry}
-          onClick={onRun}
-        >
-          <AutomationRunNowIcon className="size-4" aria-hidden="true" />
-          {intl.formatMessage({ id: "workflows.hub.detail.run" })}
-        </Button>
+        {canLaunch && (
+          <Button
+            type="button"
+            size="lg"
+            data-icon="inline-start"
+            data-testid={TID_WORKFLOW_DETAIL_RUN}
+            disabled={busy || !entry}
+            onClick={onRun}
+          >
+            <AutomationRunNowIcon className="size-4" aria-hidden="true" />
+            {intl.formatMessage({ id: "workflows.hub.detail.run" })}
+          </Button>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button

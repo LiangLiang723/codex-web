@@ -3,10 +3,53 @@ import {
   zcodeSkillsReferenceCatalogResultSchema,
   zcodePluginsOverviewResultSchema,
   zcodePluginsListResultSchema,
+  type ZCodeMcpServerStatusSnapshot,
 } from "@zcode/shared";
 import { z } from "zod";
 import { type Gateway, type Message } from "./gateway.js";
-import { array, rec, str } from "./threadProjection.js";
+import { array, rec, str } from "./nativeValues.js";
+
+function projectMcpServerStatus(server: Message, updatedAt: string): ZCodeMcpServerStatusSnapshot {
+  const snapshot: Omit<ZCodeMcpServerStatusSnapshot, "status"> = {
+    transport: str(server.httpOrigin) ? "http" : "stdio",
+    toolCount: Object.keys(rec(server.tools)).length,
+    updatedAt,
+  };
+  switch (server.runtimeStatus) {
+    case "disabled":
+      return { ...snapshot, status: "disabled" };
+    case "starting":
+      return { ...snapshot, status: "connecting" };
+    case "notStarted":
+    case "cancelled":
+      return { ...snapshot, status: "disconnected" };
+  }
+  const error = str(server.toolsError);
+  const needsAuth =
+    server.runtimeStatus === "authenticationRequired" || server.authStatus === "notLoggedIn";
+  let failureKind: ZCodeMcpServerStatusSnapshot["failureKind"];
+  if (needsAuth) failureKind = "not_authenticated";
+  else if (error) failureKind = "tool_list_failed";
+  else if (server.runtimeStatus === "failed") failureKind = "connection_failed";
+  if (failureKind) {
+    return {
+      ...snapshot,
+      status: "failed",
+      failureKind,
+      ...(error ? { error } : {}),
+    };
+  }
+  // Codex 在无会话上下文时返回空运行状态，旧响应也可能省略该字段。
+  // 已初始化服务或工具目录能提供连接证据，单凭注册名称无法确认连接。
+  const discovered =
+    server.runtimeStatus == null &&
+    (snapshot.toolCount > 0 || server.serverInfo != null || server.serverCapabilities != null);
+  return {
+    ...snapshot,
+    status: server.runtimeStatus === "connected" || discovered ? "connected" : "disconnected",
+  };
+}
+
 export const codexRequest = async (g: Gateway, hostId: number, method: string, params: Message) => {
   const { value } = await g.request(
     "/api/selfhost/capability",
@@ -26,17 +69,37 @@ export async function extensionRequest(
   const call = (name: string, params: Message) => codexRequest(g, id, name, params);
   if (method === "getSkillReferenceCatalog" || method === "listSkills") {
     const reply = await call("skills/list", { cwds: [cwd] });
-    const batch = array(reply.data).find((group) => group.cwd === cwd) ?? array(reply.data)[0];
-    const skills = array(batch?.skills)
-      .map((item) => ({
-        id: str(item.path),
-        name: str(item.name),
-        description: str(item.description),
-        path: str(item.path),
-        scope: item.scope === "repo" ? "workspace" : item.scope === "plugin" ? "plugin" : "user",
-        enabled: item.enabled !== false,
-      }))
-      .filter((item) => item.id && item.name);
+    const batches = array(reply.data);
+    const batch =
+      batches.find((group) => group.cwd === cwd) ?? (batches.length === 1 ? batches[0] : undefined);
+    const skillsByPath = new Map(
+      array(batch?.skills).flatMap((item) => {
+        const path = str(item.path);
+        const name = str(item.name);
+        const pluginId = str(item.pluginId);
+        if (!path || !name) return [];
+        return [
+          [
+            path,
+            {
+              id: path,
+              name,
+              description: str(item.description),
+              path,
+              scope:
+                pluginId || item.scope === "plugin"
+                  ? "plugin"
+                  : item.scope === "repo"
+                    ? "workspace"
+                    : "user",
+              enabled: item.enabled === true,
+              ...(pluginId ? { pluginName: pluginId } : {}),
+            },
+          ],
+        ];
+      }),
+    );
+    const skills = [...skillsByPath.values()];
     if (method === "getSkillReferenceCatalog")
       return zcodeSkillsReferenceCatalogResultSchema.parse({
         authority: "workspace",
@@ -56,24 +119,18 @@ export async function extensionRequest(
   if (method === "setSkillEnabled")
     return call("skills/config/write", { path: p.path ?? p.skillId, enabled: p.enabled });
   if (method === "listMcpServerStatuses") {
-    const statuses: Message = {};
+    const statuses = new Map<string, ZCodeMcpServerStatusSnapshot>();
     let cursor: string | null = null;
     do {
       const page = await call("mcpServerStatus/list", { cursor, limit: 100 });
+      const updatedAt = new Date().toISOString();
       for (const server of array(page.data)) {
-        statuses[str(server.name)] = {
-          status: "connected",
-          toolCount: Object.keys(rec(server.tools)).length,
-          tools: server.tools,
-          resources: server.resources,
-          resourceTemplates: server.resourceTemplates,
-          updatedAt: new Date().toISOString(),
-          authStatus: server.authStatus,
-        };
+        const name = str(server.name);
+        if (name) statuses.set(name, projectMcpServerStatus(server, updatedAt));
       }
       cursor = str(page.nextCursor) || null;
     } while (cursor);
-    return { statuses };
+    return { statuses: Object.fromEntries(statuses) };
   }
   const mutation: Record<string, [string, Message]> = {
     addPluginMarketplace: ["marketplace/add", { source: p.source }],
@@ -135,70 +192,34 @@ export async function extensionRequest(
     source: str(e.marketplaceName) || "codex",
   }));
   if (method === "getPluginReferenceCatalog") {
-    // The original picker inspects conflict IDs immediately after the asynchronous catalog resolves.
-    // A marketplace summary and a reference entry are distinct ZCode protocol DTOs.
-    const enabled = entries.filter((item) => item.enabled);
-    const found = await call("skills/list", dirs);
-    const group = array(found.data).find((item) => item.cwd === cwd);
-    const skills = array(group?.skills).filter((skill) => skill.enabled !== false);
-    const plugins = enabled.map((item) => ({
-      pluginId: item.id,
-      name: item.name,
-      marketplace: item.marketplace,
-      description: item.description,
-      displayName: item.displayName,
-      enabled: true,
-      conflictingPluginIds: enabled
-        .filter((other) => other.id !== item.id && other.name === item.name)
-        .map((other) => other.id),
-      skillQualifiedNames: skills
-        .filter((skill) => {
-          const marker = "/plugins/cache/" + item.marketplace + "/" + item.name + "/";
-          return str(skill.path).includes(marker);
-        })
-        .map((skill) => str(skill.name))
-        .filter(Boolean)
-        .map((name) => (name.startsWith(item.name + ":") ? name : item.name + ":" + name)),
-      mcpServerNames: [] as string[],
-      subagentNames: [] as string[],
-    }));
-    await Promise.all(
-      Array.from({ length: Math.min(4, plugins.length) }, async (_, lane) => {
-        for (let index = lane; index < plugins.length; index += 4) {
-          const entry = plugins[index];
-          if (!entry) continue;
-          const market = markets.find((m) => m.name === entry.marketplace);
-          // Remote marketplaces may need an internet request for plugin/read. The composer
-          // uses their installed summary and locally discovered skills; the detail panel can query the catalog.
-          if (!market || !market.path) continue;
-          const key = JSON.stringify([id, cwd, entry.pluginId]);
-          const info = await cachedPluginDetail(g, key, () =>
-            call("plugin/read", {
-              pluginName: entry.name,
-              marketplacePath: market.path,
-            }),
-          );
-          const detail = rec(info.plugin ?? info);
-          entry.skillQualifiedNames = [
-            ...new Set([
-              ...entry.skillQualifiedNames,
-              ...array(detail.skills)
-                .filter((skill) => skill.enabled !== false && str(skill.name))
-                .map((skill) => {
-                  const name = str(skill.name);
-                  return name.startsWith(entry.name + ":") ? name : entry.name + ":" + name;
-                }),
-            ]),
-          ];
-          entry.mcpServerNames = Array.isArray(detail.mcpServers)
-            ? detail.mcpServers
-                .map((s) => (typeof s === "string" ? s : str(rec(s).name)))
-                .filter(Boolean)
-            : Object.keys(rec(detail.mcpServers));
-        }
-      }),
+    // 预读 Skills 或逐项详情曾让一个独立服务故障挡住整个加号。这里直接用原生
+    // 已安装摘要，以 Codex 的完整 pluginId 区分跨市场同名插件。
+    const byId = new Map(
+      entries.flatMap((item) =>
+        item.enabled && item.installed && item.id && item.name && item.marketplace
+          ? [
+              [
+                item.id,
+                {
+                  pluginId: item.id,
+                  name: item.name,
+                  marketplace: item.marketplace,
+                  description: item.description,
+                  displayName: item.displayName,
+                  enabled: true,
+                  conflictingPluginIds: [],
+                  skillQualifiedNames: [],
+                  mcpServerNames: [],
+                },
+              ],
+            ]
+          : [],
+      ),
     );
-    return zcodePluginsReferenceCatalogResultSchema.parse({ authority: "workspace", plugins });
+    return zcodePluginsReferenceCatalogResultSchema.parse({
+      authority: "workspace",
+      plugins: [...byId.values()],
+    });
   }
   if (method === "listPlugins")
     return zcodePluginsListResultSchema.parse({
@@ -252,19 +273,4 @@ export async function extensionRequest(
     })),
     capability: { supported: true },
   });
-}
-type DetailCache = Map<string, { expires: number; value: Promise<Message> }>;
-const details = new WeakMap<Gateway, DetailCache>();
-function cachedPluginDetail(gateway: Gateway, key: string, read: () => Promise<Message>) {
-  const cache = details.get(gateway) ?? new Map();
-  details.set(gateway, cache);
-  const existing = cache.get(key);
-  if (existing && existing.expires > Date.now()) return existing.value;
-  const value = read().catch((error) => {
-    cache.delete(key);
-    throw error;
-  });
-  if (cache.size > 400) cache.delete(cache.keys().next().value!);
-  cache.set(key, { expires: Date.now() + 60000, value });
-  return value;
 }

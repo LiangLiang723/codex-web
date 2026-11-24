@@ -1,0 +1,1149 @@
+diff --git a/server/utils/gateway/realtime/handlers/thread-events.ts b/server/utils/gateway/realtime/handlers/thread-events.ts
+--- a/server/utils/gateway/realtime/handlers/thread-events.ts
++++ b/server/utils/gateway/realtime/handlers/thread-events.ts
+@@ -5,6 +5,8 @@
+ import { threadBroker } from "../../runtime/broker";
+ import type { ThreadSubscriptionLease } from "../../runtime/controller-registry";
+ import { threadRuntimeEvents } from "../../runtime/thread-runtime-events";
++import { hostSessionEvents } from "../../runtime/host-session-events";
++import { hostLifecycleBus } from "../../state/host-events";
+ import { gatewayEventStore } from "../../state/gateway-events";
+ import { hostStore } from "../../state/hosts";
+ import { webThreadSource } from "../../../selfhost-thread-title";
+@@ -71,20 +73,13 @@
+   const key = threadTopicKey(input.hostId, input.threadId);
+   const pending = beginThreadActivation(peer, key);
+   if (pending.signal.aborted) return;
+-  // Capture the replay cursor before reading the snapshot. Events emitted while thread/read is in
+-  // flight are then replayed by subscribeThreadEvents; capturing it afterwards would pair an old
+-  // snapshot with a newer cursor and permanently skip those events.
+   const activationLease = threadBroker.retainThreadActivation(host, input.threadId);
+   // Codex RPC reads are not cancellable. Keep their lease until finally, then dispose; cancelling
+   // the browser owner prevents late attachment without closing a controller during thread/resume.
+   let leaseTransferred = false;
+   try {
+     const activationController = await activationLease.ready;
+-    if (pending.signal.aborted) return;
+-    // Authentication establishes the remote identity. Capture its shared cursor after acquiring
+-    // that lease, but before reading history, so another user's in-flight events are replayed.
+-    const lastEventId = gatewayEventStore.latestId(input.hostId, input.threadId);
+-    const eventEpoch = gatewayEventStore.epoch(input.hostId);
++    if (pending.signal.aborted) throw new Error("Thread activation was superseded");
+     const result = await threadBroker.openThread(
+       host,
+       input.threadId,
+@@ -92,7 +87,8 @@
+       activationController,
+       input.retryWriter,
+     );
+-    if (pending.signal.aborted) return;
++    if (pending.signal.aborted) throw new Error("Thread activation was superseded");
++    const { lastEventId, eventEpoch } = result;
+     const activeTurn = result.history.thread.turns.at(-1);
+     const recoveryEvent =
+       activeTurn?.status === "inProgress" && eventEpoch === gatewayEventStore.epoch(input.hostId)
+@@ -103,8 +99,6 @@
+       requestId: message.requestId,
+       hostId: input.hostId,
+       threadId: input.threadId,
+-      lastEventId,
+-      eventEpoch,
+       ...result,
+       recentEvents: recoveryEvent ? [...result.recentEvents, recoveryEvent] : result.recentEvents,
+     });
+@@ -114,6 +108,8 @@
+         controller: activationController,
+       });
+       leaseTransferred = true;
++    } else {
++      subscribeThreadEvents(peer, host, input.threadId, lastEventId, eventEpoch, undefined, true);
+     }
+     if (
+       result.readOnly !== true &&
+@@ -138,7 +134,12 @@
+   }
+ }
+ 
+-function latestModelRecoveryEvent(hostId: number, threadId: string, turnId: string, cursor: number) {
++function latestModelRecoveryEvent(
++  hostId: number,
++  threadId: string,
++  turnId: string,
++  cursor: number,
++) {
+   // 订阅游标会跳过已有事件。只带回活动轮次在该游标前仍有效的恢复通知，后续事件走原回放。
+   const latest = gatewayEventStore.list(hostId, threadId, 0, 500).findLast(({ id, event }) => {
+     if (id > cursor) return false;
+@@ -153,7 +154,9 @@
+           event.params.message.startsWith("Falling back from WebSockets to HTTPS transport")
+         );
+       case "timeline.item.delta":
+-        return event.turnId === turnId && event.channel !== "commandOutput" && event.delta.length > 0;
++        return (
++          event.turnId === turnId && event.channel !== "commandOutput" && event.delta.length > 0
++        );
+       case "timeline.item.upsert":
+         return (
+           event.item.turnId === turnId &&
+@@ -247,6 +250,7 @@
+     lease: ThreadSubscriptionLease;
+     controller: Awaited<ThreadSubscriptionLease["ready"]>;
+   },
++  readOnly = false,
+ ) {
+   const hostId = host.id;
+   const eventEpoch = gatewayEventStore.epoch(hostId);
+@@ -276,22 +280,36 @@
+   }
+   let sentThroughId = afterId;
+   let invalidated = false;
++  let interrupted = false;
+   let releaseSubscription = () => {};
++  const invalidate = (epoch: string) => {
++    if (invalidated) return;
++    invalidated = true;
++    sendRealtimePeerMessage(peer, {
++      type: "thread.events.gap",
++      hostId,
++      threadId,
++      afterId: sentThroughId,
++      lastEventId: gatewayEventStore.latestId(hostId, threadId),
++      eventEpoch: epoch,
++    });
++    releaseSubscription();
++  };
++  const stopClose = hostSessionEvents.onClosed(({ userId, hostId: closedHost }) => {
++    if (userId === state.userId && closedHost === hostId) interrupted = true;
++  });
++  const stopConnect = hostLifecycleBus.subscribe((event) => {
++    if (event.hostId !== hostId || event.status !== "connected") return;
++    const current = gatewayEventStore.epoch(hostId);
++    // 仅 SSH 重连时浏览器 WebSocket 还在线；一轮可能已经在离线窗口结束。
++    // 重新认证后一旦有可用主机，即使没有任何新轮次通知也主动让旧订阅补读。
++    if (interrupted || current !== eventEpoch) invalidate(current);
++  });
+   const sendOnce = (event: GatewayEvent) => {
++    if (interrupted || invalidated) return;
+     const currentEpoch = gatewayEventStore.epoch(hostId);
+     if (currentEpoch !== eventEpoch) {
+-      if (!invalidated) {
+-        invalidated = true;
+-        sendRealtimePeerMessage(peer, {
+-          type: "thread.events.gap",
+-          hostId,
+-          threadId,
+-          afterId: sentThroughId,
+-          lastEventId: gatewayEventStore.latestId(hostId, threadId),
+-          eventEpoch: currentEpoch,
+-        });
+-        releaseSubscription();
+-      }
++      invalidate(currentEpoch);
+       return;
+     }
+     if (event.id <= sentThroughId) return;
+@@ -300,7 +318,7 @@
+     // allocation for every token emitted during a long-running turn.
+     sentThroughId = event.id;
+     // Output windows are bounded once when entering the replay store, shared by every browser.
+-    sendRealtimePeerMessage(peer, { type: "thread.event", event });
++    sendRealtimePeerMessage(peer, { type: "thread.event", event, eventEpoch });
+   };
+ 
+   let replaying = true;
+@@ -310,32 +328,40 @@
+   // up with the active-status broadcast. Keep the shared subscription for the browser's lifetime;
+   // explicit unsubscribe, cache eviction, and WebSocket close release it through this one owner.
+   // Monitor-only subscriptions still release on idle; they have no browser reading the thread.
+-  const upstreamLease =
+-    activation?.lease ?? threadBroker.retainUpstreamSubscription(host, threadId, "browser");
+-
+-  const unsubscribe = threadRuntimeEvents.subscribe(
+-    hostId,
+-    threadId,
+-    bindGatewayUser((event) => {
+-      if (replaying) {
+-        liveQueue.push(event);
+-        return;
+-      }
+-      sendOnce(event);
+-    }),
+-  );
++  const upstreamLease = readOnly
++    ? undefined
++    : (activation?.lease ?? threadBroker.retainUpstreamSubscription(host, threadId, "browser"));
++
++  const unsubscribe = readOnly
++    ? undefined
++    : threadRuntimeEvents.subscribe(
++        hostId,
++        threadId,
++        bindGatewayUser((event) => {
++          if (replaying) {
++            liveQueue.push(event);
++            return;
++          }
++          sendOnce(event);
++        }),
++      );
+   releaseSubscription = () => {
+-    unsubscribe();
+-    upstreamLease.release();
++    stopClose();
++    stopConnect();
++    unsubscribe?.();
++    upstreamLease?.release();
+     if (state.threadUnsubscribers.get(key) === releaseSubscription) {
+       state.threadUnsubscribers.delete(key);
+     }
+   };
+   state.threadUnsubscribers.set(key, releaseSubscription);
++  if (upstreamLease === undefined) return;
+   void runPeerScoped(peer, () =>
+     (activation === undefined
+       ? upstreamLease.ready
+-      : activation.controller.ensureSubscribed()
++      : activation.controller.isSubscribed()
++        ? Promise.resolve()
++        : activation.controller.ensureSubscribed()
+     ).catch((error: unknown) => {
+       recordGatewayError(hostId, threadId, error, "Failed to subscribe thread upstream");
+       if (state.threadUnsubscribers.get(key) === releaseSubscription) releaseSubscription();
+diff --git a/server/utils/gateway/runtime/active-writer-conflict.ts b/server/utils/gateway/runtime/active-writer-conflict.ts
+--- a/server/utils/gateway/runtime/active-writer-conflict.ts
++++ b/server/utils/gateway/runtime/active-writer-conflict.ts
+@@ -1,11 +1,13 @@
++import type { ThreadReadOnlyReason } from "~~/shared/types";
++import { recordFromUnknown } from "~~/shared/utils/records";
+ import { CodexRpcError } from "../http/errors";
+ 
+ const activeWriterMessage = /^thread [0-9a-f-]+ already has an active writer$/i;
+ 
+-export function isActiveWriterConflict(error: unknown): error is CodexRpcError {
+-  return (
+-    error instanceof CodexRpcError &&
+-    error.rpcCode === -32600 &&
+-    activeWriterMessage.test(error.message)
+-  );
++export function threadReadOnlyReason(error: unknown): ThreadReadOnlyReason | undefined {
++  if (!(error instanceof CodexRpcError) || error.rpcCode !== -32600) return undefined;
++  if (recordFromUnknown(error.rpcData)?.type === "modelProviderMismatch") {
++    return "modelProviderMismatch";
++  }
++  return activeWriterMessage.test(error.message) ? "activeWriter" : undefined;
+ }
+diff --git a/server/utils/gateway/runtime/open-snapshot-events.ts b/server/utils/gateway/runtime/open-snapshot-events.ts
+--- a/server/utils/gateway/runtime/open-snapshot-events.ts
++++ b/server/utils/gateway/runtime/open-snapshot-events.ts
+@@ -11,6 +11,7 @@
+ import { retainSnapshotHistory } from "./snapshot-history";
+ import { SERVER_TURN_CACHE_LIMIT } from "~~/shared/config";
+ import { mergeTurnItems } from "~~/shared/thread-history/item-merge";
++import { sameItem } from "~~/shared/thread-history/item-identity";
+ 
+ export function applyEventToOpenSnapshot(snapshot: ThreadOpenSnapshot | null, event: AgentEvent) {
+   if (snapshot === null) {
+@@ -105,18 +106,16 @@
+     const item = recordFromUnknown(gatewayEvent.event.item);
+     return item?.type === "userMessage" && retainedTurnIds.has(String(item.turnId)) ? [item] : [];
+   });
+-  const knownUserIds = new Set(
+-    snapshot.history.thread.turns.flatMap((turn) =>
+-      turn.items.filter((item) => item.type === "userMessage").map((item) => item.id),
+-    ),
++  const knownUsers = snapshot.history.thread.turns.flatMap((turn) =>
++    turn.items.filter((item) => item.type === "userMessage"),
+   );
+   // The page is authoritative, including text updated by deltas. Replaying an earlier item/start
+   // without its deltas regresses that text. Only fill absent user rows omitted by summary pages;
+   // ordinary live notifications continue through the controller after this synchronous commit.
+-  return [...previousMessages, ...retainedMessages].reduce((current, item) => {
+-    const id = idFromUnknown(item.id);
+-    if (knownUserIds.has(id)) return current;
+-    knownUserIds.add(id);
++  // 补录和原生条目可能有同一 clientId。优先匹配原生记录，避免把已确认 ID 改回补录 ID。
++  return [...previousMessages, ...retainedMessages].toReversed().reduce((current, item) => {
++    if (knownUsers.some((known) => sameItem(known, item))) return current;
++    knownUsers.push(item);
+     return applyEventToOpenSnapshot(current, { type: "timeline.item.upsert", item }) ?? current;
+   }, snapshot);
+ }
+@@ -134,8 +133,13 @@
+       };
+     case "notice":
+       return event.source === "thread/name/updated"
+-        ? { ...snapshot, thread: { ...snapshot.thread, name: typeof event.params.threadName === "string"
+-          ? event.params.threadName : null } }
++        ? {
++            ...snapshot,
++            thread: {
++              ...snapshot.thread,
++              name: typeof event.params.threadName === "string" ? event.params.threadName : null,
++            },
++          }
+         : snapshot;
+     case "error.reported":
+     case "gateway.error":
+diff --git a/server/utils/gateway/runtime/thread-history-reader.ts b/server/utils/gateway/runtime/thread-history-reader.ts
+--- a/server/utils/gateway/runtime/thread-history-reader.ts
++++ b/server/utils/gateway/runtime/thread-history-reader.ts
+@@ -1,14 +1,22 @@
+-import type { AppServerThread, HostRecord, ThreadTimelineItem } from "~~/shared/types";
++import type {
++  AppServerThread,
++  AppServerTimelinePage,
++  AppServerTurn,
++  HostRecord,
++} from "~~/shared/types";
+ import {
++  parseThreadItemsReadResponse,
++  parseThreadReadResult,
+   parseThreadTimelinePage,
+-  parseThreadItemsReadResponse,
++  parseThreadTurnsPage,
+ } from "~~/shared/runtime/app-server";
+-import { timelinePageItemsForTurn } from "~~/shared/thread-history/app-server-timeline";
++import { INITIAL_TIMELINE_PAGE_LIMIT, SERVER_TURN_CACHE_LIMIT } from "~~/shared/config";
++import { threadSnapshotStore } from "../state/thread-snapshots";
+ import { threadTimelinePageStore } from "../state/thread-timeline-pages";
+ import type { ControllerRegistry } from "./controller-registry";
+ import { DEFAULT_TIMELINE_PAGE_LIMIT } from "./types";
+-import { INITIAL_TIMELINE_PAGE_LIMIT } from "~~/shared/config";
+-import type { RecoveredTurnTail } from "./thread-tail-recovery";
++
++const legacyCursorPrefix = "legacy-turns:";
+ 
+ export class ThreadHistoryReader {
+   constructor(private readonly registry: ControllerRegistry) {}
+@@ -18,7 +26,9 @@
+     thread: AppServerThread,
+     limit = INITIAL_TIMELINE_PAGE_LIMIT,
+   ) {
+-    return this.fetchTimelinePage(host, thread.id, null, limit);
++    return thread.historyMode === "legacy"
++      ? this.fetchLegacyPage(host, thread.id, null, limit)
++      : this.fetchTimelinePage(host, thread.id, null, limit);
+   }
+ 
+   async listTimelinePage(
+@@ -27,8 +37,25 @@
+     cursor: string | null,
+     limit?: number,
+   ) {
+-    // Official history is independent of our disposable snapshot. A reader may expand an old
+-    // Turn after its idle cache expired; authorization/existence still belong to Host/RPC.
++    // 老历史使用完整轮次的原生游标。编码格式使缓存失效后也能继续翻页。
++    if (cursor?.startsWith(legacyCursorPrefix)) {
++      return this.fetchLegacyPage(host, threadId, cursor, limit);
++    }
++    if (cursor === null) {
++      const client = await this.registry.getHostClient(host);
++      const cached = threadSnapshotStore.get(host.id, threadId);
++      const thread =
++        cached?.thread ??
++        (
++          await client.request(
++            "thread/read",
++            { threadId, includeTurns: false },
++            120_000,
++            parseThreadReadResult,
++          )
++        ).thread;
++      return this.loadInitialTimelinePage(host, thread, limit ?? DEFAULT_TIMELINE_PAGE_LIMIT);
++    }
+     return this.fetchTimelinePage(host, threadId, cursor, limit);
+   }
+ 
+@@ -42,25 +69,6 @@
+       120_000,
+       parseThreadItemsReadResponse,
+     );
+-  }
+-
+-  async recoverLatestTurnTail(
+-    host: HostRecord,
+-    threadId: string,
+-    turnId: string,
+-  ): Promise<RecoveredTurnTail> {
+-    const latestPage = await this.fetchTimelinePage(host, threadId, null);
+-    const tailItems: ThreadTimelineItem[] = timelinePageItemsForTurn(latestPage, turnId);
+-    const complete = latestPage.data.some(
+-      (entry) => entry.type === "turnStarted" && entry.turnId === turnId,
+-    );
+-
+-    return {
+-      turnId,
+-      olderUserItems: [],
+-      tailItems,
+-      complete,
+-    };
+   }
+ 
+   private async fetchTimelinePage(
+@@ -81,4 +89,64 @@
+     threadTimelinePageStore.set(host.id, threadId, cursor, limit, page);
+     return page;
+   }
++
++  private async fetchLegacyPage(
++    host: HostRecord,
++    threadId: string,
++    cursor: string | null,
++    limit = DEFAULT_TIMELINE_PAGE_LIMIT,
++  ) {
++    const pageLimit = Math.min(limit, SERVER_TURN_CACHE_LIMIT);
++    const client = await this.registry.getHostClient(host);
++    const cached = threadTimelinePageStore.get(host.id, threadId, cursor, pageLimit);
++    if (cached !== null) return cached;
++    const turns = await client.request(
++      "thread/turns/list",
++      {
++        threadId,
++        ...(cursor === null ? {} : { cursor: cursor.slice(legacyCursorPrefix.length) }),
++        limit: pageLimit,
++        sortDirection: "desc",
++        itemsView: "full",
++      },
++      120_000,
++      parseThreadTurnsPage,
++    );
++    const page = legacyTimelinePage(turns.data, turns.nextCursor);
++    threadTimelinePageStore.set(host.id, threadId, cursor, pageLimit, page);
++    return page;
++  }
+ }
++
++function legacyTimelinePage(turns: AppServerTurn[], cursor: string | null): AppServerTimelinePage {
++  const data: AppServerTimelinePage["data"] = [];
++  // 同一个 legacy 轮次始终整轮读取；位置只用于所处页的时间顺序。
++  for (const turn of turns.toReversed()) {
++    data.push({
++      type: "turnStarted",
++      turnId: turn.id,
++      startedAt: turn.startedAt,
++      position: data.length,
++    });
++    for (const item of turn.items) {
++      data.push({ type: "item", turnId: turn.id, item, position: data.length });
++    }
++    if (turn.status !== "inProgress") {
++      data.push({
++        type: "turnCompleted",
++        turnId: turn.id,
++        status: turn.status,
++        error: turn.error,
++        startedAt: turn.startedAt,
++        completedAt: turn.completedAt,
++        durationMs: turn.durationMs,
++        position: data.length,
++      });
++    }
++  }
++  return {
++    data,
++    nextCursor: cursor === null ? null : legacyCursorPrefix + cursor,
++    activeRealtimeSessionAtPageStart: null,
++  };
++}
+diff --git a/server/utils/gateway/runtime/thread-history-refresh.ts b/server/utils/gateway/runtime/thread-history-refresh.ts
+new file mode 100644
+--- /dev/null
++++ b/server/utils/gateway/runtime/thread-history-refresh.ts
+@@ -0,0 +1,149 @@
++import type { AgentEvent } from "~~/shared/agent/events";
++import { SERVER_TURN_CACHE_LIMIT } from "~~/shared/config";
++import { applyCanonicalEventToHistory } from "~~/shared/thread-history/canonical-events";
++import { sameItem } from "~~/shared/thread-history/item-identity";
++import { mergeThreadItem, mergeTurnItems } from "~~/shared/thread-history/item-merge";
++import type {
++  ThreadHistoryItem,
++  ThreadHistoryState,
++  ThreadHistoryTurn,
++} from "~~/shared/thread-history/types";
++import { recordFromUnknown } from "~~/shared/utils/records";
++import { gatewayEventStore } from "../state/gateway-events";
++import { threadSnapshotStore } from "../state/thread-snapshots";
++import { applyEventToOpenSnapshot } from "./open-snapshot-events";
++import { threadRuntimeEvents } from "./thread-runtime-events";
++import type { ThreadOpenSnapshot } from "./types";
++
++export type ThreadHistoryRefresh = ReturnType<typeof captureThreadHistoryRefresh>;
++
++export function captureThreadHistoryRefresh(hostId: number, threadId: string) {
++  const epoch = gatewayEventStore.epoch(hostId);
++  const currentEpoch = () => epoch === gatewayEventStore.epoch(hostId);
++  const previous = threadSnapshotStore.get(hostId, threadId);
++  const touched = new Set<string>();
++  const metadata = new Map<string, AgentEvent>();
++  let coldHistory: ThreadHistoryState | null = null;
++  const reduceCold = (event: AgentEvent) => {
++    coldHistory = applyCanonicalEventToHistory(coldHistory, null, threadId, event);
++    if (coldHistory !== null && coldHistory.thread.turns.length > SERVER_TURN_CACHE_LIMIT) {
++      coldHistory.thread.turns = coldHistory.thread.turns.slice(-SERVER_TURN_CACHE_LIMIT);
++    }
++  };
++  if (previous === null) {
++    for (const { event } of gatewayEventStore.list(hostId, threadId, 0, 500)) reduceCold(event);
++  }
++  const dispose = threadRuntimeEvents.subscribe(hostId, threadId, ({ event }) => {
++    if (!currentEpoch()) return;
++    const turnId = eventTurnId(event);
++    if (turnId !== undefined) touched.add(turnId);
++    if (previous === null) reduceCold(event);
++    if (
++      event.type === "thread.settings.updated" ||
++      (event.type === "notice" && event.source === "thread/name/updated")
++    ) {
++      metadata.set(event.type, event);
++    }
++  });
++  return {
++    assertCurrent() {
++      if (!currentEpoch()) throw new Error("Codex history read was superseded by a host reconnect");
++    },
++    dispose,
++    merge(page: ThreadHistoryTurn[]) {
++      const live =
++        (previous === null
++          ? coldHistory
++          : (threadSnapshotStore.get(hostId, threadId) ?? previous).history
++        )?.thread.turns ?? [];
++      const liveTurns = new Map(
++        live
++          .filter((turn) => turn.status === "inProgress" || touched.has(String(turn.id)))
++          .map((turn) => [String(turn.id), turn]),
++      );
++      const turns = page.map((persisted) => {
++        const id = String(persisted.id);
++        const inFlight = liveTurns.get(id);
++        liveTurns.delete(id);
++        return inFlight === undefined ? persisted : mergeOpenTurn(persisted, inFlight);
++      });
++      return [...turns, ...liveTurns.values()];
++    },
++    applyMetadata(snapshot: ThreadOpenSnapshot) {
++      for (const event of metadata.values())
++        snapshot = applyEventToOpenSnapshot(snapshot, event) ?? snapshot;
++      return snapshot;
++    },
++  };
++}
++
++function eventTurnId(event: AgentEvent): string | undefined {
++  switch (event.type) {
++    case "turn.started":
++    case "turn.completed":
++      return event.turn.id == null ? undefined : String(event.turn.id);
++    case "timeline.item.upsert":
++    case "serverRequest.requested": {
++      const turnId = recordFromUnknown(event.item)?.turnId;
++      return typeof turnId === "string" ? turnId : undefined;
++    }
++    case "timeline.item.delta":
++    case "timeline.item.reasoningSummaryPartAdded":
++    case "turn.diff.updated":
++    case "turn.plan.updated":
++    case "turn.usage.upsert":
++      return String(event.turnId);
++    default:
++      return undefined;
++  }
++}
++
++function mergeOpenTurn(persisted: ThreadHistoryTurn, live: ThreadHistoryTurn): ThreadHistoryTurn {
++  const terminal = ["completed", "interrupted", "failed"].includes(String(persisted.status));
++  const source = terminal ? persisted : live;
++  return {
++    ...persisted,
++    ...source,
++    startedAt: source.startedAt ?? persisted.startedAt,
++    itemsView: persisted.itemsView === "full" ? "full" : (source.itemsView ?? persisted.itemsView),
++    items: mergeTurnItems(
++      persisted.items ?? [],
++      (live.items ?? []).map((item) => {
++        const stored = persisted.items?.find((candidate) => sameItem(candidate, item));
++        return stored === undefined ? item : mergeOpenItem(stored, item, terminal);
++      }),
++    ),
++  };
++}
++
++function mergeOpenItem(stored: ThreadHistoryItem, live: ThreadHistoryItem, terminal: boolean) {
++  const completed = terminal || stored.completedAtMs != null || stored.status === "completed";
++  if (completed || stored.type === "userMessage") return mergeThreadItem(live, stored);
++  if (live.completedAtMs != null || live.status === "completed")
++    return mergeThreadItem(stored, live);
++
++  // 同一个条目分别有原生页和实时累计两份状态。只选已知前缀的较新累计值，
++  // 避免把页中已经持久化的增量再次拼接。条目完成通知补齐尚无起点的旧流。
++  const merged = mergeThreadItem(live, stored);
++  return {
++    ...merged,
++    text: newerPrefix(stored.text, live.text),
++    aggregatedOutput: newerPrefix(stored.aggregatedOutput, live.aggregatedOutput),
++    summary: newerParts(stored.summary, live.summary),
++    ...(stored.type === "reasoning" ? { content: newerParts(stored.content, live.content) } : {}),
++  };
++}
++
++function newerPrefix<T>(stored: T, live: T): T {
++  return stored == null ||
++    (typeof live === "string" && typeof stored === "string" && live.startsWith(stored))
++    ? live
++    : stored;
++}
++
++function newerParts(stored: unknown[] | undefined, live: unknown[] | undefined) {
++  if (!stored || !live) return stored ?? live;
++  return Array.from({ length: Math.max(stored.length, live.length) }, (_, index) =>
++    newerPrefix(stored[index], live[index]),
++  );
++}
+diff --git a/server/utils/gateway/runtime/thread-open-service.ts b/server/utils/gateway/runtime/thread-open-service.ts
+--- a/server/utils/gateway/runtime/thread-open-service.ts
++++ b/server/utils/gateway/runtime/thread-open-service.ts
+@@ -1,4 +1,4 @@
+-import type { AppServerThread, HostRecord } from "~~/shared/types";
++import type { AppServerThread, HostRecord, ThreadReadOnlyReason } from "~~/shared/types";
+ import type { AppServerTimelinePage } from "~~/shared/runtime/app-server";
+ import { INITIAL_TIMELINE_PAGE_LIMIT } from "~~/shared/config";
+ import {
+@@ -16,24 +16,23 @@
+ import type { ThreadController } from "./thread-controller";
+ import { runtimeLog } from "./runtime-log";
+ import { threadRuntimeEvents } from "./thread-runtime-events";
+-import type { ThreadOpenSnapshot } from "./types";
++import { DEFAULT_TIMELINE_PAGE_LIMIT, type ThreadOpenSnapshot } from "./types";
+ import { preserveCanonicalUserMessagesInOpenSnapshot } from "./open-snapshot-events";
+ import { currentGatewayUserId } from "../state/memory";
+ import { parseThreadReadResult, parseThreadStartResult } from "~~/shared/runtime/app-server";
+ import { gatewayThreadFromAppServer } from "../protocol/gateway-thread";
+ import type { ThreadHistoryReader } from "./thread-history-reader";
+-import { installRecoveredTurnTail } from "./thread-tail-recovery";
+ import { timelinePageToTurns } from "~~/shared/thread-history/app-server-timeline";
+ import { threadActivationHistory } from "../protocol/thread-activation-history";
+ import { retainSnapshotHistory } from "./snapshot-history";
+-import { isActiveWriterConflict } from "./active-writer-conflict";
++import { threadReadOnlyReason } from "./active-writer-conflict";
++import { captureThreadHistoryRefresh, type ThreadHistoryRefresh } from "./thread-history-refresh";
+ 
+ export class ThreadOpenService {
+   private readonly pendingRefreshes = new Map<
+     string,
+     {
+       limit: number;
+-      recoverLatestTail: boolean;
+       retryWriter: boolean;
+       promise: Promise<ReturnTypeResult>;
+     }
+@@ -52,31 +51,16 @@
+     retryWriter = false,
+   ) {
+     const cachedSnapshot = threadSnapshotStore.get(host.id, threadId);
+-    if (cachedSnapshot && (!retryWriter || cachedSnapshot.readOnly !== true)) {
+-      if (cachedSnapshot.readOnly === true) {
+-        return this.snapshotResult(host, threadId, cachedSnapshot, limit);
+-      }
+-      if (cachedSnapshot.historyTrimmed === true) {
++    if (
++      cachedSnapshot &&
++      (cachedSnapshot.readOnly === true
++        ? !retryWriter
++        : activationController === undefined || activationController.isSubscribed())
++    ) {
++      if (cachedSnapshot.historyTrimmed === true && cachedSnapshot.readOnly !== true) {
+         return this.refreshThreadState(host, threadId, limit, activationController);
+       }
+-      if (
+-        activationController !== undefined &&
+-        !activationController.isSubscribed() &&
+-        this.isThreadRunning(host.id, threadId)
+-      ) {
+-        runtimeLog("thread cache continuity refresh", {
+-          hostId: host.id,
+-          threadId,
+-        });
+-        return this.refreshThreadState(host, threadId, limit, activationController, true);
+-      }
+-      // Runtime notifications are projected into this snapshot as they arrive, including the
+-      // active Turn's cumulative output and status. Re-reading a running thread here would make
+-      // every browser activation call repeat the timeline scan. Only an absent cache requires
+-      // initial history I/O; reconnect gaps use the authoritative refresh path.
+-      // A timeline page can consist entirely of one running Turn. Cache validity is maintained
+-      // by the subscription/recovery lifecycle, never by comparing a Turn count with an entry
+-      // limit. Historical expansion uses its official cursor instead of reopening the thread.
++      // 缓存只证明历史存在；已有原生订阅才证明当前 controller 持有写入资格。
+       return this.snapshotResult(host, threadId, cachedSnapshot, limit);
+     }
+ 
+@@ -86,7 +70,14 @@
+       limit,
+       retryWriter,
+     });
+-    return this.refreshThreadState(host, threadId, limit, activationController, false, retryWriter);
++    // 活动轮次从新 controller 恢复时沿用原有较宽的读取范围，只读取一次原生页。
++    const refreshLimit =
++      cachedSnapshot !== null &&
++      cachedSnapshot.readOnly !== true &&
++      this.isThreadRunning(host.id, threadId)
++        ? Math.max(limit, DEFAULT_TIMELINE_PAGE_LIMIT)
++        : limit;
++    return this.refreshThreadState(host, threadId, refreshLimit, activationController, retryWriter);
+   }
+ 
+   startedThreadResult(host: HostRecord, rawResult: unknown) {
+@@ -140,7 +131,6 @@
+     threadId: string,
+     limit = INITIAL_TIMELINE_PAGE_LIMIT,
+     activationController?: ThreadController,
+-    recoverLatestTail = false,
+     retryWriter = false,
+   ): Promise<ReturnTypeResult> {
+     const key = refreshKey(host.id, threadId);
+@@ -150,22 +140,11 @@
+       // narrower one. Wait for the narrow refresh to settle, then retry so the server cache
+       // monotonically expands to the requested page depth instead of racing two snapshots into the
+       // same store entry.
+-      if (
+-        pending.limit >= limit &&
+-        (!recoverLatestTail || pending.recoverLatestTail) &&
+-        (!retryWriter || pending.retryWriter)
+-      ) {
++      if (pending.limit >= limit && (!retryWriter || pending.retryWriter)) {
+         return pending.promise;
+       }
+       await pending.promise;
+-      return this.refreshThreadState(
+-        host,
+-        threadId,
+-        limit,
+-        activationController,
+-        recoverLatestTail,
+-        retryWriter,
+-      );
++      return this.refreshThreadState(host, threadId, limit, activationController, retryWriter);
+     }
+ 
+     const promise = this.performThreadStateRefresh(
+@@ -173,10 +152,9 @@
+       threadId,
+       limit,
+       activationController,
+-      recoverLatestTail,
+       retryWriter,
+     );
+-    this.pendingRefreshes.set(key, { limit, recoverLatestTail, retryWriter, promise });
++    this.pendingRefreshes.set(key, { limit, retryWriter, promise });
+     try {
+       return await promise;
+     } finally {
+@@ -214,48 +192,34 @@
+     threadId: string,
+     limit: number,
+     activationController?: ThreadController,
+-    recoverLatestTail = false,
+     retryWriter = false,
+   ) {
+-    const loaded = await this.loadRemoteOpenSnapshot(
+-      host,
+-      threadId,
+-      activationController,
+-      limit,
+-      retryWriter,
+-    );
+-    let { snapshot } = loaded;
+-    if (recoverLatestTail) {
+-      const latestTurn = snapshot.history.thread.turns.at(-1);
+-      const latestTurnId = latestTurn?.id === undefined ? "" : String(latestTurn.id);
+-      if (latestTurnId !== "") {
+-        const recovered = await this.historyReader.recoverLatestTurnTail(
+-          host,
+-          threadId,
+-          latestTurnId,
+-        );
+-        snapshot = installRecoveredTurnTail(snapshot, recovered);
+-        if (activationController === undefined)
+-          threadSnapshotStore.set(host.id, threadId, snapshot);
+-        else activationController.setOpenSnapshot(snapshot);
+-      }
+-    }
+-    const status = runtimeStatusFromSnapshotState(snapshot.thread, snapshot.history) ?? "completed";
+-    // The refresh event is the backend's canonical correction after reconnect
+-    // or stale running scans; clients must converge on this status.
+-    threadRuntimeEvents.record(host.id, threadId, { type: "thread.status.changed", status });
+-    const recentEvents = gatewayEventStore.list(host.id, threadId, 0, 200);
+-    return {
+-      thread: gatewayThreadFromAppServer(host.id, snapshot.thread),
+-      history: activationHistory(snapshot, host.id, threadId, limit),
+-      runtimeStatus: runtimeStatusFromThreadState(snapshot.thread, snapshot.history, recentEvents),
+-      project: projectStore.ensureForPath(host.id, snapshot.thread.cwd),
+-      oldestTimelineCursor: snapshot.oldestTimelineCursor,
+-      threadSettings: snapshot.threadSettings,
+-      tokenUsage: latestTokenUsageFromEvents(recentEvents) ?? snapshot.tokenUsage,
+-      recentEvents: snapshotRecentEvents(host.id, threadId),
+-      readOnly: snapshot.readOnly === true,
+-    };
++    await this.registry.getHostClient(host);
++    const capture = captureThreadHistoryRefresh(host.id, threadId);
++    try {
++      const loaded = await this.loadRemoteOpenSnapshot(
++        host,
++        threadId,
++        capture,
++        activationController,
++        limit,
++        retryWriter,
++      );
++      const { snapshot } = loaded;
++      capture.assertCurrent();
++      const current = threadSnapshotStore.get(host.id, threadId) ?? snapshot;
++      const status = runtimeStatusFromSnapshotState(current.thread, current.history) ?? "completed";
++      // Reconcile monitor state only after the persisted page and in-flight changes agree.
++      threadRuntimeEvents.record(host.id, threadId, { type: "thread.status.changed", status });
++      return this.snapshotResult(
++        host,
++        threadId,
++        threadSnapshotStore.get(host.id, threadId) ?? current,
++        limit,
++      );
++    } finally {
++      capture.dispose();
++    }
+   }
+ 
+   private snapshotResult(
+@@ -281,12 +245,17 @@
+       tokenUsage: latestTokenUsageFromEvents(recentEvents) ?? snapshot.tokenUsage,
+       recentEvents: snapshotRecentEvents(host.id, threadId),
+       readOnly: snapshot.readOnly === true,
++      ...(snapshot.readOnlyReason ? { readOnlyReason: snapshot.readOnlyReason } : {}),
++      // 实时归约和发布都在同一事件循环内完成。同步取快照与游标，后续通知走订阅回放。
++      lastEventId: gatewayEventStore.latestId(host.id, threadId),
++      eventEpoch: gatewayEventStore.epoch(host.id),
+     };
+   }
+ 
+   private async loadRemoteOpenSnapshot(
+     host: HostRecord,
+     threadId: string,
++    capture: ThreadHistoryRefresh,
+     activationController?: ThreadController,
+     limit = INITIAL_TIMELINE_PAGE_LIMIT,
+     retryWriter = false,
+@@ -296,14 +265,16 @@
+       try {
+         resumed = await activationController.resumeForHistory();
+       } catch (error: unknown) {
+-        if (!isActiveWriterConflict(error)) throw error;
+-        runtimeLog("thread opened read-only because another app-server owns its writer", {
++        const reason = threadReadOnlyReason(error);
++        if (reason === undefined) throw error;
++        runtimeLog("thread opened read-only after a native resume rejection", {
+           hostId: host.id,
+           hostName: host.name,
+           threadId,
+           retryWriter,
++          reason,
+         });
+-        return this.readStoredOpenSnapshot(host, threadId, limit, true);
++        return this.readStoredOpenSnapshot(host, threadId, capture, limit, reason);
+       }
+       const timelinePage = await this.historyReader.loadInitialTimelinePage(
+         host,
+@@ -315,22 +286,23 @@
+         resumed.thread,
+         timelinePage,
+         extractThreadSettings(resumed),
++        capture,
+         activationController,
+-        false,
+       );
+     }
+ 
+     // Non-browser refreshes, such as reconciliation after a failed turn command, already run under
+     // a controller operation and must not acquire another subscription lease. They retain the
+     // metadata + page pair; normal browser cold opens use the combined resume path above.
+-    return this.readStoredOpenSnapshot(host, threadId, limit);
++    return this.readStoredOpenSnapshot(host, threadId, capture, limit);
+   }
+ 
+   private async readStoredOpenSnapshot(
+     host: HostRecord,
+     threadId: string,
++    capture: ThreadHistoryRefresh,
+     limit: number,
+-    readOnly = false,
++    readOnlyReason?: ThreadReadOnlyReason,
+   ) {
+     const client = await this.registry.getHostClient(host);
+     const read = await client.request(
+@@ -345,8 +317,9 @@
+       read.thread,
+       timelinePage,
+       extractThreadSettings(read.thread),
++      capture,
+       undefined,
+-      readOnly,
++      readOnlyReason,
+     );
+   }
+ 
+@@ -355,9 +328,11 @@
+     thread: AppServerThread,
+     timelinePage: AppServerTimelinePage,
+     threadSettings: ReturnType<typeof extractThreadSettings> | null,
++    capture: ThreadHistoryRefresh,
+     activationController?: ThreadController,
+-    readOnly = false,
+-  ) {
++    readOnlyReason?: ThreadReadOnlyReason,
++  ) {
++    capture.assertCurrent();
+     const threadId = thread.id;
+     projectStore.ensureForPath(host.id, thread.cwd);
+     threadMetadataStore.record(host.id, thread);
+@@ -368,7 +343,7 @@
+     const baseSnapshot = {
+       thread,
+       history: retainSnapshotHistory({
+-        thread: { id: thread.id, turns: timelinePageToTurns(timelinePage) },
++        thread: { id: thread.id, turns: capture.merge(timelinePageToTurns(timelinePage)) },
+       }),
+       oldestTimelineCursor: timelinePage.nextCursor,
+       // For browser activation this value comes directly from thread/resume, including its
+@@ -376,10 +351,11 @@
+       // response is the protocol's persisted thread configuration.
+       threadSettings,
+       tokenUsage: latestTokenUsageFromEvents(recentEvents),
+-      readOnly,
++      readOnly: readOnlyReason !== undefined,
++      readOnlyReason,
+     };
+     const snapshot = preserveCanonicalUserMessagesInOpenSnapshot(
+-      baseSnapshot,
++      capture.applyMetadata(baseSnapshot),
+       previousSnapshot,
+       recentEvents,
+     );
+@@ -403,7 +379,12 @@
+   return `${userId}:${hostId}:${threadId}`;
+ }
+ 
+-function activationHistory(snapshot: ThreadOpenSnapshot, hostId: number, threadId: string, limit: number) {
++function activationHistory(
++  snapshot: ThreadOpenSnapshot,
++  hostId: number,
++  threadId: string,
++  limit: number,
++) {
+   let history = threadActivationHistory(snapshot.history, limit);
+   // 待答请求属于活动 RPC，而原生历史分页可能只含已落盘的轮次。重开页面时只补回仍待答的请求。
+   for (const packet of pendingServerRequests.forThread(hostId, threadId)) {
+@@ -422,7 +403,8 @@
+   return gatewayEventStore
+     .list(hostId, threadId, 0, 500)
+     .filter(
+-      (event) =>
+-        event.event.type === "timeline.item.upsert" && event.event.item.type === "userMessage",
++      ({ event }) =>
++        (event.type === "timeline.item.upsert" && event.item.type === "userMessage") ||
++        event.type === "turn.plan.updated",
+     );
+ }
+diff --git a/server/utils/gateway/runtime/thread-tail-recovery.ts b/server/utils/gateway/runtime/thread-tail-recovery.ts
+deleted file mode 100644
+--- a/server/utils/gateway/runtime/thread-tail-recovery.ts
++++ /dev/null
+@@ -1,68 +0,0 @@
+-import { sameItem } from "~~/shared/thread-history/item-identity";
+-import type { ThreadTimelineItem } from "~~/shared/types";
+-import type { ThreadOpenSnapshot } from "./types";
+-import { retainSnapshotHistory } from "./snapshot-history";
+-
+-export interface RecoveredTurnTail {
+-  turnId: string;
+-  olderUserItems: ThreadTimelineItem[];
+-  tailItems: ThreadTimelineItem[];
+-  complete: boolean;
+-}
+-
+-export function installRecoveredTurnTail(
+-  snapshot: ThreadOpenSnapshot,
+-  recovery: RecoveredTurnTail,
+-): ThreadOpenSnapshot {
+-  return {
+-    ...snapshot,
+-    history: retainSnapshotHistory(
+-      {
+-        thread: {
+-          ...snapshot.history.thread,
+-          turns: snapshot.history.thread.turns.map((turn) => {
+-            if (String(turn.id) !== recovery.turnId) return turn;
+-            const existingItems = Array.isArray(turn.items) ? turn.items : [];
+-            const retainedUsers = existingItems.filter((item) => item.type === "userMessage");
+-            if (recovery.complete) {
+-              return {
+-                ...turn,
+-                items: mergeOrderedItems(retainedUsers, recovery.tailItems),
+-                itemsView: "full" as const,
+-              };
+-            }
+-
+-            // A bounded latest tail is authoritative for recent progress, while summary pages retain
+-            // only the first prompt and final answer. Keep every recovered/submitted user row before
+-            // that tail so a subscription gap cannot make Desktop-originated steer disappear. We do
+-            // not label this partial projection as full: opening intermediate history may still page
+-            // the complete Turn from App Server.
+-            const finalAgent = [...existingItems]
+-              .reverse()
+-              .find((item) => item.type === "agentMessage" && item.phase === "final_answer");
+-            const items = mergeOrderedItems(
+-              [...retainedUsers, ...recovery.olderUserItems],
+-              recovery.tailItems,
+-              finalAgent === undefined ? [] : [finalAgent],
+-            );
+-            return { ...turn, items, itemsView: "summary" as const };
+-          }),
+-        },
+-      },
+-      snapshot.history,
+-    ),
+-  };
+-}
+-
+-function mergeOrderedItems(...groups: ThreadTimelineItem[][]) {
+-  const items: ThreadTimelineItem[] = [];
+-  for (const incoming of groups.flat()) {
+-    const index = items.findIndex((candidate) => sameItem(candidate, incoming));
+-    if (index < 0) {
+-      items.push(incoming);
+-      continue;
+-    }
+-    items[index] = incoming;
+-  }
+-  return items;
+-}
+diff --git a/server/utils/gateway/runtime/types.ts b/server/utils/gateway/runtime/types.ts
+--- a/server/utils/gateway/runtime/types.ts
++++ b/server/utils/gateway/runtime/types.ts
+@@ -6,6 +6,7 @@
+   ReasoningSummary,
+   ThreadCollaborationMode,
+   ThreadSettingsState,
++  ThreadReadOnlyReason,
+   ThreadTokenUsageState,
+   ThreadTimelineHistoryState,
+   RpcEnvelope,
+@@ -25,6 +26,7 @@
+   threadSettings: ThreadSettingsState | null;
+   tokenUsage: ThreadTokenUsageState | null;
+   readOnly?: boolean;
++  readOnlyReason?: ThreadReadOnlyReason;
+ }
+ 
+ export interface TurnStartInput {
+diff --git a/shared/runtime/app-server.ts b/shared/runtime/app-server.ts
+--- a/shared/runtime/app-server.ts
++++ b/shared/runtime/app-server.ts
+@@ -194,6 +194,18 @@
+   .strict();
+ 
+ export type AppServerTurn = z.infer<typeof threadTurnSchema>;
++
++const threadTurnsPageSchema = z
++  .object({
++    data: z.array(threadTurnSchema),
++    nextCursor: z.string().nullable(),
++    backwardsCursor: z.string().nullable(),
++  })
++  .strip();
++
++export function parseThreadTurnsPage(value: unknown) {
++  return threadTurnsPageSchema.parse(value);
++}
+ export type CodexErrorInfo = NonNullable<NonNullable<AppServerTurn["error"]>["codexErrorInfo"]>;
+ export type MisalignmentErrorDetails = NonNullable<
+   NonNullable<AppServerTurn["error"]>["misalignment"]
+@@ -323,10 +335,7 @@
+       .nullable(),
+     sectionEnteredAt: z.number().nullable(),
+     projectId: z.string().nullable(),
+-    // Existing daemons can retain threads created before timeline pagination was enabled. The
+-    // Gateway never uses their legacy page fields; it normalizes this metadata and always reads
+-    // history through thread/timeline/list.
+-    historyMode: z.enum(["legacy", "paginated"]).transform(() => "paginated" as const),
++    historyMode: z.enum(["legacy", "paginated"]),
+     modelProvider: z.string(),
+     model: z.string().nullable(),
+     reasoningEffort: z.string().nullable(),
+diff --git a/shared/runtime/realtime/server-message-schema.ts b/shared/runtime/realtime/server-message-schema.ts
+--- a/shared/runtime/realtime/server-message-schema.ts
++++ b/shared/runtime/realtime/server-message-schema.ts
+@@ -180,6 +180,7 @@
+   oldestTimelineCursor: z.string().nullable(),
+   recentEvents: z.array(gatewayEventSchema),
+   readOnly: z.boolean().optional(),
++  readOnlyReason: z.enum(["activeWriter", "modelProviderMismatch"]).optional(),
+ };
+ const terminalSessionSchema = z
+   .object({
+@@ -608,7 +609,13 @@
+       })
+       .strict(),
+     z.object({ type: z.literal("tmux.sessions.updated"), ...tmuxSessionsSnapshotFields }).strict(),
+-    z.object({ type: z.literal("thread.event"), event: gatewayEventSchema }).strict(),
++    z
++      .object({
++        type: z.literal("thread.event"),
++        event: gatewayEventSchema,
++        eventEpoch: nonEmptyString.optional(),
++      })
++      .strict(),
+     z
+       .object({
+         type: z.literal("thread.events.gap"),
+diff --git a/shared/types.ts b/shared/types.ts
+--- a/shared/types.ts
++++ b/shared/types.ts
+@@ -26,6 +26,7 @@
+   ThreadAttachment,
+   ThreadAttachmentsPage,
+   ThreadOpenResult,
++  ThreadReadOnlyReason,
+   ThreadRuntimeStatus,
+   ThreadRuntimeStatusUpdate,
+   ThreadCollaborationMode,
+diff --git a/shared/types/realtime.ts b/shared/types/realtime.ts
+--- a/shared/types/realtime.ts
++++ b/shared/types/realtime.ts
+@@ -486,6 +486,7 @@
+   | {
+       type: "thread.event";
+       event: GatewayEvent;
++      eventEpoch?: string;
+     }
+   | {
+       type: "thread.events.gap";
+diff --git a/shared/types/thread.ts b/shared/types/thread.ts
+--- a/shared/types/thread.ts
++++ b/shared/types/thread.ts
+@@ -62,6 +62,8 @@
+   updatedAt: number;
+ }
+ 
++export type ThreadReadOnlyReason = "activeWriter" | "modelProviderMismatch";
++
+ export interface ThreadOpenResult {
+   hostId: number;
+   thread: GatewayThread;
+@@ -75,8 +77,9 @@
+   /** Cursor for the oldest currently cached timeline page; null means no older page exists. */
+   oldestTimelineCursor: string | null;
+   recentEvents: GatewayEvent[];
+-  /** The thread is owned by another app-server process and was opened without a writer lease. */
++  /** Native history can be read even when app-server refuses a writer lease. */
+   readOnly?: boolean;
++  readOnlyReason?: ThreadReadOnlyReason;
+ }
+ 
+ /** Persisted by the official app-server thread attachment store. */

@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dropdown-menu.js";
 import { cn } from "@/components/lib/utils.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { usePlatform } from "@/hooks/usePlatform.js";
 import {
   AutomationMoreHorizontalIcon,
   AutomationRunNowIcon,
@@ -117,6 +118,7 @@ export const SavedWorkflowCard = memo(function SavedWorkflowCard({
 }: SavedWorkflowCardProps) {
   const { intl } = useZCodeIntl();
   const argNames = Object.keys(entry.args ?? {});
+  const canLaunch = !usePlatform().sshWorkspace;
   const visibleArgs = argNames.slice(0, MAX_ARG_CHIPS);
   const hiddenArgCount = argNames.length - visibleArgs.length;
   const runLabel = intl.formatMessage({ id: "workflows.hub.card.run" });
@@ -177,18 +179,20 @@ export const SavedWorkflowCard = memo(function SavedWorkflowCard({
         onClick={(event) => event.stopPropagation()}
         onKeyDown={(event) => event.stopPropagation()}
       >
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          data-icon="inline-start"
-          data-testid={testId(TID_WORKFLOW_CARD_RUN, entry.name)}
-          disabled={busy}
-          onClick={() => onRun(entry)}
-        >
-          <AutomationRunNowIcon className="size-3" aria-hidden="true" />
-          {runLabel}
-        </Button>
+        {canLaunch && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-icon="inline-start"
+            data-testid={testId(TID_WORKFLOW_CARD_RUN, entry.name)}
+            disabled={busy}
+            onClick={() => onRun(entry)}
+          >
+            <AutomationRunNowIcon className="size-3" aria-hidden="true" />
+            {runLabel}
+          </Button>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button

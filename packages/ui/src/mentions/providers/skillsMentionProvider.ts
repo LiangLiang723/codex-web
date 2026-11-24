@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { Locale, SkillScope, ZCodeProvider } from "@zcode/shared";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import type { MentionCategoryResult, MentionItem } from "@/mentions/mentionTypes.js";
 import { filterMentionItemsWithOptions } from "@/mentions/mentionSearch.js";
 import { buildSkillMentionMarkdown } from "@/mentions/mentionMarkdown.js";
@@ -20,6 +21,7 @@ export function mapSkillsToMentionItemsForTest(
   locale?: Locale,
 ): MentionItem[] {
   const uniqueSkillsByName = new Map<string, (typeof skills)[number]>();
+  const nativeNameCounts = new Map<string, number>();
   const scopePriority: Record<SkillScope, number> = {
     workspace: 0,
     plugin: 1,
@@ -27,6 +29,10 @@ export function mapSkillsToMentionItemsForTest(
   };
   for (const skill of skills) {
     const key = skill.name.trim().toLowerCase();
+    if (selfHostedBuild) {
+      nativeNameCounts.set(key, (nativeNameCounts.get(key) ?? 0) + 1);
+      continue;
+    }
     const current = uniqueSkillsByName.get(key);
     // `$` 面板是执行入口，不是来源管理页。
     // 同名技能如果来自 workspace/user/plugin 多个路径，继续全部展示会让用户看到“同一个 skill”重复刷屏。
@@ -35,16 +41,21 @@ export function mapSkillsToMentionItemsForTest(
       uniqueSkillsByName.set(key, skill);
     }
   }
-  const uniqueSkills = [...uniqueSkillsByName.values()];
+  const visibleSkills = selfHostedBuild ? skills : [...uniqueSkillsByName.values()];
 
-  return uniqueSkills.map((skill) => {
+  return visibleSkills.map((skill) => {
     const sourceLabel = resolveSkillSourceLabel(skill.scope, locale);
-    const description = resolveSkillDisplayDescription(skill, locale);
+    const description = selfHostedBuild
+      ? skill.description
+      : resolveSkillDisplayDescription(skill, locale);
+    const duplicateName = (nativeNameCounts.get(skill.name.trim().toLowerCase()) ?? 0) > 1;
     return {
       id: `skill:${skill.id}`,
       category: "skills",
       label: skill.name,
-      description: description ? `${sourceLabel} · ${description}` : sourceLabel,
+      description: [sourceLabel, duplicateName ? skill.path : description]
+        .filter(Boolean)
+        .join(" · "),
       value: skill.name,
       markdown: buildSkillMentionMarkdown(skill.name, skill.path),
       keywords: [...new Set([skill.name, skill.description, description, skill.scope])],
@@ -78,7 +89,9 @@ export function useSkillsMentionProvider(
   const allItems = useMemo(
     () =>
       mapSkillsToMentionItemsForTest(
-        filterSkillsForProvider(skills, provider).filter((skill) => skill.enabled),
+        (selfHostedBuild ? skills : filterSkillsForProvider(skills, provider)).filter(
+          (skill) => skill.enabled,
+        ),
         locale,
       ),
     [locale, provider, skills],

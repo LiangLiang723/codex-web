@@ -2362,7 +2362,21 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
       onStartDraftInWorkspace={handleStartDraftInWorkspaceInChat}
       onOpenBrowserUrl={handleOpenBrowserUrl}
       fileTreeOpenRequest={fileTreeOpenRequest}
-      onCreateTask={handleCreateTaskInChat}
+      onCreateTask={
+        mobile && selfHostedBuild
+          ? (request) => {
+              const options = typeof request === "string" ? { provider: request } : request;
+              // 自托管手机端由当前 Root 准备草稿，目录就绪后再复用手机聊天页导航。
+              handleCreateTaskInChat({
+                ...options,
+                onComplete: () => {
+                  mobile.navigateToChat();
+                  options?.onComplete?.();
+                },
+              });
+            }
+          : handleCreateTaskInChat
+      }
       onCreateConversationTask={onCreateConversationTask ?? handleCreateTaskInChat}
       onCreateConversationTaskOnSource={onCreateConversationTaskOnSource}
       onOpenFolderFromWorkspaceMenu={onOpenFolderFromWorkspaceMenu}

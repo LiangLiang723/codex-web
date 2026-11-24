@@ -190,7 +190,7 @@ export const sessionMetaStateSchema = z.object({
   title: z.string(),
   // default = 未命名；generated = 模型自动生成；custom = 用户显式重命名（不再被自动标题覆盖）。
   titleSource: z.enum(["default", "generated", "custom"]),
-  readOnlyReason: z.literal("activeWriter").optional(),
+  readOnlyReason: z.enum(["activeWriter", "modelProviderMismatch"]).optional(),
 });
 export type SessionMetaState = z.infer<typeof sessionMetaStateSchema>;
 
@@ -271,8 +271,14 @@ export function permissionGrantMode(optionId: string | undefined): "guarded" | "
 const permissionOptionSchema = z.object({
   optionId: z.string(),
   label: z.string(),
+  description: z.string().optional(),
   kind: z.enum(["allowOnce", "allowAlways", "deny", "custom"]),
   response: zcodePermissionResponseSchema.optional(),
+});
+
+const nativePermissionDetailSchema = z.object({
+  kind: z.enum(["networkTarget", "networkAccess", "read", "write", "filesystemRules", "grantRoot", "changedFiles"]),
+  values: z.array(z.string()),
 });
 
 export const permissionRequestPayloadSchema = z.object({
@@ -281,6 +287,7 @@ export const permissionRequestPayloadSchema = z.object({
   toolName: z.string(),
   summary: z.string(),
   detail: z.unknown(),
+  nativeDetails: z.array(nativePermissionDetailSchema).optional(),
   // additive：旧 snapshot 缺省时 UI 不显示反馈输入；V4 新投影可显式开启。
   freeText: z.boolean().optional(),
   origin: zcodeInteractionRequestOriginSchema.optional(),
@@ -324,6 +331,19 @@ export const nativeMcpElicitationSchema = z.object({
   url: z.string().optional(),
 });
 export type NativeMcpElicitation = z.infer<typeof nativeMcpElicitationSchema>;
+
+export const nativeCodexQuestionsSchema = z.object({
+  interaction: z.literal("codex.questions"),
+  questions: z.array(z.object({
+    id: z.string(),
+    header: z.string(),
+    question: z.string(),
+    isOther: z.boolean().optional(),
+    isSecret: z.boolean().optional(),
+    options: z.array(z.object({ label: z.string(), description: z.string() })).nullish(),
+  })),
+});
+export type NativeCodexQuestions = z.infer<typeof nativeCodexQuestionsSchema>;
 
 export const userInputRequestPayloadSchema = z.object({
   kind: z.literal("userInput"),
@@ -504,6 +524,12 @@ export const goalStateSchema = z.object({
   // paused：stop 作用于任何 foreground work 时 target 强制进入（stopPausesActiveGoalTarget）。
   // notSatisfied 与 failed 分离：前者是有效结论，后者是验证过程失败。
   status: z.enum(["active", "paused", "verifying", "verified", "notSatisfied", "failed"]),
+  nativeCodex: z
+    .object({
+      status: z.enum(["active", "paused", "blocked", "usageLimited", "budgetLimited", "complete"]),
+      tokensUsed: z.number().int().nonnegative().optional(),
+    })
+    .optional(),
   iteration: z.number(),
   verifications: z.array(
     z.object({
@@ -524,6 +550,16 @@ export const planStateSchema = z.object({
   updatedAt: timestampSchema,
 });
 export type PlanState = z.infer<typeof planStateSchema>;
+
+const conversationSourceSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.enum(["userLink", "webResult", "webVisit"]),
+    url: z.url({ protocol: /^https?$/u }),
+    title: z.string(),
+  }),
+  z.object({ kind: z.literal("tool"), id: z.string(), title: z.string(), tool: z.string() }),
+]);
+export type ConversationSource = z.infer<typeof conversationSourceSchema>;
 
 // ── Snapshot 总览 ──
 export const rowsWindowSchema = z.object({
@@ -604,6 +640,7 @@ export const conversationSnapshotSchema = z.object({
   workflowRuns: workflowRunsStateSchema.optional(),
   goal: goalStateSchema.nullable(),
   plan: planStateSchema.nullable(),
+  sources: z.array(conversationSourceSchema).optional(),
   // 软门禁(Soft Gate)：additive 字段,必须带 default(null)。
   // 旧快照/旧发送端不携带此字段 → 解析得 null,不破坏兼容性(遵守冻结规则)。
   // pendingCount === 0 时投影层置 null(提示条消失)。

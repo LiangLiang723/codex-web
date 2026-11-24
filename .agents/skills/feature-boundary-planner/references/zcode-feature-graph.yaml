@@ -5656,7 +5656,41 @@ nodes:
       - symbol: "SessionPane"
         file: "packages/ui/src/v4/SessionPane.tsx"
 
+  - id: "capability.selfhost-turn-files"
+    kind: "capability"
+    label: "Remote per-turn file changes and verified undo"
+    docs: ["specs/selfhost-codex/README.md", "packages/web/src/selfhost/CONTRACT.md"]
+    codeSeeds:
+      - symbol: "captureTurnFiles"
+        file: "selfhost/gateway/overlay/utils/selfhost-turn-files.ts"
+      - symbol: "turnFileRewind"
+        file: "selfhost/worker/turn-file-rewind.ts"
+    invariants:
+      - "The SSH host, native thread and turn own the diff. Undo requires a preview of the same worktree and matching before/after content."
+
+  - id: "capability.selfhost-codex-command-approval"
+    kind: "capability"
+    label: "Self-hosted Codex terminal command approval"
+    aliases: ["审批命令重复", "允许类似命令"]
+    docs: ["specs/selfhost-codex/README.md", "packages/web/src/selfhost/CONTRACT.md"]
+    codeSeeds:
+      - symbol: "projectThread"
+        file: "packages/web/src/selfhost/threadProjection.ts"
+      - symbol: "SessionBridge"
+        file: "packages/web/src/selfhost/sessionBridge.ts"
+    invariants:
+      - "The command preview shows the complete command once. Distinct native reasons retain their own text."
+      - "The active native request supplies the displayed approval decisions and the exact prefix tokens returned to Codex."
+
 edges:
+  - from: "capability.selfhost-turn-files"
+    to: "surface.selfhost-codex-conversation"
+    type: "renders-in"
+    rank: "must-inspect"
+  - from: "capability.selfhost-codex-command-approval"
+    to: "surface.selfhost-codex-conversation"
+    type: "renders-in"
+    rank: "must-inspect"
   - from: "capability.selfhost-codex-continuity"
     to: "surface.selfhost-codex-conversation"
     type: "implemented-in"

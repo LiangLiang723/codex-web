@@ -43,7 +43,7 @@ interface StorageLike {
   removeItem(key: string): void;
 }
 
-export type PendingCommandRecoveryReason = "discarded";
+export type PendingCommandRecoveryReason = "discarded" | "nativeDeliveryPending";
 
 export interface PendingCommandEntry {
   commandId: string;
@@ -236,7 +236,8 @@ export class PendingCommandRegistry {
   listRecoverable(sessionId: string | null): readonly PendingCommandEntry[] {
     return this.list(sessionId).filter(
       // 兼容 V4 初版已经写入 localStorage 的 unknown：它不是可操作错误，不能再进入 UI。
-      (entry) => entry.recovery === "discarded" && !entry.recoveryDismissed,
+      (entry) => (entry.recovery === "discarded" || entry.recovery === "nativeDeliveryPending") &&
+        !entry.recoveryDismissed,
     );
   }
 
@@ -249,6 +250,11 @@ export class PendingCommandRegistry {
     const entry = this.entries.get(keyOf(sessionId, commandId));
     if (entry) this.rejectComposer(entry);
     this.settle(sessionId, commandId);
+  }
+
+  markNativeDeliveryPending(envelope: Pick<CommandEnvelope, "sessionId" | "commandId">): void {
+    const entry = this.entries.get(keyOf(envelope.sessionId, envelope.commandId));
+    if (entry) this.markRecovery(entry, "nativeDeliveryPending");
   }
 
   dismissRecovery(sessionId: string | null, commandId: string): void {

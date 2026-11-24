@@ -13,7 +13,10 @@ export function PluginMentionOptionContent({ item }: { item: MentionItem }) {
       <span className="shrink-0 whitespace-nowrap text-ui-base font-medium text-foreground">
         {item.displayLabel ?? item.label}
       </span>
-      <span className="min-w-0 truncate text-ui-xs text-foreground-subtlest">
+      <span
+        className="min-w-0 truncate text-ui-xs text-foreground-subtlest"
+        title={item.description}
+      >
         {/* 冲突禁选项优先展示原因，普通项展示当前语言的插件描述。 */}
         {item.disabled && item.disabledReason ? item.disabledReason : item.description}
       </span>

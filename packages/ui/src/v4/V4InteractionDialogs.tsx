@@ -7,6 +7,7 @@ import {
 import { captureRecentOrder } from "@/lib/composerRecent.js";
 import type { ComposerScope } from "@/v4/composer/composerDraftStore.js";
 import {
+  nativeCodexQuestionsSchema,
   nativeMcpElicitationSchema,
   committedPermissionGrantMode,
   permissionGrantMode,
@@ -42,7 +43,7 @@ import {
   pendingUserInputToElicitationRequest,
   pendingUserInputToViewModel,
 } from "@/v4/pendingInteractionAdapter.js";
-import { McpElicitationForm, V4UserInputDialog } from "@/v4/V4UserInputDialog.js";
+import { CodexQuestionsForm, McpElicitationForm, V4UserInputDialog } from "@/v4/V4UserInputDialog.js";
 import { reportAppTelemetryEvent } from "@/lib/appTelemetry.js";
 import {
   buildPermissionPromptResultTelemetryEvent,
@@ -382,6 +383,7 @@ export function V4InteractionDialogs({
       <PermissionDialog
         key={pending.interactionId}
         request={request}
+        nativeDetails={permissionPayload.nativeDetails}
         permissionMode={currentSnapshot?.config?.mode}
         modeSwitch={pending.payload.modeSwitch}
         workspacePath={workspacePath}
@@ -449,6 +451,8 @@ export function V4InteractionDialogs({
               );
             }
             if (permissionResponseFlight.current !== interactionId) return;
+            // Web 网关的接纳回执先于原生 resolved。保留等待态直到权威待答请求移除。
+            if (accepted && permissionPayload.nativeDetails !== undefined) return;
             permissionResponseFlight.current = null;
             setPermissionResponse({
               interactionId,
@@ -458,6 +462,19 @@ export function V4InteractionDialogs({
             });
           });
         }}
+      />
+    );
+  }
+
+  const codexQuestions = nativeCodexQuestionsSchema.safeParse(pending.payload.schema);
+  if (codexQuestions.success) {
+    return (
+      <CodexQuestionsForm
+        key={`${sessionId}-${pending.interactionId}`}
+        request={codexQuestions.data}
+        respond={async (answers) => (await resolveInteraction(pending.interactionId, {
+          action: "accept", content: { answers },
+        })).accepted}
       />
     );
   }

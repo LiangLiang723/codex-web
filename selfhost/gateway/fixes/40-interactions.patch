@@ -1,0 +1,402 @@
+--- a/server/utils/gateway/agent/providers/codex/codex-event-mapper.ts
++++ b/server/utils/gateway/agent/providers/codex/codex-event-mapper.ts
+@@ -105,50 +105,6 @@
+     return { event: { type: "timeline.item.upsert", item }, emittedAt: emittedAtMs };
+   }
+ 
+-  // ── Approval items ────────────────────────────────────────────
+-  if (method === "item/commandExecution/requestApproval") {
+-    const requestId = typeof id === "string" || typeof id === "number" ? id : undefined;
+-    if (requestId === undefined || idParam(p.itemId) === null || idParam(p.turnId) === null)
+-      return null;
+-    return {
+-      event: {
+-        type: "timeline.item.upsert",
+-        item: {
+-          type: "commandExecution",
+-          id: idParam(p.itemId),
+-          turnId: idParam(p.turnId),
+-          status: "waitingForApproval",
+-          startedAtMs: numericParam(p.startedAtMs),
+-          command: stringFromUnknown(p.command),
+-          cwd: stringFromUnknown(p.cwd),
+-          pendingApproval: { requestId, method, params: p },
+-        },
+-      },
+-      emittedAt: emittedAtMs,
+-      requestId,
+-    };
+-  }
+-
+-  if (method === "item/fileChange/requestApproval") {
+-    const requestId = typeof id === "string" || typeof id === "number" ? id : undefined;
+-    if (requestId === undefined || idParam(p.itemId) === null || idParam(p.turnId) === null)
+-      return null;
+-    return {
+-      event: {
+-        type: "timeline.item.upsert",
+-        item: {
+-          type: "fileChange",
+-          id: idParam(p.itemId),
+-          turnId: idParam(p.turnId),
+-          status: "waitingForApproval",
+-          pendingApproval: { requestId, method, params: p },
+-        },
+-      },
+-      emittedAt: emittedAtMs,
+-      requestId,
+-    };
+-  }
+-
+   if (method === "item/fileChange/patchUpdated") {
+     if (idParam(p.itemId) === null || idParam(p.turnId) === null || !Array.isArray(p.changes))
+       return null;
+@@ -167,16 +123,20 @@
+     };
+   }
+ 
+-  // ── Pending server requests (7 methods) ───────────────────────
+-  if (isPendingServerRequestMethod(method)) {
++  // ── Pending server requests ───────────────────────────────────
++  if (
++    isPendingServerRequestMethod(method) ||
++    method === "item/commandExecution/requestApproval" ||
++    method === "item/fileChange/requestApproval"
++  ) {
+     if (method === "currentTime/read") return null;
+     const requestId = typeof id === "string" || typeof id === "number" ? id : undefined;
+     if (requestId === undefined) return null;
+-    const stableItemId = idParam(p.itemId) ?? requestId;
++    // 同一工具条目可能对应多个审批回调。原 JSON-RPC ID 才是当前待答请求的身份。
+     const item: Record<string, unknown> = {
+       type: itemTypeForServerRequest(method),
+-      id: `server-request-${String(stableItemId)}`,
+-      turnId: idParam(p.turnId) ?? `server-request-turn-${String(stableItemId)}`,
++      id: `server-request-${typeof requestId}-${requestId}`,
++      turnId: idParam(p.turnId),
+       status: "waitingForClient",
+       requestId,
+       method,
+--- a/server/utils/gateway/runtime/pending-server-requests.ts
++++ b/server/utils/gateway/runtime/pending-server-requests.ts
+@@ -1,6 +1,7 @@
+ import type { GatewayEvent, RpcEnvelope } from "~~/shared/types";
+ import { idFromUnknown, recordFromUnknown } from "~~/shared/utils/records";
+ import { currentGatewayUserId } from "../state/memory";
++import { gatewayEventStore } from "../state/gateway-events";
+ 
+ const MAX_PENDING_SERVER_REQUESTS = 1_000;
+ 
+@@ -30,31 +31,31 @@
+     if (requestId !== null) this.resolve(hostId, threadId, requestId);
+   }
+ 
++  has(hostId: number, threadId: string, requestId: string | number) {
++    return this.currentUserKeys().get(this.key(hostId, threadId, requestId)) != null;
++  }
++
+   isPending(event: GatewayEvent) {
+-    if (event.event.type !== "serverRequest.requested") return false;
+-    const requestId = event.event.requestId;
+-    return (
+-      requestId !== null &&
+-      requestId !== undefined &&
+-      this.currentUserKeys().has(this.key(event.hostId, event.threadId, requestId))
+-    );
++    return event.event.type === "serverRequest.requested" &&
++      this.has(event.hostId, event.threadId, event.event.requestId);
+   }
+ 
+   remember(event: GatewayEvent) {
+-    // Codex 的命令审批附在时间线条目上。恢复原生历史时也要补回仍有效的请求及其选项。
+-    const packet = event.event;
+-    const approval = packet.type === "timeline.item.upsert" && packet.item.type === "commandExecution"
+-      ? recordFromUnknown(packet.item.pendingApproval) : null;
+-    const requestId = idFromUnknown(packet.type === "serverRequest.requested" ? packet.requestId : approval?.requestId);
+-    if (requestId === null) return;
+-    const key = this.key(event.hostId, event.threadId, requestId);
+-    const keys = this.currentUserKeys();
+-    if (keys.has(key)) keys.set(key, event);
++    const { event: packet, hostId, threadId } = event;
++    if (packet.type === "serverRequest.resolved") {
++      this.resolve(hostId, threadId, packet.requestId);
++      return;
++    }
++    if (packet.type !== "serverRequest.requested") return;
++    // 共享 RPC 向各已认证主机别名发布时，首个别名可能先于其他别名的原始帧回调。
++    this.track(hostId, threadId, { id: packet.requestId });
++    this.currentUserKeys().set(this.key(hostId, threadId, packet.requestId), event);
+   }
+ 
+   forThread(hostId: number, threadId: string) {
+-    return Array.from(this.currentUserKeys().values()).filter(
+-      (event): event is GatewayEvent => event !== null && event.hostId === hostId && event.threadId === threadId,
++    const prefix = this.connectionPrefix(hostId);
++    return Array.from(this.currentUserKeys()).flatMap(([key, event]) =>
++      key.startsWith(prefix) && event !== null && event.threadId === threadId ? [event] : [],
+     );
+   }
+ 
+@@ -69,7 +70,12 @@
+   }
+ 
+   private key(hostId: number, threadId: string, requestId: string | number) {
+-    return `${hostId}:${threadId}:${requestId}`;
++    return this.connectionPrefix(hostId) + JSON.stringify([threadId, requestId]);
++  }
++
++  private connectionPrefix(hostId: number) {
++    // 断线后重新连接可能从相同的原生请求编号开始，快照只读取当前物理连接世代。
++    return `${hostId}:${JSON.stringify(gatewayEventStore.epoch(hostId))}:`;
+   }
+ 
+   private currentUserKeys() {
+--- a/server/utils/gateway/runtime/thread-open-service.ts
++++ b/server/utils/gateway/runtime/thread-open-service.ts
+@@ -7,7 +7,6 @@
+ } from "~~/shared/thread-runtime-status";
+ import { extractThreadSettings, latestTokenUsageFromEvents } from "../protocol/thread-payload";
+ import { pendingServerRequests } from "./pending-server-requests";
+-import { applyCanonicalEventToHistory } from "~~/shared/thread-history/canonical-events";
+ import { gatewayEventStore } from "../state/gateway-events";
+ import { projectStore } from "../state/projects";
+ import { threadMetadataStore } from "../state/thread-metadata";
+@@ -237,7 +236,8 @@
+     });
+     return {
+       thread: gatewayThreadFromAppServer(host.id, snapshot.thread),
+-      history: activationHistory(snapshot, host.id, threadId, limit),
++      history: threadActivationHistory(snapshot.history, limit),
++      pendingRequests: snapshot.readOnly === true ? [] : pendingServerRequests.forThread(host.id, threadId),
+       runtimeStatus: runtimeStatusFromThreadState(snapshot.thread, snapshot.history, recentEvents),
+       project: projectStore.ensureForPath(host.id, snapshot.thread.cwd),
+       oldestTimelineCursor: snapshot.oldestTimelineCursor,
+@@ -379,21 +379,6 @@
+   return `${userId}:${hostId}:${threadId}`;
+ }
+ 
+-function activationHistory(
+-  snapshot: ThreadOpenSnapshot,
+-  hostId: number,
+-  threadId: string,
+-  limit: number,
+-) {
+-  let history = threadActivationHistory(snapshot.history, limit);
+-  // 待答请求属于活动 RPC，而原生历史分页可能只含已落盘的轮次。重开页面时只补回仍待答的请求。
+-  for (const packet of pendingServerRequests.forThread(hostId, threadId)) {
+-    const next = applyCanonicalEventToHistory(history, snapshot.thread, threadId, packet.event);
+-    if (next) history = { ...history, thread: { ...history.thread, turns: next.thread.turns } };
+-  }
+-  return history;
+-}
+-
+ function snapshotRecentEvents(hostId: number, threadId: string) {
+   // Summary snapshots intentionally omit later user messages. Replay only those small canonical
+   // rows here so a route switch cannot advance the client cursor past a message that the snapshot
+--- a/server/utils/gateway/runtime/open-snapshot-events.ts
++++ b/server/utils/gateway/runtime/open-snapshot-events.ts
+@@ -14,7 +14,8 @@
+ import { sameItem } from "~~/shared/thread-history/item-identity";
+ 
+ export function applyEventToOpenSnapshot(snapshot: ThreadOpenSnapshot | null, event: AgentEvent) {
+-  if (snapshot === null) {
++  // 待答请求由连接注册表管理。无原生 turnId 的请求也不得创建可操作的时间线轮次。
++  if (snapshot === null || event.type === "serverRequest.requested" || event.type === "serverRequest.resolved") {
+     return snapshot;
+   }
+ 
+--- a/shared/types/thread.ts
++++ b/shared/types/thread.ts
+@@ -65,6 +65,7 @@
+ export type ThreadReadOnlyReason = "activeWriter" | "modelProviderMismatch";
+ 
+ export interface ThreadOpenResult {
++  pendingRequests?: GatewayEvent[];
+   hostId: number;
+   thread: GatewayThread;
+   history: ThreadTimelineHistoryState;
+--- a/shared/runtime/realtime/server-message-schema.ts
++++ b/shared/runtime/realtime/server-message-schema.ts
+@@ -173,6 +173,7 @@
+   })
+   .strict();
+ const threadOpenResultFields = {
++  pendingRequests: z.array(gatewayEventSchema).optional(),
+   hostId: positiveId,
+   thread: gatewayThreadSchema,
+   history: threadHistorySchema,
+--- a/shared/types/realtime.ts
++++ b/shared/types/realtime.ts
+@@ -285,6 +285,7 @@
+     }
+   | {
+       type: "serverRequest.respond";
++      eventEpoch: string;
+       requestId: string;
+       hostId: number;
+       threadId: string;
+--- a/shared/runtime/realtime/client-message-schema.ts
++++ b/shared/runtime/realtime/client-message-schema.ts
+@@ -344,6 +344,7 @@
+     z
+       .object({
+         type: z.literal("serverRequest.respond"),
++        eventEpoch: nonEmptyString,
+         ...requestIdField,
+         ...threadScopeFields,
+         serverRequestId: z.union([z.string(), z.number()]),
+--- a/server/utils/gateway/http/validation/threads.ts
++++ b/server/utils/gateway/http/validation/threads.ts
+@@ -124,6 +124,7 @@
+ 
+ export const serverRequestResponseSchema = z
+   .object({
++    eventEpoch: z.string().min(1),
+     hostId: z.coerce.number().int().positive(),
+     threadId: z.string().trim().min(1),
+     requestId: z.union([z.string().trim().min(1), z.number().int()]),
+--- a/server/utils/gateway/runtime/types.ts
++++ b/server/utils/gateway/runtime/types.ts
+@@ -61,6 +61,7 @@
+ }
+ 
+ export interface ServerRequestResponseInput {
++  eventEpoch: string;
+   requestId: string | number;
+   result?: unknown;
+   error?: {
+--- a/server/utils/gateway/realtime/server-request-response.ts
++++ b/server/utils/gateway/realtime/server-request-response.ts
+@@ -3,7 +3,6 @@
+ import { serverRequestResponseSchema } from "../http/validation/threads";
+ import { threadBroker } from "../runtime/broker";
+ import { hostStore } from "../state/hosts";
+-import { pendingServerRequests } from "../runtime/pending-server-requests";
+ 
+ export type RealtimeServerRequestResponseMessage = Extract<
+   RealtimeClientMessage,
+@@ -20,8 +19,8 @@
+   const host = requireRecord(hostStore.getWithSecret(input.hostId), "Host not found");
+   await threadBroker.respondToServerRequest(host, input.threadId, {
+     requestId: input.requestId,
++    eventEpoch: input.eventEpoch,
+     result: input.result,
+     error: input.error,
+   });
+-  pendingServerRequests.resolve(input.hostId, input.threadId, input.requestId);
+ }
+--- a/server/utils/gateway/runtime/turn-commands.ts
++++ b/server/utils/gateway/runtime/turn-commands.ts
+@@ -5,6 +5,8 @@
+ import type { ControllerRegistry } from "./controller-registry";
+ import { buildTurnStartParams, buildUserInput } from "../protocol/thread-payload";
+ import { runtimeLog } from "./runtime-log";
++import { pendingServerRequests } from "./pending-server-requests";
++import { gatewayEventStore } from "../state/gateway-events";
+ import type { ThreadOpenService } from "./thread-open-service";
+ import { recordFromUnknown, stringFromUnknown } from "~~/shared/utils/records";
+ import { trimmedOrFallback } from "~~/shared/utils/strings";
+@@ -125,12 +127,22 @@
+     threadId: string,
+     input: ServerRequestResponseInput,
+   ) {
++    // getHostClient 可能重新连接。取连接前后均核对世代、Thread 和待答范围。
++    const verifyPending = () => {
++      if (
++        input.eventEpoch !== gatewayEventStore.epoch(host.id) ||
++        !pendingServerRequests.has(host.id, threadId, input.requestId)
++      ) {
++        throw Error("This Codex request is no longer pending on this connection.");
++      }
++    };
++    verifyPending();
+     const client = await this.registry.getHostClient(host);
+-    if (input.error) {
+-      client.respondError(input.requestId, input.error.code, input.error.message, input.error.data);
+-    } else {
+-      client.respond(input.requestId, input.result ?? {});
+-    }
++    verifyPending();
++    const sent = input.error
++      ? client.respondError(input.requestId, input.error.code, input.error.message, input.error.data)
++      : client.respond(input.requestId, input.result ?? {});
++    if (sent === false) throw Error("This Codex request has already been answered.");
+   }
+ }
+ 
+--- a/server/utils/gateway/agent/provider-adapter.ts
++++ b/server/utils/gateway/agent/provider-adapter.ts
+@@ -46,8 +46,8 @@
+     parse: (value: unknown) => T,
+   ): Promise<T>;
+   notify(method: string, params: unknown): void;
+-  respond(id: string | number, result: unknown): void;
+-  respondError(id: string | number, code: number, message: string, data?: unknown): void;
++  respond(id: string | number, result: unknown): boolean;
++  respondError(id: string | number, code: number, message: string, data?: unknown): boolean;
+   close(): void;
+ }
+ 
+--- a/server/utils/gateway/infra/rpc/shared-codex-client.ts
++++ b/server/utils/gateway/infra/rpc/shared-codex-client.ts
+@@ -20,7 +20,7 @@
+   ready: Promise<void>;
+   members: Set<SharedCodexClient>;
+   subscriptions: Map<string, Set<SharedCodexClient>>;
+-  pendingRequests: Set<string | number>;
++  pendingRequests: Map<string | number, boolean>;
+   releaseTransport: () => void;
+ }
+ 
+@@ -112,7 +112,7 @@
+         ready: Promise.resolve(),
+         members: new Set(),
+         subscriptions: new Map(),
+-        pendingRequests: new Set(),
++        pendingRequests: new Map(),
+         releaseTransport: sshConnections.retainTransport(this.host),
+       };
+       connections.set(key, connection);
+@@ -194,14 +194,20 @@
+   }
+ 
+   respond(id: string | number, result: unknown) {
+-    const connection = this.requireConnection();
+-    if (connection.pendingRequests.delete(id)) connection.client.respond(id, result);
++    return this.submitServerResponse(id, (client) => client.respond(id, result));
+   }
+ 
+   respondError(id: string | number, code: number, message: string, data?: unknown) {
+-    const connection = this.requireConnection();
+-    if (connection.pendingRequests.delete(id))
+-      connection.client.respondError(id, code, message, data);
++    return this.submitServerResponse(id, (client) => client.respondError(id, code, message, data));
++  }
++
++  private submitServerResponse(id: string | number, send: (client: CodexRpcClient) => void) {
++    const { client, pendingRequests } = this.requireConnection();
++    if (pendingRequests.get(id) !== false) return false;
++    send(client);
++    // 原生 resolved 到达前保留已提交状态。同一个请求在 resume 重放时仍只能提交一次。
++    pendingRequests.set(id, true);
++    return true;
+   }
+ 
+   close() {
+@@ -270,9 +276,15 @@
+       }
+     });
+     connection.client.on("request", (message) => {
+-      if (message.id !== undefined) connection.pendingRequests.add(message.id);
++      if (message.id !== undefined && !connection.pendingRequests.has(message.id)) {
++        connection.pendingRequests.set(message.id, false);
++      }
+       for (const member of connection.members) {
+         member.inUserScope(() => member.emit("request", message));
++      }
++      // 无 Thread 的时钟查询由 Provider 同步应答，原生服务不会发 Thread resolved。
++      if (message.id !== undefined && message.method === "currentTime/read") {
++        connection.pendingRequests.delete(message.id);
+       }
+     });
+     connection.client.on("stderr", (text) => {

@@ -4,7 +4,7 @@
 
 ## Docker Compose 部署
 
-首次克隆本仓库时使用 Git 的 `--recurse-submodules` 参数。源码归档已经包含 Gateway 子模块。中心服务器需要能访问目标 SSH 主机。远端需要 Git、Node.js 和已登录的官方 Codex CLI。已实测的远端 CLI 为 `0.171.0`，配套协议使用 `codex app-server daemon` 和 `codex app-server proxy`。
+首次克隆本仓库时使用 Git 的 `--recurse-submodules` 参数。源码归档已经包含 Gateway 子模块。中心服务器需要能访问目标 SSH 主机。远端需要 Git、Node.js 和已登录的官方 Codex CLI。版本专项覆盖远端 CLI `0.170.0` 与 `0.172.0`，配套协议使用 `codex app-server daemon` 和 `codex app-server proxy`。
 
 ```sh
 git submodule update --init --recursive
@@ -44,6 +44,8 @@ sh selfhost/update.sh --no-build
 
 每次用 `selfhost/update.sh` 更新时，Compose 在 `codex-web` 健康后清理 `zcode-selfhost` 仓库下已被替换的镜像，并用 `zcode-selfhost:rollback` 保留上一版健康镜像。通过其他流程切换版本时，验收后可在同一部署目录运行 `sh selfhost/update.sh --cleanup zcode-selfhost:<上一版标签>`。镜像通过 Mac 或其他构建机中转时，发布完成后清除该次构建和上传的临时目录、旧归档，以及构建机上明确已用完的候选镜像。服务端的 SQLite、SSH 配置、数据卷和备份有各自的保留周期。
 
+需要在清理前验收服务时，使用 `sh selfhost/update.sh --stage` 切换到已构建的镜像。更新前的健康镜像按精确 ID 保存在部署目录的记录中，并受标签保护。验证登录、SSH 和桌面及手机会话后，运行 `sh selfhost/update.sh --cleanup`。若验收失败，将 `.env` 的 `CODEX_WEB_IMAGE` 指回原版本，运行 `docker compose up -d --no-build --wait codex-web`。共用 Docker daemon 的独立实例可将 `CODEX_WEB_RELEASE_REPOSITORY` 导出到脚本环境，各自使用独立的镜像仓库。
+
 ## 连接和切换主机
 
 在「SSH 工作区」选择「添加主机」，输入 SSH 地址、端口、用户与认证方式。可使用 Tailscale IP、普通 SSH 主机名或中心服务器能访问的 SSH 隧道端点。
@@ -58,10 +60,12 @@ sh selfhost/update.sh --no-build
 
 ## 会话和操作
 
-- 模型菜单、思考强度、Lexical 输入框、文件引用、会话列表和消息时间线使用 upstream ZCode 组件。模型来自选中主机的 `model/list`。
+- 模型菜单、思考强度、Lexical 输入框、文件引用、会话列表和消息时间线使用 upstream ZCode 组件。模型来自所选 SSH 主机和项目提供商的 `model/list`。已有 Thread 使用其原生提供商。
 - Thread 和 Turn 由官方 CLI 创建。历史来自远端 Codex，网页地址保留原生 Thread ID。断开浏览器后，后台任务仍由远端 app-server 处理。支持流式输出、工具调用、Plan Mode、权限审批和重新进入同一会话。
-- 另一端持有写锁时，Web 正常显示历史并提供重新连接。Web 创建的会话在首轮完成后生成短标题，通过 Codex 原生接口保存。
-- 桌面和手机沿用 ZCode v4 的输入框状态栏。Git 更改、目标、计划进度和后台活动按真实数据出现，点开相应胶囊可查看详情。
+- 另一端持有写锁或 Thread 的模型提供商不可用时，Web 正常显示历史并提供重新连接。Web 创建的会话在首轮完成后生成短标题，通过 Codex 原生接口保存。
+- 宽屏对话有内容时，右上角默认展开当前工作树的 Git 改动、分支以及会话的 Goal、计划、子智能体和来源。较窄窗口通过右上角按钮打开，手机使用抽屉。
+- 聊天中的文件卡按原生 Turn ID 展示文件、增删行数和补丁。撤销前先预览。SSH 工作树、补丁和文件内容无法相互印证时，界面会说明具体原因。旧历史显示 Codex 实际保存的文件记录。
+- 支持的远端可查看和取消原生排队输入，从已完成的轮次创建分支，以及查看上下文用量和触发压缩。
 - 文件浏览与 Git 使用 ZCode 原服务，经校验身份的 SSH 通道在远端执行。终端复用 Gateway 的远程 PTY。展开的远程目录通过 Codex 的 `fs/watch` 更新文件树。
 - 插件、Skills 和 MCP 通过选中主机的 Codex 接口读取。输入框使用 `plugin/installed` 加载已安装插件，浏览插件市场时再查询市场目录。支持工作流文件的读取、元数据编辑、移动和删除。ZCode 的动态工作流脚本运行器尚未接入 Codex。自动化界面可保存任务，由中心调度器发起 Codex Thread 和 Turn。
 - 私有分享保存选定轮次的用户和助手文本，使用同一中心账号查看、撤销或删除。文本分享省略图片附件和工具输出。
@@ -72,7 +76,7 @@ sh selfhost/update.sh --no-build
 
 如果同一台 Mac 上桌面回复很快，Web 却反复显示模型重连，检查 SSH 启动的 Codex daemon 是否继承该主机已有的 `HTTPS_PROXY`。代理环境在进程启动时读取。确认该 daemon 没有运行中的轮次后，从能访问已有代理的环境执行 `codex app-server daemon restart`，再用同模型、同推理强度复测首字和完成耗时。
 
-普通输入会裁去首尾空白，作为原生 `text` 输入发送。模型、推理强度、推理摘要、权限和 Plan 模式走独立协议字段，Web 的协作模式设置传入 `developer_instructions: null`。用户主动选择的代码批注、网页元素等上下文按 ZCode 输入框规则序列化，附件和图片通过原生附件与图片通道传送。Codex 自带的模式指令和项目指令由远端 CLI 加载。
+普通输入会裁去首尾空白，作为原生 `text` 输入发送。模型、推理强度、推理摘要、权限和 Plan 模式走独立协议字段，Web 的协作模式设置传入 `developer_instructions: null`。用户主动选择的代码批注、网页元素等上下文按 ZCode 输入框规则序列化，图片作为原生图片输入发送。普通文件上传后，其远端路径写入用户输入。选中的 Skills 和插件随原生结构化输入提交。Codex 自带的模式指令和项目指令由远端 CLI 加载。
 
 ## 直接在 Linux 运行
 
@@ -104,8 +108,10 @@ node selfhost/tests/session-resync.mjs
 
 使用临时测试账号时，`SELFHOST_TEST_ROTATE_ACCOUNT=1` 验证改名、改密及旧会话撤销。`SELFHOST_TEST_IDENTITY=1` 在专用 QA 主机上验证多浏览器头像和名称同步。`SELFHOST_TEST_COMPAT_HOST` 可指定另一台已有原生会话的主机，验证不同 Codex 版本的项目发现。MCP 浏览器验收可用 `SELFHOST_TEST_MCP_THREAD` 指定已收到 `selfhost/tests/fixtures/mcp-confirmation.mjs` 请求的独立测试 Thread。
 
-桌面与手机回归脚本为 `selfhost/tests/browser.mjs`。设置 `SELFHOST_TEST_URL`、`SELFHOST_TEST_USER`、`SELFHOST_TEST_PASSWORD_FILE`、`SELFHOST_TEST_HOST`、`SELFHOST_TEST_CWD` 和 `SELFHOST_TEST_THREAD`，选择至少有一轮已完成对话的测试 Thread，在已安装 Chrome 的开发机执行 `node selfhost/tests/browser.mjs`。`SELFHOST_TEST_PANEL=1` 验证有 Git 更改的测试项目的 v4 状态栏。`SELFHOST_TEST_FILE_WATCH=1` 会在指定的测试项目创建并清理临时文件，验证文件树随远端变动刷新。`SELFHOST_TEST_MUTATE=1` 会创建、编辑并删除仅属于本次测试的临时主机。
+桌面与手机回归脚本为 `selfhost/tests/browser.mjs`。设置 `SELFHOST_TEST_URL`、`SELFHOST_TEST_USER`、`SELFHOST_TEST_PASSWORD_FILE`、`SELFHOST_TEST_HOST`、`SELFHOST_TEST_CWD` 和 `SELFHOST_TEST_THREAD`，选择至少有一轮已完成对话的测试 Thread，在已安装 Chrome 的开发机执行 `node selfhost/tests/browser.mjs`。`SELFHOST_TEST_PANEL=1` 验证有 Git 更改的测试项目的右上角状态栏。`SELFHOST_TEST_FILE_WATCH=1` 会在指定的测试项目创建并清理临时文件，验证文件树随远端变动刷新。`SELFHOST_TEST_MUTATE=1` 会创建、编辑并删除仅属于本次测试的临时主机。
 
 `SELFHOST_TEST_SESSION_FOCUS=1` 可单独运行会话验收。`SELFHOST_TEST_WRITER_THREAD` 指定由另一端持有且已有历史的测试会话。`SELFHOST_TEST_AUTO_TITLE=1` 在指定测试目录创建一条合成会话，验证原生项目归属和标题后归档该会话。
+
+在独立 QA 工作区，`node selfhost/tests/ssh-web-acceptance.mjs` 可用相同登录变量记录网页提交、原生接纳、首字和完成时间。该脚本默认发送一条短消息。设置 `SELFHOST_TEST_SCENARIO=patch` 可验证同一原生轮次的文件卡、补丁、右上面板及手机抽屉。文件撤销验收仅在自己的临时工作区运行；脚本先核对预览中唯一的合成路径。
 
 后续升级、完整 SHA 和取舍清单见 [上游同步说明](selfhost/UPSTREAMS.md)、[上游版本锁](selfhost/upstreams.lock.json) 和 [功能盘点](selfhost/FEATURE-AUDIT.zh.md)。源码遵循上游许可。[ZCode](LICENSE) · [Codex Gateway](upstream/codex-gateway/LICENSE) · [第三方许可](THIRD-PARTY-NOTICES.md)

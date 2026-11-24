@@ -1,5 +1,5 @@
 import { RemoteServiceAccess } from "@zcode/client";
-import { appSettingsSchema } from "@zcode/shared";
+import { appSettingsSchema, type AgentsListResult } from "@zcode/shared";
 import type { IChannel, IChannelClient } from "@zcode/rpc";
 import { z } from "zod";
 import { Gateway, type Message, type Project, type RemoteModel } from "./gateway.js";
@@ -31,17 +31,19 @@ function modelView(models: RemoteModel[], preference: unknown, hostDefault: Mess
     models.find((v) => v.model === hostDefault.model) ??
     models.find((v) => v.isDefault) ??
     models[0];
+  const efforts = model?.supportedReasoningEfforts?.map((e) => e.reasoningEffort) ?? [];
+  const reasoningLevel =
+    [
+      model?.model === input.modelId ? str(rec(input.options).reasoningLevel) : "",
+      model?.model === hostDefault.model ? str(hostDefault.effort) : "",
+      model?.defaultReasoningEffort,
+      efforts[0],
+    ].find((value) => value && (!efforts.length || efforts.includes(value))) ?? "";
   const selection = model
     ? {
         providerId,
         modelId: model.model,
-        options: {
-          reasoningLevel:
-            str(rec(input.options).reasoningLevel) ||
-            (model.model === hostDefault.model ? str(hostDefault.effort) : "") ||
-            model.defaultReasoningEffort ||
-            "",
-        },
+        options: reasoningLevel ? { reasoningLevel } : {},
       }
     : undefined;
   return {
@@ -112,13 +114,43 @@ export async function openWorkspace(
   cwd: string,
   manage: () => void,
 ) {
-  const [models, initialPrefs] = await Promise.all([
-    gateway.models(hostId),
-    gateway.request("/api/selfhost/settings", settingsSchema),
-  ]);
-  let preferences = initialPrefs;
+  // 模型目录可单独失败，文件和可读历史不以 model/list 成功作为工作区挂载条件。
+  let preferences = await gateway.request("/api/selfhost/settings", settingsSchema);
+  const models: RemoteModel[] = [];
+  const catalogs = new Map<string, Promise<RemoteModel[]>>();
+  function catalog(provider = "") {
+    const known = catalogs.get(provider);
+    if (known) return known;
+    const request = gateway
+      .models(hostId, provider || undefined)
+      .then((rows) => {
+        if (!provider && catalogs.get(provider) === request)
+          models.splice(0, models.length, ...rows);
+        return rows;
+      })
+      .catch((error) => {
+        if (catalogs.get(provider) === request) catalogs.delete(provider);
+        throw error;
+      });
+    catalogs.set(provider, request);
+    return request;
+  }
   const projectDefaults = new Map<string, Promise<Message>>();
-  function defaultModelView(path: string, selection: unknown) {
+  let directoryLookup: Promise<string> | undefined;
+  const workspaceDirectory = () =>
+    (directoryLookup ??= gateway
+      .request("/api/selfhost/workspace", z.object({ value: z.string().startsWith("/") }), "POST", {
+        hostId,
+        channel: "system",
+        method: "resolveDirectory",
+        args: [{ path: cwd }],
+      })
+      .then(({ value }) => value)
+      .catch(() => {
+        directoryLookup = undefined;
+        return cwd;
+      }));
+  function defaultModelView(path: string, selection: unknown, provider?: string) {
     let pending = projectDefaults.get(path);
     if (!pending) {
       // model/list 默认强度是目录里的推荐值，Codex 自己的分层配置可能不同。
@@ -131,16 +163,39 @@ export async function openWorkspace(
         });
       projectDefaults.set(path, pending);
     }
-    return pending.then((defaults) => modelView(models, selection, defaults));
+    return pending.then(async (defaults) =>
+      modelView(await catalog(provider || str(defaults.modelProvider)), selection, defaults),
+    );
   }
+  let providerRevision = 0;
   type Listener = { arg: unknown; fn: (value: unknown) => void };
   const listeners = new Map<string, Set<Listener>>();
   // ZCode subscribes after create() resolves. Retain the snapshot and any intervening PTY output.
   const terminalSessions = new Map<string, string | null>();
+  let terminalGeneration = 0;
+  let terminalRecovery: Promise<void> | undefined;
   const emit = (channel: string, event: string, value: unknown, target?: unknown) => {
     for (const entry of listeners.get(channel + "." + event) ?? [])
       if (target === undefined || target === entry.arg) entry.fn(value);
   };
+  function recoverTerminals() {
+    const generation = ++terminalGeneration;
+    const openedIds = [...terminalSessions.keys()];
+    if (!openedIds.length) return Promise.resolve();
+    return gateway.call("terminal.list").then((reply) => {
+      if (generation !== terminalGeneration) return;
+      if (!Array.isArray(reply.sessions)) throw Error("远程终端列表不可用");
+      const alive = new Set(
+        array(reply.sessions)
+          .filter((s) => s.hostId === hostId)
+          .map((s) => s.sessionId),
+      );
+      for (const id of openedIds) {
+        if (!alive.has(id) && terminalSessions.delete(id))
+          emit("terminal", "onDynamicExit", null, id);
+      }
+    });
+  }
   const fileWatches = new FileWatches(gateway, hostId, (id, event) =>
     emit("file-watcher", "onDynamicChange", event, id),
   );
@@ -159,6 +214,7 @@ export async function openWorkspace(
         async (projectId) =>
           (await gateway.projects(hostId)).find((project) => project.nativeId === projectId)
             ?.nativeId,
+        catalog,
       );
       bridges.set(target, bridge);
     }
@@ -171,17 +227,9 @@ export async function openWorkspace(
     if (document.hidden || polling) return;
     polling = true;
     try {
-      const page = await gateway.request(
-        "/api/threads?" +
-          new URLSearchParams({
-            hostId: String(hostId),
-            limit: "25",
-            useRemoteStateIndexOnly: "true",
-          }),
-        z.object({ data: z.array(z.record(z.string(), z.unknown())) }),
-      );
+      const page = await bridge.tasks.page({ sortKey: "updated_at" }, 25);
       const signature = JSON.stringify(
-        page.data.map((t) => [t.id, t.title, t.updatedAt, t.status]),
+        page.data.slice(0, 25).map((t) => [t.id, t.title, t.updatedAt, t.status]),
       );
       if (lastList && signature !== lastList)
         emit("broadcast", "onMessage", { channel: "state:projects", payload: {} });
@@ -210,9 +258,25 @@ export async function openWorkspace(
       else if (early === null) emit("terminal", "onDynamicData", data, frame.sessionId);
     }),
     gateway.on((msg) => {
+      if (msg.type === "disconnected") terminalGeneration++;
+      if (msg.type === "ready") {
+        terminalRecovery = recoverTerminals();
+        void terminalRecovery.catch(() => {});
+      }
       if (msg.type === "terminal.exited" || msg.type === "terminal.closed.event") {
         if (terminalSessions.delete(str(msg.sessionId)))
           emit("terminal", "onDynamicExit", num(msg.code), msg.sessionId);
+      }
+      if (msg.type === "config.pinnedThreads.changed") {
+        emit("broadcast", "onMessage", { channel: "state:projects", payload: {} });
+        emit("zcode-task", "onDynamicWorkspaceEvent", {
+          type: "workspace_task_list_changed",
+          workspacePath: cwd,
+        });
+      }
+      if (msg.type === "ready") {
+        projectDefaults.clear();
+        directoryLookup = undefined;
       }
       if (msg.type === "config.catalog.changed") {
         emit("broadcast", "onMessage", { channel: "state:projects", payload: {} });
@@ -228,6 +292,26 @@ export async function openWorkspace(
   ];
   async function rpc(channel: string, method: string, args: unknown[]): Promise<unknown> {
     const p = rec(args[0]);
+    if (channel === "coding-plan-subscription" && method === "getDynamicWorkflowClientConfig")
+      return { mode: "disabled", enabled: false, source: "default" };
+    if (channel === "zcode-agent" && method === "listSavedWorkflowRuns") return { runs: [] };
+    if (channel === "subagents" && method === "list") {
+      // App Server 提供会话内的子智能体活动。原生配置目录缺少列表接口时返回不可用能力。
+      return {
+        agents: [],
+        userAgents: [],
+        pluginAgents: [],
+        capability: { userScopeAvailable: false },
+      } satisfies AgentsListResult;
+    }
+    if (channel === "mcp-sync" && method === "listWorkspaceMcpServerStatuses")
+      return extensionRequest(
+        gateway,
+        hostId,
+        str(p.workspacePath) || cwd,
+        "listMcpServerStatuses",
+        p,
+      );
     if (
       (channel === "zcode-agent" || channel === "plugin-management" || channel === "plugins") &&
       [
@@ -245,12 +329,12 @@ export async function openWorkspace(
         "listMcpServerStatuses",
       ].includes(method)
     )
-      return extensionRequest(gateway, hostId, cwd, method, p);
+      return extensionRequest(gateway, hostId, str(p.workspacePath) || cwd, method, p);
     if (channel === "skills" && (method === "list" || method === "setEnabled"))
       return extensionRequest(
         gateway,
         hostId,
-        cwd,
+        str(p.workspacePath) || cwd,
         method === "setEnabled" ? "setSkillEnabled" : "listSkills",
         p,
       );
@@ -306,9 +390,48 @@ export async function openWorkspace(
       return defaultModelView(
         str(p.workspacePath) || cwd,
         p.selection ?? preferences.defaultModelSelection,
+        str(p.nativeModelProvider),
       );
-    if (channel === "provider-settings" && method === "getView")
-      return { ...modelView(models, undefined), templates: [] };
+    if (channel === "provider-settings" && (method === "getView" || method === "refresh")) {
+      if (method === "refresh") {
+        // 工作区设置的刷新必须重新查询当前 SSH 主机的原生目录。
+        catalogs.clear();
+        projectDefaults.delete(cwd);
+        providerRevision++;
+      }
+      const revision = providerRevision;
+      const selection = await defaultModelView(cwd, undefined);
+      const view = {
+        revision,
+        providerTemplates: [],
+        providerOrder: [providerId],
+        providers: selection.providers.map(
+          ({ providerId: id, providerName, config, models: entries }) => ({
+            providerId: id,
+            providerName,
+            enabled: true,
+            executable: entries.length > 0,
+            effectiveBuiltinConfig: config,
+            effectiveConfig: config,
+            issues: [],
+            models: entries.map(({ modelId, config: modelConfig }) => ({
+              kind: "candidate",
+              modelId,
+              builtin: true,
+              effectiveBuiltinConfig: modelConfig,
+              effectiveConfig: modelConfig,
+              enabled: true,
+              executable: true,
+              selectable: true,
+              issues: [],
+            })),
+          }),
+        ),
+      };
+      if (method === "refresh" && revision === providerRevision)
+        emit("provider-settings", "onDidChange", view);
+      return view;
+    }
     if (
       channel === "zcode-agent" &&
       (method === "getSessionLifecycle" || method === "ensureSessionReady")
@@ -316,7 +439,7 @@ export async function openWorkspace(
       return scopedBridge(p.workspacePath).lifecycle(str(p.sessionId));
     if (channel === "zcode-agent" && /^attachment(Begin|Chunk|Commit|Abort)V4$/.test(method))
       return uploads.handle(method, p);
-    if (channel === "zcode-agent" && method.endsWith("V4"))
+    if (channel === "zcode-agent" && (method.endsWith("V4") || method === "listSessionSubagents"))
       return scopedBridge(p.workspacePath).handle(method, p);
     if (channel === "oauth") {
       if (method === "getProviders") return [];
@@ -335,10 +458,15 @@ export async function openWorkspace(
     }
     if (channel === "project") {
       if (method === "readTree") {
-        const [catalog, threads] = await Promise.all([
+        const [catalog, activeThreads, archivedThreads, currentDirectory] = await Promise.all([
           gateway.projectCatalog(hostId),
-          bridge.threads(),
+          bridge.tasks.threads(),
+          bridge.tasks.threads(undefined, undefined, true),
+          workspaceDirectory(),
         ]);
+        const threads = [
+          ...new Map([...activeThreads, ...archivedThreads].map((t) => [str(t.id), t])).values(),
+        ];
         const projects = catalog.items;
         const byId = new Map(
           projects.map((project) => [project.id ?? project.remotePath, project]),
@@ -358,13 +486,14 @@ export async function openWorkspace(
                     ? byId.get(stored)
                     : projectForDirectory(projects, t.cwd);
             return {
-              ...bridge.meta(t),
+              ...bridge.tasks.meta(t),
               hostId: "local",
-              workspacePath: str(t.cwd),
+              // 原生 cwd 可能是用户所选 SSH 路径的规范形式。导航身份保留所选项目，文件操作保留原生 cwd。
+              workspacePath: t.cwd === currentDirectory ? cwd : str(t.cwd),
               cwd: str(t.cwd),
               projectId: owner ? (owner.id ?? owner.remotePath) : null,
-              pinned: false,
-              archived: false,
+              pinned: t.pinned === true,
+              archived: t.archived === true,
             };
           }),
         };
@@ -409,6 +538,18 @@ export async function openWorkspace(
       if (method === "disposeAll") return fileWatches.clear();
     }
     if (channel === "terminal") {
+      if (method === "write" || method === "resize") {
+        await gateway.connect();
+        if (terminalRecovery) {
+          try {
+            await terminalRecovery;
+          } catch {
+            terminalRecovery = recoverTerminals();
+            await terminalRecovery;
+          }
+        }
+        if (!terminalSessions.has(str(p.id))) throw Error("SSH 终端已退出");
+      }
       if (method === "create") {
         const response = await gateway.call("terminal.open", {
           hostId: hostId,
@@ -474,59 +615,20 @@ export async function openWorkspace(
           "listDeletedTaskIds",
         ].includes(method)
       ) {
-        const kind =
-          method === "listArchivedTasks"
-            ? "archived"
-            : method === "listPinnedTasks" || method === "listPinnedTaskIds"
-              ? "pinned"
-              : p.kind;
-        const rows = (
-          await bridge.threads(p.workspaceScopes === "host" ? undefined : scope, str(p.search))
-        ).map((t) => ({
-          ...bridge.meta(t),
-          sourceAvailability: "online",
-          liveStatus: rec(t.status).type === "active" ? "running" : "idle",
-        }));
-        const selected =
-          kind === "archived" || kind === "pinned" || method === "listDeletedTaskIds"
-            ? []
-            : rows.filter(
-                (t) =>
-                  ((kind !== "active" && method !== "listActiveTaskIds") ||
-                    t.status === "running") &&
-                  (!Array.isArray(p.taskIds) || p.taskIds.includes(t.taskId)),
-              );
-        if (method === "listTaskList") {
-          const limit = num(p.limit, selected.length);
-          return {
-            items: selected.slice(0, limit),
-            total: selected.length,
-            hasMore: limit < selected.length,
-          };
-        }
-        return method.endsWith("Ids") ? selected.map((t) => t.taskId) : selected;
+        return bridge.tasks.list(method, p);
       }
-      const address = rec(p.address),
-        id = str(p.taskId ?? address.taskId);
       if (method === "getTaskMeta") {
-        const found = (await bridge.threads()).find((t) => t.id === id);
-        return found ? bridge.meta(found) : null;
+        const t = await bridge.tasks.point(str(p.taskId ?? rec(p.address).taskId));
+        return t ? bridge.tasks.meta(t) : null;
       }
-      if (method === "renameTask" || (method === "mutateTask" && rec(p.mutation).kind === "rename"))
-        return gateway.request("/api/threads/rename", z.unknown(), "POST", {
-          hostId: hostId,
-          threadId: id,
-          name: p.title ?? rec(p.mutation).title,
-        });
       if (
-        method === "archiveTask" ||
-        method === "unarchiveTask" ||
-        (method === "mutateTask" && rec(p.mutation).kind === "archive")
+        ["archiveTask", "unarchiveTask", "renameTask", "setTaskPinned"].includes(method) ||
+        (method === "mutateTask" &&
+          ["pin", "archive", "rename"].includes(str(rec(p.mutation).kind)))
       ) {
-        const archive = method === "archiveTask" || rec(p.mutation).archived === true;
-        return codexRequest(gateway, hostId, archive ? "thread/archive" : "thread/unarchive", {
-          threadId: id,
-        });
+        const outcome = await bridge.tasks.mutate(method, p);
+        emit("broadcast", "onMessage", { channel: "state:projects", payload: {} });
+        return outcome;
       }
       if (method === "getTaskConfigOptions") return [];
       if (method === "getTaskModelSelection")

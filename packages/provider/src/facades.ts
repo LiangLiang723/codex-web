@@ -196,6 +196,8 @@ export interface ModelSelectionProviderView extends Pick<
 
 export interface ModelSelectionViewInput {
   readonly selection: ModelSelection | null;
+  readonly workspacePath?: string;
+  readonly nativeModelProvider?: string;
 }
 
 export interface ModelSelectionView extends Partial<EffectiveModelSelectionResult> {

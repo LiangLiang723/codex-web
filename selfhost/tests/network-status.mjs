@@ -66,6 +66,7 @@ async function verifyNetworkStatus(page, origin) {
   let pendingReady;
   let holdReady = false;
   let losePong = false;
+  let failCatalog = false;
   const retry = (message, id = turnId) => ({
     type: "error.reported",
     params: { threadId, turnId: id, willRetry: true, error: { message } },
@@ -90,15 +91,19 @@ async function verifyNetworkStatus(page, origin) {
     localStorage.setItem("selfhost.auth", "network-test-fixture");
     localStorage.setItem("zcode-locale-preference", "zh-CN");
   });
-  await page.route("**/api/**", (route) => {
+  // Vite 的源模块也可能含有 /api/ 目录，只模拟网关的根 API。
+  await page.route(new URL("/api/**", origin).href, (route) => {
     const url = new URL(route.request().url());
+    if (failCatalog && url.pathname === "/api/hosts")
+      return route.fulfill({ status: 503, json: { message: "fixture catalog offline" } });
     const request = route.request().postDataJSON();
     const responses = {
       "/api/hosts": [host],
       "/api/selfhost/projects": url.searchParams.get("organization")
         ? { items: [project], memberships: { [threadId]: cwd } }
         : [project],
-      "/api/threads": { data: [thread], nextCursor: null },
+      "/api/threads": { data: url.searchParams.get("archived")==="true"?[]:[thread], nextCursor: null },
+      "/api/selfhost/thread-summary": {thread},
       "/api/models": { data: [model], nextCursor: null },
       "/api/selfhost/settings": { locale: "zh-CN" },
       "/api/selfhost/capability": { value: [] },
@@ -223,6 +228,16 @@ async function verifyNetworkStatus(page, origin) {
   await hostFailure.waitFor();
   sendHost("connected");
   await hostFailure.waitFor({ state: "hidden" });
+
+  failCatalog = true;
+  const failedRefresh = page.waitForResponse(response => new URL(response.url()).pathname === "/api/hosts" && response.status() === 503);
+  socket.send(JSON.stringify({type:"config.catalog.changed"}));
+  await failedRefresh;
+  await page.getByText("fixture catalog offline", {exact:false}).first().waitFor();
+  await page.getByText("部分回复", {exact:true}).waitFor();
+  failCatalog = false;
+  socket.send(JSON.stringify({type:"config.catalog.changed"}));
+  await page.getByText("fixture catalog offline", {exact:false}).first().waitFor({state:"hidden"});
 
   holdReady = true;
   losePong = true;

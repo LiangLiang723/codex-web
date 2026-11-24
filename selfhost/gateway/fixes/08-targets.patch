@@ -1,0 +1,21 @@
+--- a/server/utils/gateway/config/user-config-mutation-service.ts
++++ b/server/utils/gateway/config/user-config-mutation-service.ts
+@@ -1,3 +1,4 @@
++import { suspendHostAutomations } from "../../selfhost-automation-binding";
+ import type { GatewayConfig } from "~~/shared/types";
+ import { userStore } from "../auth/users";
+ import { sshConnections } from "../infra/host-services";
+@@ -48,8 +49,12 @@
+     }
+     withGatewayDatabaseTransaction((db) => {
+       userStore.saveConfig(userId, nextConfig);
+-      for (const id of replacedIds)
++      for (const id of replacedIds) {
+         db.prepare("DELETE FROM thread_index WHERE user_id=? AND host_id=?").run(userId, id);
++        if (db.prepare("SELECT 1 FROM sqlite_master WHERE name='zcode_project_catalog' AND type='table'").get())
++          db.prepare("DELETE FROM zcode_project_catalog WHERE user_id=? AND host_id=?").run(userId, id);
++        suspendHostAutomations(db,userId,id);
++      }
+     });
+     replaceCurrentGatewayMemoryState(draftState);
+     this.reconcileCommittedConfig(

@@ -1,0 +1,499 @@
+diff --git a/server/utils/gateway/agent/providers/codex/codex-event-mapper.ts b/server/utils/gateway/agent/providers/codex/codex-event-mapper.ts
+index 8fb99bf..77f177b 100644
+--- a/server/utils/gateway/agent/providers/codex/codex-event-mapper.ts
++++ b/server/utils/gateway/agent/providers/codex/codex-event-mapper.ts
+@@ -449,6 +449,7 @@ const ambientCodexNotifications = new Set([
+   "remoteControl/status/changed",
+   "fs/changed",
+   "thread/compacted",
++  "thread/queue/changed",
+   "model/rerouted",
+   "model/verification",
+   "modelProvider/authRecoveryStarted",
+diff --git a/server/utils/gateway/infra/rpc/shared-codex-client.ts b/server/utils/gateway/infra/rpc/shared-codex-client.ts
+index f4fc3fe..1f0d087 100644
+--- a/server/utils/gateway/infra/rpc/shared-codex-client.ts
++++ b/server/utils/gateway/infra/rpc/shared-codex-client.ts
+@@ -121,7 +121,7 @@ export class SharedCodexClient extends EventEmitter<SharedClientEvents> {
+     }
+     // A physical reconnect starts a new cache namespace. No RPC observed messages during the
+     // offline gap, so old snapshots/replay must expire rather than masquerade as a live replica.
+-    remoteHosts.bind(this.host, `${key}:${connection.epoch}`, this);
++    remoteHosts.bind(this.host, `${key}:${connection.epoch}`, this, key);
+     this.connection = connection;
+     connection.members.add(this);
+     await connection.ready;
+diff --git a/server/utils/gateway/realtime/handlers/thread-events.ts b/server/utils/gateway/realtime/handlers/thread-events.ts
+index bac58c6..2221279 100644
+--- a/server/utils/gateway/realtime/handlers/thread-events.ts
++++ b/server/utils/gateway/realtime/handlers/thread-events.ts
+@@ -8,6 +8,7 @@ import { threadRuntimeEvents } from "../../runtime/thread-runtime-events";
+ import { gatewayEventStore } from "../../state/gateway-events";
+ import { hostStore } from "../../state/hosts";
+ import { webThreadSource } from "../../../selfhost-thread-title";
++import { createNativeDeliveryThread, receiptResult } from "../../../selfhost-delivery";
+ import { bindGatewayUser } from "../../state/memory";
+ import {
+   runPeerScoped,
+@@ -180,7 +181,7 @@ export async function startThread(
+ ) {
+   const input = threadStartSchema.parse(message);
+   const host = requireRecord(hostStore.getWithSecret(input.hostId), "Host not found");
+-  const result = await threadBroker.startThread(
++  const start = (bind?: (threadId: string) => void) => threadBroker.startThread(
+     host,
+     {
+       ...buildThreadStartParams(input),
+@@ -188,7 +189,22 @@ export async function startThread(
+       threadSource: webThreadSource,
+     },
+     input.provider,
++    bind,
+   );
++  if (message.deliveryId) {
++    if (!input.cwd) throw new Error("Tracked thread creation requires a workspace");
++    const receipt = await createNativeDeliveryThread(
++      host, input.cwd, message.deliveryId, message.firstInputExpected === true, start,
++    );
++    sendRealtimePeerMessage(peer, {
++      type: "thread.delivery.state",
++      requestId: message.requestId,
++      hostId: input.hostId,
++      ...receiptResult(receipt),
++    });
++    return;
++  }
++  const result = await start();
+   const threadId = String(result.thread.id);
+   // A newly started thread can emit notifications before thread/start returns its id. Replaying
+   // from zero is safe for a new identity and avoids advancing past those startup events.
+diff --git a/server/utils/gateway/realtime/handlers/turns.ts b/server/utils/gateway/realtime/handlers/turns.ts
+index 8dfb4db..54cc461 100644
+--- a/server/utils/gateway/realtime/handlers/turns.ts
++++ b/server/utils/gateway/realtime/handlers/turns.ts
+@@ -7,11 +7,26 @@ import { sendRealtimePeerMessage, type RealtimePeer } from "../peer-state";
+ import { requireRecord } from "../../http/validation/common";
+ import { threadBroker } from "../../runtime/broker";
+ import { hostStore } from "../../state/hosts";
++import { recordNativeDelivery, receiptResult } from "../../../selfhost-delivery";
+ 
+ export async function startTurn(
+   peer: RealtimePeer,
+   request: Extract<RealtimeClientMessage, { type: "turn.start" }>,
+ ) {
++  if (request.deliveryId) {
++    const host = requireRecord(hostStore.getWithSecret(request.hostId), "Host not found");
++    const receipt = await recordNativeDelivery(host, request.threadId, request.deliveryId, "startNow", async () => {
++      const result = await startTurnFromRealtime({ ...request, clientUserMessageId: request.deliveryId });
++      return result.turn?.id === undefined ? null : String(result.turn.id);
++    });
++    sendRealtimePeerMessage(peer, {
++      type: "thread.delivery.state",
++      requestId: request.requestId,
++      hostId: host.id,
++      ...receiptResult(receipt),
++    });
++    return;
++  }
+   const result = await startTurnFromRealtime(request);
+   sendRealtimePeerMessage(peer, {
+     type: "turn.start.accepted",
+@@ -26,6 +41,20 @@ export async function steerTurn(
+   peer: RealtimePeer,
+   request: Extract<RealtimeClientMessage, { type: "turn.steer" }>,
+ ) {
++  if (request.deliveryId) {
++    const host = requireRecord(hostStore.getWithSecret(request.hostId), "Host not found");
++    const receipt = await recordNativeDelivery(host, request.threadId, request.deliveryId, "guide", async () => {
++      const result = await steerTurnFromRealtime({ ...request, clientUserMessageId: request.deliveryId });
++      return result.turnId ?? null;
++    });
++    sendRealtimePeerMessage(peer, {
++      type: "thread.delivery.state",
++      requestId: request.requestId,
++      hostId: host.id,
++      ...receiptResult(receipt),
++    });
++    return;
++  }
+   const result = await steerTurnFromRealtime(request);
+   sendRealtimePeerMessage(peer, {
+     type: "turn.steer.accepted",
+diff --git a/server/utils/gateway/realtime/message-dispatcher.ts b/server/utils/gateway/realtime/message-dispatcher.ts
+index 9dad745..e1172a8 100644
+--- a/server/utils/gateway/realtime/message-dispatcher.ts
++++ b/server/utils/gateway/realtime/message-dispatcher.ts
+@@ -40,6 +40,21 @@ export class RealtimeMessageDispatcher {
+ 
+   dispatch(peer: RealtimePeer, request: RealtimeClientMessage) {
+     return match(request)
++      .with({ type: "thread.delivery.query" }, (value) =>
++        this.dispatchEntry(peer, value, this.handlers[value.type]),
++      )
++      .with({ type: "thread.native.controls" }, (value) =>
++        this.dispatchEntry(peer, value, this.handlers[value.type]),
++      )
++      .with({ type: "thread.queue.add" }, (value) =>
++        this.dispatchEntry(peer, value, this.handlers[value.type]),
++      )
++      .with({ type: "thread.queue.delete" }, (value) =>
++        this.dispatchEntry(peer, value, this.handlers[value.type]),
++      )
++      .with({ type: "thread.native.compact" }, (value) =>
++        this.dispatchEntry(peer, value, this.handlers[value.type]),
++      )
+       .with({ type: "modelProvider.request" }, (value) =>
+         this.dispatchEntry(peer, value, this.handlers[value.type]),
+       )
+diff --git a/server/utils/gateway/realtime/message-handlers.ts b/server/utils/gateway/realtime/message-handlers.ts
+index 4b7730a..2d323e8 100644
+--- a/server/utils/gateway/realtime/message-handlers.ts
++++ b/server/utils/gateway/realtime/message-handlers.ts
+@@ -64,7 +64,20 @@ import {
+   removeThreadAttachment,
+ } from "./handlers/thread-attachments";
+ 
++import {
++  queryDelivery,
++  readControls,
++  addQueuedInput,
++  deleteQueuedInput,
++  startNativeCompaction,
++} from "./handlers/selfhost-delivery";
++
+ export const realtimeMessageDispatcher = new RealtimeMessageDispatcher({
++  "thread.delivery.query": queryDelivery,
++  "thread.native.controls": readControls,
++  "thread.queue.add": addQueuedInput,
++  "thread.queue.delete": deleteQueuedInput,
++  "thread.native.compact": startNativeCompaction,
+   "modelProvider.request": manageModelProvider,
+   "thread.fork": forkThread,
+   "thread.items.list": listThreadItems,
+diff --git a/server/utils/gateway/runtime/broker.ts b/server/utils/gateway/runtime/broker.ts
+index 0d35901..b17d7d5 100644
+--- a/server/utils/gateway/runtime/broker.ts
++++ b/server/utils/gateway/runtime/broker.ts
+@@ -17,6 +17,8 @@ import { McpRuntimeService } from "./mcp-runtime";
+ import { AppServerFileService } from "./app-server-files";
+ import { providerAdapterFor } from "../agent/provider-registry";
+ import { ThreadAttachmentService } from "./thread-attachments";
++import type { AgentRpcClient } from "../agent/provider-adapter";
++import { recordFromUnknown } from "~~/shared/utils/records";
+ 
+ class ThreadBroker {
+   private readonly registry = new ControllerRegistry();
+@@ -49,6 +51,7 @@ class ThreadBroker {
+     host: HostRecord,
+     params: Record<string, unknown>,
+     providerId: AgentProviderId = "codex",
++    onNativeStarted?: (threadId: string) => void,
+   ) {
+     const client = await this.registry.getHostClient(host, providerId);
+     // Paginated history is the current App Server storage model that can hydrate indexed Turn
+@@ -61,6 +64,9 @@ class ThreadBroker {
+       // It exposes exact per-response usage metadata without changing persisted rollout history.
+       experimentalRawEvents: true,
+     });
++    // 先记录原生身份，再解析衍生快照或保留订阅。任一步失败均沿原 Thread 恢复。
++    const nativeId = recordFromUnknown(recordFromUnknown(result)?.thread)?.id;
++    if (typeof nativeId === "string" && nativeId) onNativeStarted?.(nativeId);
+     const started = this.openService.startedThreadResult(host, result);
+     await this.registry.retainStartedThreadSubscription(host, started.threadId, providerId);
+     return started.result;
+@@ -183,6 +189,14 @@ class ThreadBroker {
+     return this.attachments.remove(host, input);
+   }
+ 
++  async withNativeThreadWriter<T>(
++    host: HostRecord, threadId: string, operate: (client: AgentRpcClient) => Promise<T>,
++  ) {
++    return this.registry.withScopedSubscription(host, threadId, (controller) =>
++      controller.enqueue(() => operate(controller.client)),
++    );
++  }
++
+   async getHostClient(host: HostRecord) {
+     return this.registry.getHostClient(host);
+   }
+diff --git a/server/utils/gateway/state/remote-hosts.ts b/server/utils/gateway/state/remote-hosts.ts
+index 918b487..17a5e58 100644
+--- a/server/utils/gateway/state/remote-hosts.ts
++++ b/server/utils/gateway/state/remote-hosts.ts
+@@ -8,6 +8,7 @@ interface RemoteHostAlias {
+   userId: number;
+   hostId: number;
+   remoteKey: string;
++  identityKey: string;
+   fingerprint: string;
+   owners: Set<object>;
+ }
+@@ -21,7 +22,7 @@ export const remoteHosts = {
+     return createHash("sha256").update(JSON.stringify(identity)).digest("hex");
+   },
+ 
+-  bind(host: HostRecord, remoteKey: string, owner: object) {
++  bind(host: HostRecord, remoteKey: string, owner: object, identityKey = remoteKey) {
+     const userId = requiredGatewayUserId();
+     const key = aliasKey(userId, host.id);
+     const fingerprint = hostRuntimeFingerprint(host);
+@@ -34,6 +35,7 @@ export const remoteHosts = {
+       userId,
+       hostId: host.id,
+       remoteKey,
++      identityKey,
+       fingerprint,
+       owners: new Set([owner]),
+     });
+@@ -44,6 +46,11 @@ export const remoteHosts = {
+     return this.keyForUser(requiredGatewayUserId(), hostId);
+   },
+ 
++  // 投递回执需要跨 SSH 重连。回放缓存继续使用含连接世代的 key。
++  verifiedIdentityKey(hostId: number) {
++    return aliases.get(aliasKey(requiredGatewayUserId(), hostId))?.identityKey ?? null;
++  },
++
+   keyForUser(userId: number, hostId: number) {
+     return aliases.get(aliasKey(userId, hostId))?.remoteKey ?? null;
+   },
+diff --git a/shared/runtime/realtime/client-message-schema.ts b/shared/runtime/realtime/client-message-schema.ts
+index cdf073c..c631933 100644
+--- a/shared/runtime/realtime/client-message-schema.ts
++++ b/shared/runtime/realtime/client-message-schema.ts
+@@ -16,6 +16,15 @@ import {
+   threadScopeFields,
+ } from "./common";
+ 
++import {
++  selfhostCompactSchema,
++  selfhostControlsReadSchema,
++  selfhostDeliveryQuerySchema,
++  selfhostQueueAddSchema,
++  selfhostQueueDeleteSchema,
++  trackedDeliveryFields,
++} from "./selfhost-delivery";
++
+ const approvalPolicy = z.enum(["untrusted", "on-request", "never"]).nullable().optional();
+ const imageInput = z
+   .object({
+@@ -45,6 +54,11 @@ const collaborationMode = z
+ export const realtimeClientMessageSchema: z.ZodType<RealtimeClientMessage> = z.discriminatedUnion(
+   "type",
+   [
++    selfhostDeliveryQuerySchema,
++    selfhostControlsReadSchema,
++    selfhostQueueAddSchema,
++    selfhostQueueDeleteSchema,
++    selfhostCompactSchema,
+     z
+       .object({
+         type: z.literal("modelProvider.request"),
+@@ -192,6 +206,8 @@ export const realtimeClientMessageSchema: z.ZodType<RealtimeClientMessage> = z.d
+     z
+       .object({
+         type: z.literal("thread.start"),
++        ...trackedDeliveryFields,
++        firstInputExpected: z.boolean().optional(),
+         ...requestIdField,
+         hostId: positiveId,
+         cwd: nullableString,
+@@ -207,6 +223,7 @@ export const realtimeClientMessageSchema: z.ZodType<RealtimeClientMessage> = z.d
+     z
+       .object({
+         type: z.literal("turn.start"),
++        ...trackedDeliveryFields,
+         ...requestIdField,
+         ...threadScopeFields,
+         text: z.string(),
+@@ -236,6 +253,7 @@ export const realtimeClientMessageSchema: z.ZodType<RealtimeClientMessage> = z.d
+     z
+       .object({
+         type: z.literal("turn.steer"),
++        ...trackedDeliveryFields,
+         ...requestIdField,
+         ...threadScopeFields,
+         expectedTurnId: nonEmptyString,
+diff --git a/shared/runtime/realtime/selfhost-delivery.ts b/shared/runtime/realtime/selfhost-delivery.ts
+new file mode 100644
+index 0000000..e8c2eac
+--- /dev/null
++++ b/shared/runtime/realtime/selfhost-delivery.ts
+@@ -0,0 +1,98 @@
++import { z } from "zod";
++import { uploadedFileSchema } from "../uploaded-file";
++import { nonEmptyString, positiveId, requestIdField, threadScopeFields } from "./common";
++
++export const trackedDeliveryFields = { deliveryId: z.uuid().optional() };
++const commandKey = z.object({ sessionId: nonEmptyString.nullable(), commandId: z.uuid() }).strict();
++const deliveryState = z.object({
++  state: z.enum(["creating", "created", "pending", "accepted", "rejected"]),
++  threadId: nonEmptyString.nullable(),
++  delivery: z.enum(["startNow", "guide", "queue"]).nullable(),
++  turnId: nonEmptyString.nullable(),
++});
++const queueItem = z.object({
++  id: nonEmptyString,
++  clientUserMessageId: nonEmptyString,
++  input: z.array(z.record(z.string(), z.unknown())),
++});
++
++export const selfhostDeliveryQuerySchema = z.object({
++  type: z.literal("thread.delivery.query"),
++  ...requestIdField,
++  hostId: positiveId,
++  cwd: z.string().startsWith("/"),
++  commands: z.array(commandKey).min(1).max(64),
++}).strict();
++export const selfhostControlsReadSchema = z.object({
++  type: z.literal("thread.native.controls"),
++  ...requestIdField,
++  ...threadScopeFields,
++}).strict();
++export const selfhostQueueAddSchema = z.object({
++  type: z.literal("thread.queue.add"),
++  ...requestIdField,
++  ...threadScopeFields,
++  deliveryId: z.uuid(),
++  text: z.string(),
++  files: z.array(uploadedFileSchema).optional(),
++  images: z.array(z.object({
++    path: z.string().optional(),
++    url: z.string().optional(),
++    detail: z.enum(["low", "high", "auto", "original"]).optional(),
++  }).strict()).optional(),
++}).strict();
++export const selfhostQueueDeleteSchema = z.object({
++  type: z.literal("thread.queue.delete"),
++  ...requestIdField,
++  ...threadScopeFields,
++  queuedSubmissionId: nonEmptyString,
++}).strict();
++export const selfhostCompactSchema = z.object({
++  type: z.literal("thread.native.compact"),
++  ...requestIdField,
++  ...threadScopeFields,
++}).strict();
++
++export const selfhostDeliveryStateSchema = deliveryState.extend({
++  type: z.literal("thread.delivery.state"),
++  ...requestIdField,
++  hostId: positiveId,
++}).strict();
++export const selfhostDeliveryResultsSchema = z.object({
++  type: z.literal("thread.delivery.results"),
++  ...requestIdField,
++  hostId: positiveId,
++  results: z.array(z.union([
++    deliveryState.extend({ key: commandKey }).strict(),
++    z.object({ key: commandKey, state: z.literal("missing") }).strict(),
++  ])),
++}).strict();
++export const selfhostControlsResultSchema = z.object({
++  type: z.literal("thread.native.controls.result"),
++  ...requestIdField,
++  ...threadScopeFields,
++  queue: z.boolean(),
++  fork: z.boolean(),
++  compact: z.boolean(),
++  queued: z.array(queueItem),
++}).strict();
++export const selfhostQueueDeletedSchema = z.object({
++  type: z.literal("thread.queue.deleted"),
++  ...requestIdField,
++  ...threadScopeFields,
++  deleted: z.boolean(),
++}).strict();
++export const selfhostCompactAcceptedSchema = z.object({
++  type: z.literal("thread.native.compact.accepted"),
++  ...requestIdField,
++  ...threadScopeFields,
++}).strict();
++
++export type SelfhostDeliveryClientMessage = z.infer<
++  typeof selfhostDeliveryQuerySchema | typeof selfhostControlsReadSchema |
++  typeof selfhostQueueAddSchema | typeof selfhostQueueDeleteSchema | typeof selfhostCompactSchema
++>;
++export type SelfhostDeliveryServerMessage = z.infer<
++  typeof selfhostDeliveryStateSchema | typeof selfhostDeliveryResultsSchema |
++  typeof selfhostControlsResultSchema | typeof selfhostQueueDeletedSchema | typeof selfhostCompactAcceptedSchema
++>;
+diff --git a/shared/runtime/realtime/server-message-schema.ts b/shared/runtime/realtime/server-message-schema.ts
+index 5bc4820..29d7cd7 100644
+--- a/shared/runtime/realtime/server-message-schema.ts
++++ b/shared/runtime/realtime/server-message-schema.ts
+@@ -27,6 +27,14 @@ import {
+   threadScopeFields,
+ } from "./common";
+ 
++import {
++  selfhostCompactAcceptedSchema,
++  selfhostControlsResultSchema,
++  selfhostDeliveryResultsSchema,
++  selfhostDeliveryStateSchema,
++  selfhostQueueDeletedSchema,
++} from "./selfhost-delivery";
++
+ const projectedHistoryItemSchema = z
+   .object({
+     id: z.union([z.string(), z.number()]).nullish(),
+@@ -415,6 +423,11 @@ const agentProjectDefaultsSchema = z
+ export const realtimeServerMessageSchema: z.ZodType<RealtimeServerMessage> = z.discriminatedUnion(
+   "type",
+   [
++    selfhostDeliveryStateSchema,
++    selfhostDeliveryResultsSchema,
++    selfhostControlsResultSchema,
++    selfhostQueueDeletedSchema,
++    selfhostCompactAcceptedSchema,
+     z
+       .object({
+         type: z.literal("modelProvider.result"),
+diff --git a/shared/types/realtime.ts b/shared/types/realtime.ts
+index ff0d010..473d252 100644
+--- a/shared/types/realtime.ts
++++ b/shared/types/realtime.ts
+@@ -30,7 +30,10 @@ import type { AgentProjectDefaults } from "./agent-defaults";
+ import type { WebPushSubscription } from "../notifications/web-push";
+ import type { HostUpgradeProgress } from "../host-upgrade";
+ 
++import type { SelfhostDeliveryClientMessage, SelfhostDeliveryServerMessage } from "../runtime/realtime/selfhost-delivery";
++
+ export type RealtimeClientMessage =
++  | SelfhostDeliveryClientMessage
+   | {
+       type: "modelProvider.request";
+       requestId: string;
+@@ -173,6 +176,8 @@ export type RealtimeClientMessage =
+     }
+   | {
+       type: "thread.start";
++      deliveryId?: string;
++      firstInputExpected?: boolean;
+       requestId: string;
+       hostId: number;
+       cwd?: string | null;
+@@ -186,6 +191,7 @@ export type RealtimeClientMessage =
+     }
+   | {
+       type: "turn.start";
++      deliveryId?: string;
+       requestId: string;
+       hostId: number;
+       threadId: string;
+@@ -203,6 +209,7 @@ export type RealtimeClientMessage =
+     }
+   | {
+       type: "turn.steer";
++      deliveryId?: string;
+       requestId: string;
+       hostId: number;
+       threadId: string;
+@@ -377,6 +384,7 @@ export type RealtimeClientMessage =
+     };
+ 
+ export type RealtimeServerMessage =
++  | SelfhostDeliveryServerMessage
+   | { type: "thread.section.changed"; hostId: number; threadId: string; sectionId: string | null }
+   | {
+       type: "modelProvider.result";

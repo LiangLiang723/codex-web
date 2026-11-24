@@ -2,6 +2,7 @@ import { verifyElicitation } from "./elicitation.mjs";
 import { verifyWorkspaceIdentity } from "./workspace-identity.mjs";
 import { verifyAccount } from "./account.mjs";
 import { verifyNativeRecovery } from "./native-history.mjs";
+import { composerPicker, revealPickerOption } from "./fixtures/composer-picker.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { once } from "node:events";
@@ -11,7 +12,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const base = new URL(process.env.SELFHOST_TEST_URL).origin;
 const username = process.env.SELFHOST_TEST_USER || "admin";
-const password = (await readFile(process.env.SELFHOST_TEST_PASSWORD_FILE, "utf8")).trim();
+const qaPassword = (await readFile(process.env.SELFHOST_TEST_PASSWORD_FILE, "utf8")).trim();
 const thread = process.env.SELFHOST_TEST_THREAD,
   hostId = Number(process.env.SELFHOST_TEST_HOST || 1),
   cwd = process.env.SELFHOST_TEST_CWD;
@@ -29,7 +30,7 @@ async function verify(page) {
 async function login(page) {
   await page.goto(base + "/?manage=1");
   await page.locator("[name=username]").fill(username);
-  await page.locator("[name=password]").fill(password);
+  await page.locator("[name=password]").fill(qaPassword);
   await button(page, "登录").click();
   await button(page, "添加主机").waitFor();
 }
@@ -153,7 +154,7 @@ async function workspace(page, width, projects) {
   if (!cwd || !thread) return;
   const query = new URLSearchParams({ host: String(hostId), cwd, thread });
   let terminalId;
-  const remoteDetailReads = [];
+  const detailReads = [];
   page.on("request", (request) => {
     if (
       new URL(request.url()).pathname !== "/api/selfhost/capability" ||
@@ -161,8 +162,7 @@ async function workspace(page, width, projects) {
     )
       return;
     const call = request.postDataJSON();
-    if (call?.method === "plugin/read" && call.params?.remoteMarketplaceName)
-      remoteDetailReads.push(call.params.remoteMarketplaceName);
+    if (call?.method === "plugin/read") detailReads.push(call.params?.pluginName);
   });
   const watchedPaths = new Set();
   if (width >= 1300) {
@@ -195,14 +195,21 @@ async function workspace(page, width, projects) {
     "Remote installed plugin catalog returned " + pluginResponse.status(),
   );
   const pluginLabels = await pluginResponse.json();
-  // Check a real installed entry from each marketplace, including offline remote catalogs.
-  for (const market of pluginLabels.value.marketplaces) {
-    const first = market.plugins.find((plugin) => plugin.enabled);
-    if (!first) continue;
-    const name = first.interface?.displayName || first.name;
-    await page.getByRole("option").filter({ hasText: name }).first().waitFor({ timeout: 75000 });
+  const installed = pluginLabels.value.marketplaces.flatMap((market) => {
+    const first = market.plugins.find((plugin) => plugin.enabled && plugin.installed && plugin.id);
+    return first ? [first] : [];
+  });
+  const picker = composerPicker(page);
+  await picker.waitFor();
+  if (installed.length) {
+    await picker.locator('[role="option"][data-section-id="plugins"]').first().waitFor();
   }
-  assert.deepEqual(remoteDetailReads, [], "Opening the composer contacted remote plugin catalogs");
+  // The visible label is localized, and the picker mounts only the current scroll window.
+  for (const plugin of installed) {
+    const option = await revealPickerOption(picker, "plugin:" + plugin.id);
+    assert(await option.isEnabled(), "Installed plugin is selectable: " + plugin.id);
+  }
+  assert.deepEqual(detailReads, [], "Composer references requested per-plugin details");
   await verify(page);
   await page.keyboard.press("Escape");
   const model = page.locator('button[aria-label^="OpenAI Codex/"]').first();
@@ -211,11 +218,12 @@ async function workspace(page, width, projects) {
   assert((await page.getByRole("option").count()) > 0);
   await page.keyboard.press("Escape");
   if (process.env.SELFHOST_TEST_PANEL === "1") {
-    const git = page.locator('[data-status-capsule="git"]');
-    await git.waitFor();
-    await git.click();
-    await page.getByTestId("status-git-files").waitFor();
-    await page.keyboard.press("Escape");
+    const status = page.getByRole("complementary", { name: "会话状态", exact: true });
+    await status.waitFor();
+    const needsOpen = (await status.getAttribute("data-status-placement")) === "trigger";
+    if (needsOpen) await status.getByRole("button", { name: "打开会话状态" }).click();
+    await page.getByTestId("status-git-view-all").waitFor();
+    if (needsOpen) await page.keyboard.press("Escape");
   }
   if (width >= 1300) {
     const watchPrefix =
@@ -324,7 +332,13 @@ async function newThreadTitle(page, projects) {
     socket.on("framereceived", ({ payload }) => {
       if (typeof payload !== "string") return;
       const message = JSON.parse(payload);
-      if (message.type === "turn.start.accepted") timing.accepted = performance.now();
+      if (
+        message.type === "turn.start.accepted" ||
+        (message.type === "thread.delivery.state" &&
+          message.state === "accepted" &&
+          message.delivery === "startNow")
+      )
+        timing.accepted = performance.now();
       if (
         message.event?.event?.type === "timeline.item.delta" &&
         message.event.event.channel === "agentMessage"
@@ -378,7 +392,7 @@ async function newThreadTitle(page, projects) {
 
 try {
   if (process.env.SELFHOST_TEST_ROTATE_ACCOUNT === "1")
-    await verifyAccount(browser, base, username, password);
+    await verifyAccount(browser, base, username, qaPassword);
   else
     for (const width of [1480, 390]) {
       const ctx = await browser.newContext({

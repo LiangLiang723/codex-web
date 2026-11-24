@@ -14,6 +14,7 @@ const options = {
   outfile: destination,
   alias: { "@zcode/contracts": resolve(root, "apps/zcode-cli/packages/contracts/src/index.ts") },
   external: ["@napi-rs/keyring"],
+  loader: { ".py": "text" },
   treeShaking: true,
   legalComments: "eof",
   logLevel: "warning",

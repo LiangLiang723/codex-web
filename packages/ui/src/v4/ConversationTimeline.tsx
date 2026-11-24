@@ -1958,6 +1958,7 @@ function ConversationTimelineImpl({
       ref={timelineRootRef}
       className={cn(
         "relative flex min-h-0 flex-1 flex-col",
+        "peer-data-[status-placement=inline]/session-status:mr-80 peer-data-[status-placement=trigger]/session-status:pt-11",
         compactForRemoteControl && "min-w-0",
         // 原先消息层的 mask 靠 scroll 回调追赶合成滚动，快速滚动会闪黑并漏字。
         // 把底部留白移到视口外，由原生 overflow 裁剪；输入框仍在同一视口内 sticky。

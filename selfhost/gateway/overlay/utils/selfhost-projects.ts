@@ -11,6 +11,7 @@ import type { HostWithSecret } from "./gateway/infra/ssh/ssh-types";
 import { z } from "zod";
 import { catalogEvents } from "./gateway/config/pinned-thread-events";
 import { CodexRpcError } from "./gateway/http/errors";
+import { remoteHostIdentity } from "~~/shared/utils/workspace";
 const path = z.string().startsWith("/");
 const registered = z.array(z.object({ remotePath: path, name: z.string(), canonicalPath: path }));
 const desktopMetadata = z.object({
@@ -140,7 +141,8 @@ export function allKnownProjects(user: number) {
   return hostStore.list().flatMap((h) => knownProjects(user, h.id));
 }
 export function refreshProjects(user: number, host: HostWithSecret, force: boolean) {
-  const key = user + ":" + host.id,
+  const identity = remoteHostIdentity(host);
+  const key = JSON.stringify([user, host.id, host.createdAt, identity]),
     prior = cached(user, host.id);
   if (!force && prior && !Array.isArray(prior.catalog) && Date.now() - prior.updated < 60000)
     return Promise.resolve(knownCatalog(user, host.id));
@@ -196,6 +198,14 @@ export function refreshProjects(user: number, host: HostWithSecret, force: boole
           false,
         );
     const catalog = { items, desktop, memberships };
+    // 慢 SSH 目录响应可能晚于主机替换，不把旧机器的项目保存给复用 ID 的新主机。
+    const current = hostStore.get(host.id);
+    if (
+      !current ||
+      current.createdAt !== host.createdAt ||
+      remoteHostIdentity(current) !== identity
+    )
+      throw Error("SSH 主机已变更，请重新读取项目");
     table()
       .prepare(
         "INSERT INTO zcode_project_catalog VALUES(?,?,?,?) ON CONFLICT(user_id,host_id) DO UPDATE SET updated=excluded.updated,catalog=excluded.catalog",

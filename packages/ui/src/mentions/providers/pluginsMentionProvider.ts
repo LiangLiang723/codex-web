@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import {
   sortPluginStoreEntries,
   isPublicStoreMarketplaceId,
@@ -58,46 +59,59 @@ export function mapPluginCatalogToMentionItemsForTest(
           ...entries.filter((entry) => !isPublicStoreMarketplaceId(entry.marketplace)),
         ]
       : entries;
-  return sorted
+  const enabled = sorted
     .filter((entry) => entry.enabled)
-    .map((entry) => {
-      const conflicted = entry.conflictingPluginIds.length > 0;
-      return {
-        id: `plugin:${entry.pluginId}`,
-        category: "plugins" as const,
-        label: entry.name,
-        displayLabel: resolvePluginDisplayName(
-          {
-            name: entry.name,
-            listing: {
-              displayName: entry.displayName,
-              displayNameI18n: entry.displayNameI18n,
-            },
-          },
-          locale,
-        ),
-        description: resolveLocalizedText(locale, entry.description, entry.descriptionI18n) ?? "",
-        value: entry.pluginId,
-        markdown: buildPluginMentionMarkdown(entry.name, entry.pluginId),
-        keywords: [
-          entry.name,
-          entry.pluginId,
-          entry.marketplace,
-          ...(entry.displayName ? [entry.displayName] : []),
-          ...Object.values(entry.displayNameI18n ?? {}),
-        ],
-        data: {
-          pluginId: entry.pluginId,
-          ...(entry.icon ? { icon: entry.icon } : {}),
+    .map((entry) => ({
+      entry,
+      displayLabel: resolvePluginDisplayName(
+        {
+          name: entry.name,
+          listing: { displayName: entry.displayName, displayNameI18n: entry.displayNameI18n },
         },
-        ...(conflicted
-          ? {
-              disabled: true,
-              disabledReason: labels.conflictReason,
-            }
-          : {}),
-      };
-    });
+        locale,
+      ),
+    }));
+  const nameCounts = new Map<string, number>();
+  if (selfHostedBuild) {
+    for (const { displayLabel } of enabled) {
+      const key = displayLabel.trim().toLowerCase();
+      nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1);
+    }
+  }
+  return enabled.map(({ entry, displayLabel }) => {
+    const conflicted = entry.conflictingPluginIds.length > 0;
+    const description =
+      resolveLocalizedText(locale, entry.description, entry.descriptionI18n) ?? "";
+    const showMarketplace = (nameCounts.get(displayLabel.trim().toLowerCase()) ?? 0) > 1;
+    return {
+      id: `plugin:${entry.pluginId}`,
+      category: "plugins" as const,
+      label: entry.name,
+      displayLabel,
+      description: showMarketplace
+        ? [entry.marketplace, description].filter(Boolean).join(" · ")
+        : description,
+      value: entry.pluginId,
+      markdown: buildPluginMentionMarkdown(entry.name, entry.pluginId),
+      keywords: [
+        entry.name,
+        entry.pluginId,
+        entry.marketplace,
+        ...(entry.displayName ? [entry.displayName] : []),
+        ...Object.values(entry.displayNameI18n ?? {}),
+      ],
+      data: {
+        pluginId: entry.pluginId,
+        ...(entry.icon ? { icon: entry.icon } : {}),
+      },
+      ...(conflicted
+        ? {
+            disabled: true,
+            disabledReason: labels.conflictReason,
+          }
+        : {}),
+    };
+  });
 }
 
 export function usePluginsMentionProvider(

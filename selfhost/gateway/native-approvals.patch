@@ -17,7 +17,7 @@
      while (keys.size > MAX_PENDING_SERVER_REQUESTS) {
        const oldest = keys.keys().next().value;
        if (oldest === undefined) break;
-@@ -36,6 +37,19 @@
+@@ -36,6 +37,24 @@
        requestId !== null &&
        requestId !== undefined &&
        this.currentUserKeys().has(this.key(event.hostId, event.threadId, requestId))
@@ -25,8 +25,13 @@
 +  }
 +
 +  remember(event: GatewayEvent) {
-+    if (event.event.type !== "serverRequest.requested" || event.event.requestId == null) return;
-+    const key = this.key(event.hostId, event.threadId, event.event.requestId);
++    // Codex 的命令审批附在时间线条目上。恢复原生历史时也要补回仍有效的请求及其选项。
++    const packet = event.event;
++    const approval = packet.type === "timeline.item.upsert" && packet.item.type === "commandExecution"
++      ? recordFromUnknown(packet.item.pendingApproval) : null;
++    const requestId = idFromUnknown(packet.type === "serverRequest.requested" ? packet.requestId : approval?.requestId);
++    if (requestId === null) return;
++    const key = this.key(event.hostId, event.threadId, requestId);
 +    const keys = this.currentUserKeys();
 +    if (keys.has(key)) keys.set(key, event);
 +  }

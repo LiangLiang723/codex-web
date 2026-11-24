@@ -1,6 +1,20 @@
-import { MessagesSquare } from "lucide-react";
+import { MessagesSquare, WandSparkles } from "lucide-react";
 import { FileDisplayInline } from "@/lib/fileDisplay.js";
 import type { MentionItem } from "@/mentions/mentionTypes.js";
+
+export function SkillMentionOptionContent({ item }: { item: MentionItem }) {
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-2" title={item.description}>
+      <WandSparkles className="size-3.5 shrink-0 text-foreground" />
+      <span className="shrink-0 whitespace-nowrap text-ui-base font-medium text-foreground">
+        {item.label}
+      </span>
+      <span className="min-w-0 truncate text-ui-xs text-foreground-subtlest">
+        {item.description}
+      </span>
+    </span>
+  );
+}
 
 export function ContextMentionOptionContent({
   item,

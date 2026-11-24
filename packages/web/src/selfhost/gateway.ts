@@ -7,6 +7,7 @@ export const hostSchema = z.object({
   avatar: z.string().default("server"),
   name: z.string(),
   sshHost: z.string(),
+  createdAt: z.string().optional(),
   username: z.string().nullable(),
   port: z.number().nullable(),
   authMode: z.enum(["agent", "privateKey", "password"]),
@@ -75,11 +76,11 @@ export class Gateway {
     private readonly token: string,
     private readonly sessionExpired: () => void = () => {},
   ) {}
-  static async login(username: string, password: string) {
+  static async login(credentials: Record<"username" | "password", string>) {
     const response = await fetch("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify(credentials),
     });
     if (!response.ok)
       throw new Error(response.status === 401 ? "用户名或密码不正确" : String(response.status));
@@ -274,11 +275,13 @@ export class Gateway {
       }),
     );
   }
-  async models(hostId: number) {
+  async models(hostId: number, modelProvider?: string) {
     const all: RemoteModel[] = [];
+    const seen = new Set<string>();
     let cursor: string | null = null;
     do {
       const query = new URLSearchParams({ hostId: String(hostId) });
+      if (modelProvider) query.set("modelProvider", modelProvider);
       if (cursor) query.set("cursor", cursor);
       const page: { data: RemoteModel[]; nextCursor?: string | null } = await this.request(
         "/api/models?" + query,
@@ -286,6 +289,8 @@ export class Gateway {
       );
       all.push(...page.data);
       cursor = page.nextCursor ?? null;
+      if (cursor && seen.has(cursor)) throw Error("Codex 返回了重复的模型游标");
+      if (cursor) seen.add(cursor);
     } while (cursor);
     return all;
   }

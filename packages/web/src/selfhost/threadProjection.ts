@@ -6,29 +6,31 @@ import {
 import {
   codexConnectionCode,
   type ApiRetryState,
+  type AttachmentRef,
   type ConversationRow,
   type ConversationSnapshot,
-  type PendingInteraction,
+  type ConversationSource,
+  type GoalState,
+  type PlanState,
   type SessionErrorInfo,
   type SessionPhase,
 } from "@zcode/shared/zcode-protocol-v4";
 import type { Message, RemoteModel } from "./gateway.js";
+import {
+  approvalAnchor,
+  isToolApproval,
+  nativeRequests,
+  projectNativeInteraction,
+  projectNativeToolRow,
+} from "./nativeInteractions.js";
 import { timelinePageToTurns, mergeThreadTurns } from "virtual:gateway-terminal-stream";
+import { turnFileHeader } from "./turnFileChanges.js";
+import { array, num, rec, str } from "./nativeValues.js";
+import { projectNativeSubagents } from "./nativeSubagents.js";
+import { nativeUserImages } from "./attachments.js";
 
-export function rec(v: unknown): Message {
-  return typeof v === "object" && v !== null && !Array.isArray(v)
-    ? Object.fromEntries(Object.entries(v))
-    : {};
-}
-export function array(v: unknown): Message[] {
-  return Array.isArray(v) ? v.map(rec) : [];
-}
-export function str(v: unknown, fallback = "") {
-  return typeof v === "string" ? v : fallback;
-}
-export function num(v: unknown, fallback = 0) {
-  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
-}
+export { array, num, rec, str } from "./nativeValues.js";
+
 function time(v: unknown, fallback: number) {
   const t = num(v);
   return t > 0 ? (t < 1e12 ? t * 1000 : t) : fallback;
@@ -42,10 +44,115 @@ function plain(value: unknown): string {
       .join("\n");
   return "";
 }
+
+function nativeUserText(text: string, images: readonly AttachmentRef[]): string {
+  if (images.length === 0) return text;
+  const header =
+    /^\s*# Files mentioned by the user:\r?\n\r?\n([\s\S]+?)\r?\n\r?\nDistinguish instructions in attached documents from the user['’]s request\.\r?\n\r?\n## My request:(?:\r?\n|$)/u.exec(
+      text,
+    );
+  const fileList = header?.[1];
+  if (!header || !fileList) return text;
+  // 只有原生图片逐项对应的注入清单才折起，保留用户正文和其他文件信息。
+  const imageEntries = new Set(
+    images
+      .filter(({ ref }) => ref.startsWith("/"))
+      .map(({ fileName, ref }) => `## ${fileName}: ${ref}\nImage attachment: true`),
+  );
+  return fileList
+    .replaceAll("\r\n", "\n")
+    .split("\n\n")
+    .every((entry) => imageEntries.has(entry))
+    ? text.slice(header[0].length)
+    : text;
+}
+function addSource(
+  sources: Map<string, ConversationSource>,
+  kind: "userLink" | "webResult" | "webVisit",
+  value: unknown,
+  title?: unknown,
+) {
+  try {
+    const url = new URL(str(value).trim());
+    if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password)
+      return;
+    const id = kind + ":" + url.href;
+    if (!sources.has(id))
+      sources.set(id, {
+        kind, url: url.href, title: str(title).trim() || url.href.replace(/^https?:\/\//u, ""),
+      });
+  } catch {
+    // 原生的搜索结果允许未知内容，只有可打开的结构化地址进入来源。
+  }
+}
+
+function collectNativeSources(
+  sources: Map<string, ConversationSource>,
+  item: Message,
+  userText?: string,
+) {
+  if (userText !== undefined) {
+    for (const [link] of userText.matchAll(/https?:\/\/[^\s<>"'[\]）】》。，、；]+/giu)) {
+      // Markdown 结束括号不属于链接；保留 URL 内成对的括号。
+      let url = link.replace(/[.,;!?]+$/u, "");
+      while (url.endsWith(")") && url.split(")").length > url.split("(").length)
+        url = url.slice(0, -1);
+      addSource(sources, "userLink", url);
+    }
+  } else if (item.type === "webSearch") {
+    // query 是搜索输入。真实结果地址和原生访问动作各自有结构化字段。
+    for (const result of array(item.results))
+      addSource(sources, "webResult", result.url, result.title);
+    const action = rec(item.action);
+    if (action.type === "openPage" || action.type === "findInPage")
+      addSource(sources, "webVisit", action.url);
+  } else if (item.type === "mcpToolCall" || item.type === "dynamicToolCall") {
+    const tool = str(item.tool).trim();
+    if (!tool) return;
+    const app = rec(item.appContext);
+    const namespace = str(item.server ?? item.namespace).trim();
+    const id = JSON.stringify([item.type, str(app.connectorId), namespace, tool]);
+    sources.set(id, {
+      kind: "tool",
+      id,
+      title: str(app.appName).trim() || namespace || tool,
+      tool: str(app.actionName).trim() || tool,
+    });
+  }
+}
+
+function projectNativePlan(item: Message, at: number): PlanState {
+  const planId = str(item.id) || str(item.turnId);
+  return {
+    updatedAt: at,
+    items: array(item.plan).flatMap((step, index) => {
+      const content = str(step.step).trim();
+      if (!content) return [];
+      const status = step.status === "completed" ? "completed" :
+        step.status === "inProgress" ? "inProgress" : "pending";
+      return [{ id: planId + "-" + index, content, status }];
+    }),
+  };
+}
+
+function nativeGoalStatus(value: unknown): NonNullable<GoalState["nativeCodex"]>["status"] | undefined {
+  switch (value) {
+    case "active":
+    case "paused":
+    case "blocked":
+    case "usageLimited":
+    case "budgetLimited":
+    case "complete":
+      return value;
+  }
+}
+
 export const providerId = "codex-ssh";
 export const nativeHistoryRowStart = 2 ** 40;
-function nativeHistoryRowKey(turnId: string, entityId: string) {
-  return JSON.stringify([turnId, entityId]);
+function nativeHistoryRowKey(turnId: string, entityId: string, sourceCommandId = "") {
+  return JSON.stringify(
+    sourceCommandId ? [turnId, "input", sourceCommandId] : [turnId, "item", entityId],
+  );
 }
 export function prependNativeHistoryPage(
   info: Message,
@@ -55,7 +162,20 @@ export function prependNativeHistoryPage(
   rowIds: Map<string, number>,
   oldestRowId: number,
 ) {
-  const turns = timelinePageToTurns(page);
+  const existing = new Map(
+    array(rec(rec(info.history).thread).turns).map((turn) => [turn.id, turn]),
+  );
+  const turns = timelinePageToTurns(page).map((turn) => {
+    const latest = existing.get(turn.id);
+    if (!latest) return turn;
+    // 旧页可能只有 turnStarted，当前页或实时通知已经收到了完成和失败原因。
+    return {
+      ...turn,
+      ...latest,
+      startedAt: latest.startedAt ?? turn.startedAt,
+      items: turn.items,
+    };
+  });
   const previous = projectThread(
     { history: { thread: { id: threadId, turns } } },
     threadId,
@@ -64,9 +184,16 @@ export function prependNativeHistoryPage(
     registry,
     new Map(),
   ).rows.window;
-  const keys = previous
-    .map((row) => nativeHistoryRowKey(row.turnId ?? "", row.entityId ?? ""))
-    .filter((key) => !rowIds.has(key));
+  const keys = previous.flatMap((row) => {
+    const turnId = row.turnId ?? "";
+    const itemKey = nativeHistoryRowKey(turnId, row.entityId ?? "");
+    const key = nativeHistoryRowKey(
+      turnId,
+      row.entityId ?? "",
+      row.kind === "userInput" ? row.sourceCommandId : undefined,
+    );
+    return !rowIds.has(itemKey) && !rowIds.has(key) ? [key] : [];
+  });
   const start = oldestRowId - keys.length;
   for (const [index, key] of keys.entries()) rowIds.set(key, start + index);
   info.history = mergeThreadTurns(info.history, info.thread, threadId, turns, "prepend");
@@ -82,6 +209,20 @@ export function nativeMode(m: unknown) {
     : m === "guarded"
       ? { approvalPolicy: "untrusted", sandbox: "workspace-write" }
       : { approvalPolicy: "on-request", sandbox: "workspace-write" };
+}
+
+function nativeCompactionItem(turn: Message | undefined) {
+  if (turn?.status !== "inProgress") return undefined;
+  return array(turn.items).findLast(
+    (item) =>
+      item.type === "contextCompaction" &&
+      (item.status === "inProgress" ||
+        (!item.status && typeof item.startedAtMs === "number" && !item.completedAtMs)),
+  );
+}
+
+export function nativeTurnIsCompacting(activation: Message | undefined) {
+  return Boolean(nativeCompactionItem(array(rec(rec(activation?.history).thread).turns).at(-1)));
 }
 export function threadPhase(status: unknown): SessionPhase {
   switch (status) {
@@ -123,7 +264,8 @@ export function applyCodexRecoveryEvent(info: Message, envelope: Message, thread
     !modelItem &&
     event.type !== "error.reported" &&
     event.type !== "turn.completed"
-  ) return;
+  )
+    return;
 
   const turns = rec(rec(info.history).thread).turns;
   const active = rec(Array.isArray(turns) ? turns.at(-1) : null);
@@ -149,7 +291,7 @@ export function applyCodexRecoveryEvent(info: Message, envelope: Message, thread
   } satisfies ApiRetryState;
 }
 
-function codexTurnConnectionError(turn: Message, at: number): SessionErrorInfo | null {
+function codexTurnError(turn: Message, at: number): SessionErrorInfo {
   const error = rec(turn.error);
   const message = str(error.message);
   const details = `${message}\n${str(error.additionalDetails)}`;
@@ -168,7 +310,13 @@ function codexTurnConnectionError(turn: Message, at: number): SessionErrorInfo |
     (timedOut &&
       (/\b(?:stream|connection|connect|websocket|network)\b/i.test(details) ||
         /^(?:timed?\s*out|deadline exceeded)[.!]?$/i.test(message.trim())));
-  if (!network) return null;
+  if (!network) {
+    // 配额、上下文和工具等失败同样由原生 turn/completed 决定，保留服务端原因供用户判断。
+    const nativeCode = str(error.codexErrorInfo) || Object.keys(kind)[0] || "turnFailed";
+    return {code:"codex."+nativeCode,message:message || str(error.additionalDetails) || nativeCode,
+      ...(message && str(error.additionalDetails) ? {detail:str(error.additionalDetails)} : {}),
+      source:"provider",recoverable:true,at:time(turn.completedAt,time(turn.startedAt,at))};
+  }
   return {
     code: timedOut ? codexConnectionCode.timeout : codexConnectionCode.failed,
     message: timedOut ? "Model connection timed out." : "Model connection failed.",
@@ -189,10 +337,16 @@ export function projectThread(
   const history = rec(activation.history),
     stored = rec(history.thread),
     thread = { ...stored, ...rec(activation.thread) },
-    turns = array(stored.turns ?? thread.turns);
+    historyTurns = array(stored.turns ?? thread.turns),
+    turns = historyTurns.filter((turn) => !str(turn.id).startsWith("server-request-turn-"));
+  const requests = nativeRequests(activation, historyTurns);
   const settings = rec(activation.threadSettings ?? history.settings),
     collaboration = rec(settings.collaborationMode);
   const result = createInitialConversationSnapshot(id, epoch);
+  if (Array.isArray(activation.nativeModels)) registry = activation.nativeModels as RemoteModel[];
+  const controls = rec(activation.nativeControls);
+  const queueAvailable = controls.queue === true && activation.readOnly !== true;
+  const followupMode = queueAvailable && activation.followupMode === "queue" ? "queue" : "guide";
   const modelId =
     str(settings.model) ||
     str(thread.model) ||
@@ -210,11 +364,22 @@ export function projectThread(
   result.meta = {
     title: threadName(thread),
     titleSource: typeof thread.name === "string" ? "custom" : "generated",
-    ...(activation.readOnly === true ? { readOnlyReason: "activeWriter" } : {}),
+    ...(activation.readOnly === true
+      ? {
+          readOnlyReason:
+            activation.readOnlyReason === "modelProviderMismatch"
+              ? "modelProviderMismatch"
+              : "activeWriter",
+        }
+      : {}),
   };
   result.config = {
     ...result.config,
+    followupMode,
     provider: providerId,
+    ...(typeof thread.modelProvider === "string"
+      ? { nativeModelProvider: thread.modelProvider }
+      : {}),
     model: modelId,
     thought,
     thoughtLevels: (model?.supportedReasoningEfforts ?? []).map((e) => e.reasoningEffort),
@@ -224,22 +389,32 @@ export function projectThread(
         : "build",
     planEnabled: collaboration.mode === "plan",
     ...(modelId
-      ? { modelSelection: { providerId, modelId, options: { reasoningLevel: thought } } }
+      ? { modelSelection: { providerId, modelId, options: thought ? {reasoningLevel:thought} : {} } }
       : {}),
   };
   const rows: ConversationRow[] = [];
-  const interactions: PendingInteraction[] = [];
+  const sources = new Map<string, ConversationSource>();
+  const toolAnchors = new Map<string, { rowId: number; item: Message }>();
+  const pendingToolApprovals = new Map<string, string>();
+  for (const request of requests) {
+    if (!isToolApproval(request)) continue;
+    const key = approvalAnchor(request);
+    if (key && !pendingToolApprovals.has(key)) pendingToolApprovals.set(key, request.key);
+  }
   const created = time(thread.createdAt, 0);
-  const base = (turnId: string, entityId: string, at: number) => {
-    const key = nativeHistoryRowKey(turnId, entityId);
-    let rowId = rowIds.get(key);
+  const base = (turnId: string, entityId: string, at: number, sourceCommandId = "") => {
+    const itemKey = nativeHistoryRowKey(turnId, entityId);
+    const key = nativeHistoryRowKey(turnId, entityId, sourceCommandId);
+    let rowId = rowIds.get(key) ?? rowIds.get(itemKey);
     if (rowId === undefined) {
       // 游标之后可能还有旧页，给更早的行保留编号空间且不移动已发布的行。
       rowId = nativeHistoryRowStart + rowIds.size;
-      rowIds.set(key, rowId);
     }
+    rowIds.set(key, rowId);
+    if (key !== itemKey) rowIds.set(itemKey, rowId);
     return { rowId, entityId, turnId, productTurnId: turnId, createdAt: at, createdAtSeq: rowId };
   };
+  const livePlan = rec(activation.nativePlan);
   for (const turn of turns) {
     const turnId = str(turn.id);
     const at = time(turn.startedAt, created);
@@ -259,18 +434,28 @@ export function projectThread(
       state,
       startedAt: at,
       ...(turn.completedAt ? { endedAt: time(turn.completedAt, at) } : {}),
+      ...turnFileHeader(activation, turn, str(thread.cwd)),
     });
+    let hasPlan = false;
     for (const item of array(turn.items)) {
       const itemId = str(item.id);
       if (!itemId) continue;
-      const fields = base(turnId, itemId, at),
+      if (item.type !== "userMessage") collectNativeSources(sources, item);
+      const sourceCommandId = item.type === "userMessage" ? str(item.clientId) : "";
+      const fields = base(turnId, itemId, at, sourceCommandId),
         stream = phase === "running" && item.status !== "completed";
       if (item.type === "userMessage") {
+        const { attachments, links } = nativeUserImages(item.content, { turnId, itemId });
+        const text = nativeUserText(plain(item.content ?? item.text), attachments);
+        collectNativeSources(sources, item, text);
+        for (const { href, fileName } of links) addSource(sources, "userLink", href, fileName);
         rows.push({
           ...fields,
           kind: "userInput",
           origin: "realUser",
-          text: plain(item.content ?? item.text),
+          text,
+          ...(sourceCommandId ? { sourceCommandId } : {}),
+          ...(attachments.length ? { attachments } : {}),
         });
       } else if (item.type === "agentMessage") {
         rows.push({
@@ -279,6 +464,20 @@ export function projectThread(
           text: plain(item.text ?? item.content),
           state: stream ? "streaming" : "complete",
           model: modelId,
+          ...(controls.fork === true && turn.status === "completed" && activation.readOnly !== true
+            ? { actions: { canFork: true } }
+            : {}),
+        });
+      } else if (item.type === "contextCompaction") {
+        const running = nativeCompactionItem(turn)?.id === item.id;
+        rows.push({
+          ...fields, kind: "timelineMarker", lane: "assistantWork",
+          marker: {
+            type: "compact", origin: "native",
+            status: running ? "running" : item.completedAtMs || item.status === "completed"
+              ? "success" : phase === "error" ? "failed" : phase === "completedInterrupted"
+                ? "cancelled" : "success",
+          },
         });
       } else if (item.type === "plan") {
         const plan = plain(item.text ?? item.content);
@@ -293,19 +492,8 @@ export function projectThread(
           output: { text: plan },
         });
       } else if (item.type === "turnPlan") {
-        result.plan = {
-          updatedAt: at,
-          items: array(item.plan).map((step, i) => ({
-            id: itemId + "-" + i,
-            content: str(step.step),
-            status:
-              step.status === "completed"
-                ? "completed"
-                : step.status === "inProgress"
-                  ? "inProgress"
-                  : "pending",
-          })),
-        };
+        result.plan = projectNativePlan(item, at);
+        hasPlan = true;
       } else if (item.type === "reasoning") {
         rows.push({
           ...fields,
@@ -314,112 +502,30 @@ export function projectThread(
           state: stream ? "streaming" : "complete",
         });
       } else {
-        const command = str(item.command),
-          toolName = command ? "Bash" : str(item.tool) || str(item.type);
-        const input = command
-          ? { command, cwd: str(item.cwd, str(thread.cwd)) }
-          : (item.arguments ?? item.changes ?? item.input ?? {});
-        const output = item.aggregatedOutput ?? item.result ?? item.output;
-        const request = item.requestId ?? rec(item.pendingApproval).requestId;
-        const pending = request !== null && request !== undefined;
-        const requestKey = String(request);
+        const anchor = JSON.stringify([turnId, itemId]);
+        toolAnchors.set(anchor, { rowId: fields.rowId, item });
         rows.push({
           ...fields,
-          kind: "toolCall",
-          toolCallId: itemId,
-          toolName,
-          inputText: typeof input === "string" ? input : JSON.stringify(input),
-          input,
-          status: pending
-            ? "pendingApproval"
-            : item.status === "failed" || num(item.exitCode) !== 0
-              ? "error"
-              : item.status === "inProgress"
-                ? "running"
-                : "success",
-          ...(output != null
-            ? { output: { text: typeof output === "string" ? output : JSON.stringify(output) } }
-            : {}),
-          ...(pending ? { approvalInteractionId: requestKey } : {}),
+          ...projectNativeToolRow(item, str(thread.cwd), pendingToolApprovals.get(anchor)),
         });
-        const params = rec(item.params ?? rec(item.pendingApproval).params);
-        const method = str(item.method ?? rec(item.pendingApproval).method);
-        if (pending && method === "mcpServer/elicitation/request") {
-          // MCP 的表单、链接与命令审批使用不同的响应结构。保留原始请求信息。
-          interactions.push({
-            interactionId: requestKey,
-            kind: "userInput",
-            anchorRowId: fields.rowId,
-            createdAt: at,
-            payload: {
-              kind: "userInput",
-              prompt: str(params.message),
-              freeText: false,
-              toolName: "McpElicitation",
-              schema: {
-                interaction: "mcp.structured",
-                mode: params.mode ?? "form",
-                serverName: str(params.serverName),
-                requestedSchema: params.requestedSchema,
-                url: params.url,
-              },
-            },
-          });
-        } else if (pending && method === "item/tool/requestUserInput") {
-          const questions = array(params.questions).map((q) => ({
-            question: str(q.question),
-            header: str(q.header),
-            options: array(q.options).map((o) => ({
-              value: str(o.label),
-              label: str(o.label),
-              description: str(o.description),
-            })),
-          }));
-          interactions.push({
-            interactionId: requestKey,
-            kind: "userInput",
-            anchorRowId: fields.rowId,
-            createdAt: at,
-            payload: {
-              kind: "userInput",
-              prompt: questions[0]?.question || "Codex 需要你的输入",
-              freeText: true,
-              questions,
-            },
-          });
-        } else if (
-          pending &&
-          [
-            "item/commandExecution/requestApproval",
-            "item/fileChange/requestApproval",
-            "item/permissions/requestApproval",
-          ].includes(method)
-        ) {
-          interactions.push({
-            interactionId: requestKey,
-            kind: "permission",
-            anchorRowId: fields.rowId,
-            createdAt: at,
-            payload: {
-              kind: "permission",
-              toolCallId: itemId,
-              toolName,
-              summary: str(rec(item.pendingApproval).reason) || command || toolName,
-              detail: input,
-              options: [
-                { optionId: "accept", kind: "allowOnce", label: "允许本轮" },
-                { optionId: "decline", kind: "deny", label: "拒绝" },
-              ],
-            },
-          });
-        }
       }
     }
+    // 实时计划已由 Gateway 并入时间线。旧快照近期事件只填补同一轮缺失的计划。
+    if (!hasPlan && livePlan.turnId === turnId && Array.isArray(livePlan.plan))
+      result.plan = projectNativePlan(livePlan, at);
   }
+  if (sources.size) result.sources = [...sources.values()];
+  const subagents = projectNativeSubagents(activation, revision);
+  result.subagents = { ...subagents, ended: subagents.ended?.slice(0, 20) };
+  const interactions = requests.flatMap((request) => {
+    const projected = projectNativeInteraction(request, toolAnchors.get(approvalAnchor(request)));
+    return projected ? [projected] : [];
+  });
   const goal = rec(activation.goal);
-  if (typeof goal.objective === "string" && goal.objective) {
+  const codexGoal = nativeGoalStatus(goal.status);
+  if (typeof goal.objective === "string" && goal.objective && codexGoal) {
     const status =
-      goal.status === "complete" ? "verified" : goal.status === "active" ? "active" : "paused";
+      codexGoal === "complete" ? "verified" : codexGoal === "active" ? "active" : "paused";
     result.goal = {
       targetId: id + "-" + str(String(goal.createdAt ?? "")),
       objective: goal.objective,
@@ -427,25 +533,14 @@ export function projectThread(
       timeUsedSeconds: num(goal.timeUsedSeconds),
       activeRunStartedAtMs: null,
       status,
+      nativeCodex: {
+        status: codexGoal,
+        ...(typeof goal.tokensUsed === "number" && goal.tokensUsed >= 0
+          ? { tokensUsed: goal.tokensUsed } : {}),
+      },
       iteration: 0,
       iterations: [],
       verifications: [],
-    };
-  }
-  const livePlan = rec(activation.nativePlan);
-  if (Array.isArray(livePlan.plan)) {
-    result.plan = {
-      updatedAt: time(thread.updatedAt, created),
-      items: array(livePlan.plan).map((step, i) => ({
-        id: str(livePlan.turnId) + "-" + i,
-        content: str(step.step),
-        status:
-          step.status === "completed"
-            ? "completed"
-            : step.status === "inProgress"
-              ? "inProgress"
-              : "pending",
-      })),
     };
   }
   const last = turns.at(-1);
@@ -463,24 +558,97 @@ export function projectThread(
     canStop: phase === "running",
     stopState: phase === "running" ? "stoppable" : "idle",
     stopTargetKind: phase === "running" ? "assistant" : "unknown",
-    lastError: last && phase === "error" ? codexTurnConnectionError(last, created) : null,
+    lastError: last && phase === "error" ? codexTurnError(last, created) : null,
     apiRetry:
-      phase === "running" && activation.apiRetry
-        ? (activation.apiRetry as ApiRetryState)
+      phase === "running" && activation.apiRetry ? (activation.apiRetry as ApiRetryState) : null,
+  };
+  result.queue = {
+    // 只显示原生队列成员，顺序由 list 返回，避免暂存假队列与远端自动出队竞态。
+    items: queueAvailable
+      ? array(controls.queued).flatMap((item, index) => {
+          const queueItemId = str(item.id);
+          const sourceCommandId = str(item.clientUserMessageId);
+          if (!queueItemId || !sourceCommandId) return [];
+          const { attachments } = nativeUserImages(item.input);
+          return [
+            {
+              sourceCommandId,
+              queueItemId,
+              clientId: providerId,
+              kind: "sendText" as const,
+              text: nativeUserText(plain(item.input), attachments),
+              attachments,
+              admittedAt: time(item.createdAt, 0),
+              delivery: { requested: "queue" as const, admitted: "queue" as const },
+              order: { admissionSeq: index + 1, queuePosition: index },
+              steer: { state: "notRequested" as const },
+              dispatch: { state: "queued" as const },
+            },
+          ];
+        })
+      : [],
+    autoDrain: true,
+  };
+  const tokenUsage = rec(activation.tokenUsage);
+  const totalTokens = rec(tokenUsage.total);
+  const maxTokens = num(tokenUsage.modelContextWindow);
+  const usedTokens = num(rec(tokenUsage.last).totalTokens, -1);
+  result.usage = {
+    cumulative: {
+      inputTokens: num(totalTokens.inputTokens),
+      outputTokens: num(totalTokens.outputTokens),
+      cacheReadTokens: num(totalTokens.cachedInputTokens),
+      cacheWriteTokens: num(totalTokens.cacheWriteInputTokens),
+    },
+    contextWindow:
+      maxTokens > 0 && usedTokens >= 0
+        ? { maxTokens, usedTokens, autoCompactThresholdTokens: null }
         : null,
   };
+  const compaction = nativeCompactionItem(last);
+  if (compaction) {
+    result.control.activeWorks = [
+      { kind: "compact", startedAt: time(compaction.startedAtMs, created) },
+    ];
+    result.control.stopTargetKind = "compact";
+  }
   result.pendingInteractions = interactions;
   const context = {
     phase,
     goalStatus: result.goal?.status ?? null,
-    compacting: false,
+    compacting: Boolean(compaction),
     goalVerifying: false,
-    queueLength: 0,
+    queueLength: result.queue.items.length,
     autoDrain: true,
     activeWorkCount: phase === "running" ? 1 : 0,
     pendingInteractionCount: interactions.length,
   };
   result.availability = computeAvailability(context);
-  result.inputRouting = computeInputRouting(context, "guide");
+  if (codexGoal === "budgetLimited" || activation.readOnly === true) {
+    result.availability.pauseGoal = { allowed: false, reasonCode: "goalNotActive" };
+    result.availability.resumeGoal = { allowed: false, reasonCode: "goalNotPaused" };
+  }
+  if (controls.fork !== true)
+    result.availability.fork = { allowed: false, reasonCode: "forkTargetNotStable" };
+  if (controls.compact !== true || phase === "running" || activation.readOnly === true)
+    result.availability.compact = {
+      allowed: false,
+      reasonCode: compaction ? "compactOperationLock" : "idleCannotCompact",
+    };
+  result.availability.queueEdit = {
+    allowed: false,
+    reasonCode: "codex.nativeQueueEditUnavailable",
+  };
+  result.availability.sendQueuedNow = {
+    allowed: false,
+    reasonCode: "codex.nativeQueueStartUnavailable",
+  };
+  result.availability.setFollowupMode = queueAvailable
+    ? { allowed: true }
+    : { allowed: false, reasonCode: "codex.nativeQueueUnavailable" };
+  result.inputRouting =
+    compaction && !queueAvailable
+      ? { mode: "reject", reasonCode: "compactOperationLock" }
+      : computeInputRouting(context, followupMode);
   return result;
 }

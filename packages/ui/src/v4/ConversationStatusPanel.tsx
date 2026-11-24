@@ -31,13 +31,17 @@ import {
   CircleIcon,
   FileDiffIcon,
   GitBranchIcon,
+  GlobeIcon,
   GoalIcon,
+  LinkIcon,
   ListChecksIcon,
   PauseIcon,
   PlayIcon,
   CircleStopIcon,
   SquareTerminalIcon,
   WorkflowIcon,
+  WrenchIcon,
+  XIcon,
 } from "lucide-react";
 import {
   TID_V4_BACKGROUND_WORK_CANCEL,
@@ -53,6 +57,7 @@ import type {
 import type {
   BackgroundWorkSummary,
   ConversationSnapshot,
+  ConversationSource,
   SubagentProjectionState,
   GoalState,
   PlanState,
@@ -62,6 +67,14 @@ import { cn } from "@/components/lib/utils.js";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover.js";
 import { GitStatusRepositoryContext } from "@/hooks/useGitRepository.js";
 import { Button } from "@/components/ui/button.js";
+import {
+  BottomSheet,
+  BottomSheetClose,
+  BottomSheetContent,
+  BottomSheetHeader,
+  BottomSheetTitle,
+  BottomSheetTrigger,
+} from "@/components/mobile-ui/index.js";
 import { ScrollFadeViewport } from "@/components/ui/scroll-fade-viewport.js";
 import { useNowTicker } from "@/components/workflow-graph/use-now-ticker.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
@@ -71,6 +84,7 @@ import { HostedGitBranchSwitcher } from "@/GitBranchSwitcher.js";
 import { resolveGitBranchTriggerLabel } from "@/git-branch-switcher/display.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import type {
+  OpenPlanDetailSideTabRequest,
   OpenSubagentDirectorySideTabRequest,
   OpenSubagentSideTabRequest,
   OpenWorkflowRunDirectorySideTabRequest,
@@ -608,7 +622,7 @@ export function buildRunningSubagentOpenRequest({
 }: {
   parentSessionId?: string;
   rootSessionId?: string;
-  subagent: ZCodeSessionRunningSubagent;
+  subagent: Pick<ZCodeSessionRunningSubagent, "childSessionId" | "subagentType" | "title">;
 }): OpenSubagentSideTabRequest | null {
   if (!parentSessionId) return null;
   return {
@@ -1670,3 +1684,550 @@ function ConversationStatusPanelImpl(props: ConversationStatusPanelProps) {
 }
 
 export const ConversationStatusPanel = memo(ConversationStatusPanelImpl);
+
+type SelfhostConversationStatusProps = Pick<
+  ConversationStatusPanelProps,
+  | "workspacePath"
+  | "workspaceIdentity"
+  | "gitCwd"
+  | "gitSummary"
+  | "gitDirtyFileCount"
+  | "gitWorktreeReviewSourceId"
+  | "gitWorktreeChangeSummary"
+  | "activeTaskChangeSummary"
+  | "goal"
+  | "plan"
+  | "runningSubagents"
+  | "endedSubagents"
+  | "endedSubagentCount"
+  | "parentSessionId"
+  | "rootSessionId"
+  | "onRefreshGit"
+  | "onOpenGitReview"
+  | "onPauseGoal"
+  | "onResumeGoal"
+  | "onOpenSubagentSession"
+  | "onOpenSubagentDirectory"
+> & {
+  mobile: boolean;
+  sources?: readonly ConversationSource[];
+  writtenPlan?: OpenPlanDetailSideTabRequest;
+  onOpenPlan?: (request: OpenPlanDetailSideTabRequest) => void;
+};
+
+function SelfhostStatusSection({
+  name,
+  title,
+  summary,
+  children,
+}: {
+  name: string;
+  title: string;
+  summary?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section
+      data-status-section={name}
+      className="min-w-0 px-2 py-2 [&+&]:border-t [&+&]:border-border"
+    >
+      <div className="flex min-w-0 items-center justify-between gap-2 pb-1.5 pl-2">
+        <h3 className="truncate text-ui-sm font-medium text-foreground-subtle">{title}</h3>
+        {summary}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function SelfhostStatusGit({
+  summary,
+  onNavigate,
+  ...props
+}: SelfhostConversationStatusProps & {
+  summary: GitRepositorySummary;
+  onNavigate: () => void;
+}) {
+  const { intl } = useZCodeIntl();
+  const cwd = props.gitCwd ?? props.workspacePath;
+  const changes = props.gitWorktreeChangeSummary;
+  const rowClass = "h-8 w-full justify-start gap-2 rounded-lg border-0 px-2 text-left text-ui-base";
+  const branch = resolveGitBranchTriggerLabel({
+    headRefType: summary.headRefType,
+    currentBranchName: summary.branchName,
+    detachedLabel: intl.formatMessage({ id: "git.head.detached" }),
+    fallbackLabel: intl.formatMessage({ id: "git.branchSwitcher.label" }),
+  });
+  return (
+    <SelfhostStatusSection name="git" title={intl.formatMessage({ id: "selfhost.status.git" })}>
+      <Button
+        data-testid="status-git-view-all"
+        variant="ghost"
+        className={rowClass}
+        disabled={!props.onOpenGitReview}
+        onClick={() => {
+          onNavigate();
+          props.onOpenGitReview?.(props.gitWorktreeReviewSourceId ?? undefined);
+        }}
+        aria-label={intl.formatMessage({ id: "chat.statusPanel.viewAllChanges" })}
+      >
+        <FileDiffIcon className="size-4 shrink-0" aria-hidden />
+        <span className="min-w-0 flex-1 truncate">
+          {intl.formatMessage({ id: "selfhost.status.changes" })}
+        </span>
+        {changes && changes.added + changes.removed > 0 ? (
+          <span className="shrink-0 space-x-1.5 text-ui-sm tabular-nums">
+            <span className="text-diff-added">+{changes.added}</span>
+            <span className="text-diff-removed">-{changes.removed}</span>
+          </span>
+        ) : props.gitDirtyFileCount ? (
+          <span className="shrink-0 text-ui-sm text-foreground-subtle">
+            {intl.formatMessage({ id: "chat.capsule.files" }, { count: props.gitDirtyFileCount })}
+          </span>
+        ) : null}
+      </Button>
+      {props.onRefreshGit ? (
+        <>
+          <HostedGitBranchSwitcher
+            restoreFocusToTrigger
+            workspacePath={cwd}
+            gitSummary={summary}
+            dirtyFileCount={props.gitDirtyFileCount ?? 0}
+            onRefreshGit={props.onRefreshGit}
+            onModalOpen={onNavigate}
+            className="w-full min-w-0 p-0"
+            triggerClassName={rowClass}
+            renderTriggerLabel={(label) => <span className="min-w-0 truncate">{label}</span>}
+          />
+          <GitActionMenu
+            workspacePath={cwd}
+            workspaceIdentity={props.workspaceIdentity}
+            gitSummary={summary}
+            activeTaskChangeSummary={props.activeTaskChangeSummary ?? null}
+            onRefreshGit={props.onRefreshGit}
+            triggerLayout="status-row"
+          />
+        </>
+      ) : (
+        <div className="flex h-8 min-w-0 items-center gap-2 px-2 text-ui-base" title={branch}>
+          <GitBranchIcon className="size-4 shrink-0" aria-hidden />
+          <span className="min-w-0 truncate">{branch}</span>
+        </div>
+      )}
+    </SelfhostStatusSection>
+  );
+}
+
+function SelfhostStatusGoal({
+  goal,
+  onPause,
+  onResume,
+}: {
+  goal: GoalState;
+  onPause?: () => void;
+  onResume?: () => void;
+}) {
+  const { intl, locale } = useZCodeIntl();
+  const native = goal.nativeCodex;
+  const nativeStatus = native?.status;
+  const statusId =
+    nativeStatus === "budgetLimited"
+      ? "chat.target.status.budget_limited"
+      : nativeStatus === "blocked" || nativeStatus === "usageLimited"
+        ? "selfhost.status.goal." + nativeStatus
+        : goal.status === "active"
+          ? "chat.target.status.active"
+          : "chat.capsule.goal." + goal.status;
+  const action = nativeStatus === "active" ? onPause : onResume;
+  const actionLabel = intl.formatMessage({
+    id: nativeStatus === "active" ? "chat.target.pause" : "chat.target.resume",
+  });
+  return (
+    <SelfhostStatusSection
+      name="goal"
+      title={intl.formatMessage({ id: "chat.goalBanner.label" })}
+      summary={
+        <span
+          className={cn(
+            "shrink-0 text-ui-sm text-foreground-subtle",
+            goal.status === "verified" && "text-success",
+          )}
+        >
+          {intl.formatMessage({ id: statusId })}
+        </span>
+      }
+    >
+      <div className="flex items-start gap-2 px-2 py-1.5">
+        <GoalIcon className="mt-0.5 size-4 shrink-0 text-foreground-subtle" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <p className="line-clamp-3 break-words text-ui-base" title={goal.objective}>
+            {goal.summaryTitle || goal.objective}
+          </p>
+          <p className="mt-1 text-ui-sm tabular-nums text-foreground-subtle">
+            {formatDurationUnits(goal.timeUsedSeconds, intl.formatMessage)}
+            {native?.tokensUsed !== undefined ? (
+              <>
+                {" "}
+                ·{" "}
+                {intl.formatMessage(
+                  { id: "chat.toolCall.workflow.card.tokens" },
+                  { count: native.tokensUsed.toLocaleString(locale) },
+                )}
+              </>
+            ) : null}
+          </p>
+        </div>
+        {action ? (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={actionLabel}
+            title={actionLabel}
+            onClick={action}
+          >
+            {nativeStatus === "active" ? <PauseIcon aria-hidden /> : <PlayIcon aria-hidden />}
+          </Button>
+        ) : null}
+      </div>
+    </SelfhostStatusSection>
+  );
+}
+
+function SelfhostStatusAgents({
+  running = EMPTY_RUNNING_SUBAGENTS,
+  ended = [],
+  endedCount,
+  parentSessionId,
+  rootSessionId,
+  onOpenSession,
+  onOpenDirectory,
+}: {
+  running?: SelfhostConversationStatusProps["runningSubagents"];
+  ended?: SelfhostConversationStatusProps["endedSubagents"];
+  endedCount?: number;
+  parentSessionId?: string;
+  rootSessionId?: string;
+  onOpenSession?: SelfhostConversationStatusProps["onOpenSubagentSession"];
+  onOpenDirectory?: SelfhostConversationStatusProps["onOpenSubagentDirectory"];
+}) {
+  const { intl } = useZCodeIntl();
+  const agents = [...running, ...ended.slice(0, 3)];
+  return (
+    <SelfhostStatusSection
+      name="subagents"
+      title={intl.formatMessage({ id: "selfhost.status.subagents" })}
+    >
+      <ul className="max-h-36 overflow-auto">
+        {agents.map((agent) => {
+          const target = buildRunningSubagentOpenRequest({
+            parentSessionId,
+            rootSessionId,
+            subagent: agent,
+          });
+          const status =
+            agent.status === "running"
+              ? "running"
+              : agent.status === "success"
+                ? "done"
+                : agent.status === "failed"
+                  ? "failed"
+                  : undefined;
+          const row = (
+            <>
+              <WorkflowAgentFace
+                name={agent.subagentType}
+                avatarIndex={undefined}
+                status={status}
+                idle={status === undefined}
+                className="size-4 min-h-4! min-w-4!"
+              />
+              <span className="min-w-0 flex-1 truncate" title={agent.title}>
+                {agent.title}
+              </span>
+              <span className="shrink-0 text-ui-sm text-foreground-subtle">
+                {intl.formatMessage({ id: "subagentDirectory.status." + agent.status })}
+              </span>
+            </>
+          );
+          const rowClass =
+            "flex min-h-8 w-full min-w-0 items-center gap-2 px-2 text-left text-ui-base";
+          return (
+            <li key={agent.childSessionId}>
+              {target && onOpenSession ? (
+                <Button variant="ghost" className={rowClass} onClick={() => onOpenSession(target)}>
+                  {row}
+                </Button>
+              ) : (
+                <div className={rowClass}>{row}</div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {onOpenDirectory && parentSessionId ? (
+        <Button
+          variant="ghost"
+          className="min-h-8 w-full justify-start gap-2 px-2 text-ui-base text-foreground-subtle"
+          aria-label={intl.formatMessage({ id: "subagentDirectory.title" })}
+          onClick={() =>
+            onOpenDirectory({ parentSessionId, rootSessionId: rootSessionId ?? parentSessionId })
+          }
+        >
+          <SubagentCollectionIcon className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1 truncate text-left">
+            {intl.formatMessage({ id: "subagentDirectory.title" })}
+          </span>
+          {endedCount ? <span className="text-ui-sm tabular-nums">{endedCount}</span> : null}
+        </Button>
+      ) : null}
+    </SelfhostStatusSection>
+  );
+}
+
+function SelfhostStatusSources({ sources }: { sources: readonly ConversationSource[] }) {
+  const { intl } = useZCodeIntl();
+  const rowClass = "flex min-h-8 min-w-0 items-center gap-2 rounded-lg px-2 py-1 text-ui-base";
+  return (
+    <SelfhostStatusSection
+      name="sources"
+      title={intl.formatMessage({ id: "selfhost.status.sources" })}
+    >
+      <ul className="max-h-40 overflow-auto">
+        {sources.map((source) => {
+          const label = intl.formatMessage({ id: "selfhost.status.source." + source.kind });
+          const Icon =
+            source.kind === "tool" ? WrenchIcon : source.kind === "userLink" ? LinkIcon : GlobeIcon;
+          const body = (
+            <>
+              <Icon aria-hidden className="size-4 shrink-0 text-foreground-subtle" />
+              <span className="min-w-0 flex-1 truncate">{source.title}</span>
+              <span className="shrink-0 text-ui-xs text-foreground-subtle">{label}</span>
+            </>
+          );
+          return source.kind === "tool" ? (
+            <li key={source.id} className={rowClass} title={source.tool}>
+              {body}
+            </li>
+          ) : (
+            <li key={source.kind + ":" + source.url}>
+              <a
+                className={cn(rowClass, "hover:bg-hover focus-visible:outline-ring")}
+                href={source.url}
+                title={source.url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {body}
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </SelfhostStatusSection>
+  );
+}
+
+export function SelfhostConversationStatusPanel(props: SelfhostConversationStatusProps) {
+  const { intl } = useZCodeIntl();
+  const root = useRef<HTMLElement>(null);
+  const focusToggle = useRef(false);
+  const [wide, setWide] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+  const [open, setOpen] = useState(false);
+  const summary = props.gitSummary;
+  const hasGit = Boolean(
+    summary?.isGitAvailable &&
+    summary.isRepository &&
+    summary.workspacePath === (props.gitCwd ?? props.workspacePath),
+  );
+  const hasAgents = Boolean(props.runningSubagents?.length || props.endedSubagentCount);
+  const hasPlan = Boolean(props.plan?.items.length || (props.writtenPlan && props.onOpenPlan));
+  const hasContent = Boolean(hasGit || props.goal || hasPlan || hasAgents || props.sources?.length);
+  const { mobile } = props;
+  const inline = !mobile && wide && expanded;
+  useLayoutEffect(() => {
+    const pane = root.current?.parentElement;
+    if (!pane || !hasContent || mobile) return;
+    // 面板及左侧消息列都是会话容器的子项，留位不会改变用于判断的容器宽度。
+    // 56rem 容纳 19rem 状态栏和项目侧栏展开后的会话主列。
+    const measure = (width: number) => {
+      const next = width >= 896;
+      setWide(next);
+      if (next) setOpen(false);
+    };
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) measure(entry.contentRect.width);
+    });
+    measure(pane.clientWidth);
+    observer.observe(pane);
+    return () => observer.disconnect();
+  }, [hasContent, mobile]);
+  useLayoutEffect(() => {
+    if (!focusToggle.current) return;
+    focusToggle.current = false;
+    root.current?.querySelector<HTMLButtonElement>("[data-session-status-toggle]")?.focus();
+  }, [inline]);
+
+  if (!hasContent) return null;
+  const title = intl.formatMessage({ id: "selfhost.status.title" });
+  const openLabel = intl.formatMessage({ id: "selfhost.status.open" });
+  const closeTransient = () => setOpen(false);
+  const sections = (
+    <>
+      {hasGit && summary ? (
+        <SelfhostStatusGit {...props} summary={summary} onNavigate={closeTransient} />
+      ) : null}
+      {props.goal ? (
+        <SelfhostStatusGoal
+          goal={props.goal}
+          onPause={props.onPauseGoal}
+          onResume={props.onResumeGoal}
+        />
+      ) : null}
+      {hasPlan ? (
+        <SelfhostStatusSection
+          name="plan"
+          title={intl.formatMessage({ id: "selfhost.status.plan" })}
+          summary={
+            props.plan?.items.length ? (
+              <span className="text-ui-sm tabular-nums text-foreground-subtle">
+                {props.plan.items.filter((item) => item.status === "completed").length}/
+                {props.plan.items.length}
+              </span>
+            ) : undefined
+          }
+        >
+          {props.plan?.items.length ? (
+            <ul className="max-h-44 overflow-auto">
+              <PlanStatusItemRows items={props.plan.items} />
+            </ul>
+          ) : null}
+          {props.writtenPlan && props.onOpenPlan ? (
+            <Button
+              variant="ghost"
+              className="w-full justify-start gap-2 px-2 text-ui-base text-foreground-subtle"
+              onClick={() => {
+                closeTransient();
+                if (props.writtenPlan) props.onOpenPlan?.(props.writtenPlan);
+              }}
+            >
+              <ListChecksIcon aria-hidden className="size-4" />
+              {intl.formatMessage({ id: "planTool.panel.viewFull" })}
+            </Button>
+          ) : null}
+        </SelfhostStatusSection>
+      ) : null}
+      {hasAgents ? (
+        <SelfhostStatusAgents
+          running={props.runningSubagents}
+          ended={props.endedSubagents}
+          endedCount={props.endedSubagentCount}
+          parentSessionId={props.parentSessionId}
+          rootSessionId={props.rootSessionId}
+          onOpenSession={
+            props.onOpenSubagentSession
+              ? (request) => {
+                  closeTransient();
+                  props.onOpenSubagentSession?.(request);
+                }
+              : undefined
+          }
+          onOpenDirectory={
+            props.onOpenSubagentDirectory
+              ? (request) => {
+                  closeTransient();
+                  props.onOpenSubagentDirectory?.(request);
+                }
+              : undefined
+          }
+        />
+      ) : null}
+      {props.sources?.length ? <SelfhostStatusSources sources={props.sources} /> : null}
+    </>
+  );
+  const trigger = (
+    <Button
+      type="button"
+      variant="outline"
+      size="icon-md"
+      aria-label={openLabel}
+      title={openLabel}
+      className="bg-surface shadow-xs"
+      data-session-status-toggle=""
+      onClick={
+        wide && !mobile
+          ? () => {
+              focusToggle.current = true;
+              setExpanded(true);
+            }
+          : undefined
+      }
+    >
+      <MonitorActivityIcon aria-hidden className="size-4" />
+    </Button>
+  );
+  return (
+    <aside
+      ref={root}
+      aria-label={title}
+      data-status-placement={inline ? "inline" : "trigger"}
+      className="peer/session-status absolute right-3 top-2 z-30"
+    >
+      {mobile ? (
+        <BottomSheet open={open} onOpenChange={setOpen}>
+          <BottomSheetTrigger asChild>{trigger}</BottomSheetTrigger>
+          <BottomSheetContent aria-describedby={undefined}>
+            <BottomSheetHeader className="flex items-center justify-between gap-2">
+              <BottomSheetTitle>{title}</BottomSheetTitle>
+              <BottomSheetClose asChild>
+                <Button
+                  size="icon-md"
+                  variant="ghost"
+                  aria-label={intl.formatMessage({ id: "selfhost.status.close" })}
+                >
+                  <XIcon aria-hidden />
+                </Button>
+              </BottomSheetClose>
+            </BottomSheetHeader>
+            <div className="min-h-0 overflow-auto px-2">{sections}</div>
+          </BottomSheetContent>
+        </BottomSheet>
+      ) : inline ? (
+        <div
+          data-testid="selfhost-status-panel"
+          className="relative max-h-[min(80dvh,40rem)] w-[19rem] overflow-y-auto overscroll-contain rounded-2xl border border-border bg-popover px-1.5 pt-1 text-popover-foreground shadow-[var(--shadow-status-panel)]"
+        >
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            className="absolute right-2 top-1.5 z-10"
+            aria-label={intl.formatMessage({ id: "selfhost.status.collapse" })}
+            title={intl.formatMessage({ id: "selfhost.status.collapse" })}
+            data-session-status-toggle=""
+            onClick={() => {
+              focusToggle.current = true;
+              setExpanded(false);
+            }}
+          >
+            <ChevronRightIcon aria-hidden className="size-4" />
+          </Button>
+          <div className="[&>section:first-child>div:first-child]:pr-8">{sections}</div>
+        </div>
+      ) : wide ? (
+        trigger
+      ) : (
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+          <PopoverContent
+            align="end"
+            aria-label={title}
+            data-testid="selfhost-status-panel"
+            className="block max-h-[min(75dvh,36rem)] w-[min(19rem,calc(100vw-24px))] gap-0 overflow-y-auto overscroll-contain p-1.5"
+          >
+            {sections}
+          </PopoverContent>
+        </Popover>
+      )}
+    </aside>
+  );
+}

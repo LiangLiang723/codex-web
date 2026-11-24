@@ -3,7 +3,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import type { ZCodeProvider } from "@zcode/shared";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { createPortal } from "react-dom";
-import { PaletteIcon, WandSparkles } from "lucide-react";
+import { PaletteIcon } from "lucide-react";
 import {
   $createTextNode,
   BLUR_COMMAND,
@@ -22,7 +22,10 @@ import {
   getPromptInputTriggerSignature,
   type ActivePromptInputTrigger,
 } from "../lib/promptInputTriggers.js";
-import { ContextMentionOptionContent } from "@/mentions/components/ContextMentionOptionContent.js";
+import {
+  ContextMentionOptionContent,
+  SkillMentionOptionContent,
+} from "@/mentions/components/ContextMentionOptionContent.js";
 import { PluginMentionOptionContent } from "@/mentions/components/PluginMentionOptionContent.js";
 import {
   MentionPanel,
@@ -358,17 +361,7 @@ export function MentionPlugin({
             item.category === "files" ? (
               <ContextMentionOptionContent item={item} workspacePath={workspacePath} />
             ) : item.category === "skills" ? (
-              <span className="min-w-0 flex flex-1 items-center gap-2">
-                {/* Bugfix: skills 候选项需要和命令类项保持一致的主次信息密度，
-                    这里保留图标 + 名称主文案，再把描述压成右侧弱信息，而不是额外占第二行。 */}
-                <WandSparkles className="size-3.5 shrink-0 text-foreground" />
-                <span className="shrink-0 whitespace-nowrap text-ui-base font-medium text-foreground">
-                  {item.label}
-                </span>
-                <span className="min-w-0 truncate text-ui-xs text-foreground-subtlest">
-                  {item.description}
-                </span>
-              </span>
+              <SkillMentionOptionContent item={item} />
             ) : item.category === "whiteboards" ? (
               <span className="min-w-0 flex flex-1 items-center gap-2">
                 <PaletteIcon className="size-3.5 shrink-0 text-foreground" />

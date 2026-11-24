@@ -1,0 +1,76 @@
+--- a/server/utils/gateway/http/validation/threads.ts
++++ b/server/utils/gateway/http/validation/threads.ts
+@@ -7,6 +7,7 @@
+ import { uploadedFileSchema } from "~~/shared/runtime/uploaded-file";
+ 
+ export const threadListSchema = z.object({
++  archived: z.enum(["true","false"]).transform(value => value === "true").optional(),
+   hostId: z.coerce.number().int().positive(),
+   cwd: z.string().trim().nullable().optional(),
+   searchTerm: z.string().trim().nullable().optional(),
+--- a/server/api/threads/index.get.ts
++++ b/server/api/threads/index.get.ts
+@@ -33,6 +33,7 @@
+   });
+ 
+   const listParams = withAllThreadSources({
++    ...(query.archived !== undefined ? {archived:query.archived} : {}),
+     limit: query.limit,
+     cursor: trimmedOrNull(query.cursor),
+     cwd: trimmedOrNull(query.cwd) ?? undefined,
+@@ -40,7 +41,7 @@
+     useStateDbOnly: query.useRemoteStateIndexOnly ?? false,
+   });
+   const page = await threadBroker.listThreads(host, listParams);
+-  if (userId !== undefined && discoveryGeneration !== null) {
++  if (!query.archived && userId !== undefined && discoveryGeneration !== null) {
+     const current = threadProjectDiscovery.indexPageIfCurrent(
+       userId,
+       host.id,
+@@ -58,7 +59,8 @@
+   const gatewayThreads = gatewayThreadsForList(
+     host.id,
+     page.data,
+-    threadSnapshotStore.listForHost(host.id).map((record) => record.snapshot.thread),
++    query.archived ? [] : threadSnapshotStore.listForHost(host.id).map(record => record.snapshot.thread)
++      .filter(thread => query.archived === undefined || (!thread.path && !thread.preview && thread.turns.length === 0)),
+     indexedThreads,
+     query.searchTerm ?? null,
+   );
+--- a/server/utils/gateway/agent/providers/codex/codex-project-defaults.ts
++++ b/server/utils/gateway/agent/providers/codex/codex-project-defaults.ts
+@@ -7,6 +7,7 @@
+     config: z
+       .object({
+         model: z.string().nullable(),
++        model_provider: z.string().nullish(),
+         model_reasoning_effort: z.string().nullable(),
+       })
+       .loose(),
+@@ -25,6 +26,7 @@
+   return {
+     provider: "codex",
+     model: response.config.model,
++    modelProvider: response.config.model_provider ?? undefined,
+     effort: response.config.model_reasoning_effort,
+   };
+ }
+--- a/shared/types/agent-defaults.ts
++++ b/shared/types/agent-defaults.ts
+@@ -5,5 +5,6 @@
+ export interface AgentProjectDefaults {
+   provider: AgentProviderId;
+   model: string | null;
++  modelProvider?: string;
+   effort: ReasoningEffort | null;
+ }
+--- a/shared/runtime/realtime/server-message-schema.ts
++++ b/shared/runtime/realtime/server-message-schema.ts
+@@ -413,6 +413,7 @@
+   .strict();
+ const agentProjectDefaultsSchema = z
+   .object({
++    modelProvider: z.string().optional(),
+     provider: z.literal("codex"),
+     model: z.string().nullable(),
+     effort: z.string().nullable(),

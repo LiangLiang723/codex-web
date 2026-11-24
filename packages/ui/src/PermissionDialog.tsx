@@ -32,6 +32,7 @@ import {
   MAX_PERMISSION_FEEDBACK_CHARS,
   PERMISSION_FULL_ACCESS_OPTION_ID,
   PERMISSION_GUARDED_OPTION_ID,
+  type PermissionRequestPayload,
 } from "@zcode/shared/zcode-protocol-v4";
 import { Button } from "@/components/ui/button.js";
 import { cn } from "@/components/lib/utils.js";
@@ -202,7 +203,7 @@ const PROVIDER_PERMISSION_OPTION_NAME_LABELS: Partial<
 interface PermissionOptionNameMessageIds {
   label: string;
   /** 按 name 命中时可覆盖 kind 推导的描述：会话级选项不能沿用「相同请求不再询问」的项目级文案。 */
-  description?: string;
+  description?: string | null;
 }
 
 const GLOBAL_PERMISSION_OPTION_NAME_LABELS: Record<string, PermissionOptionNameMessageIds> = {
@@ -211,6 +212,14 @@ const GLOBAL_PERMISSION_OPTION_NAME_LABELS: Record<string, PermissionOptionNameM
     description: "chat.permission.fullAccess.description",
   },
   "always allow in this project": { label: "chat.permission.allowForProject" },
+  "allow similar commands": {
+    label: "chat.permission.allowSimilarCommands",
+    description: "chat.permission.allowSimilarCommands.description",
+  },
+  "allow for this session": { label: "chat.permission.allowForSession", description: null },
+  "save allow rule": { label: "selfhost.permission.saveAllowRule", description: "selfhost.permission.savedNetworkRule" },
+  "save deny rule": { label: "selfhost.permission.saveDenyRule", description: "selfhost.permission.savedNetworkRule" },
+  "cancel turn": { label: "chat.permission.cancelTurn", description: null },
   "always allow computer use in this project": { label: "chat.permission.cua.allowForProject" },
   // workflow 运行确认窗的会话免确认：
   // CLI 侧 name 是匹配键，wire kind 是 allowAlways（排序 / 样式同 always allow）。
@@ -477,6 +486,7 @@ function focusLastSaveWorkflowControl(root: HTMLElement | null): boolean {
 
 export function PermissionDialog({
   request,
+  nativeDetails,
   onRespond,
   workspacePath,
   workspaceIdentity,
@@ -491,6 +501,7 @@ export function PermissionDialog({
   modeSwitch,
 }: {
   request: ZCodePermissionRequest;
+  nativeDetails?: PermissionRequestPayload["nativeDetails"];
   responding?: boolean;
   permissionMode?: string;
   committedMode?: "guarded" | "yolo";
@@ -926,6 +937,18 @@ export function PermissionDialog({
             displayReason ? (
               <p className="text-ui-base leading-5 text-foreground">{displayReason}</p>
             ) : null}
+            {nativeDetails?.length ? (
+              <dl className="grid gap-1 text-ui-sm">
+                {nativeDetails.map(({ kind, values }) => (
+                  <div className="min-w-0" key={kind}>
+                    <dt className="text-foreground-subtle">{intl.formatMessage({ id: `selfhost.permission.${kind}` })}</dt>
+                    {values.map((value, index) => (
+                      <dd className="break-all text-foreground" key={`${index}:${value}`}>{value}</dd>
+                    ))}
+                  </div>
+                ))}
+              </dl>
+            ) : null}
             {shouldUseSwitchModePlaceholder ? (
               <div className="flex items-center gap-2 text-ui-base text-foreground">
                 <LoaderCircle className="size-4 shrink-0 animate-spin text-foreground-subtle" />
@@ -953,7 +976,7 @@ export function PermissionDialog({
             ) : shouldUseSaveWorkflowBlock ? (
               // 同上：保存 gate 的问句（保存 / 覆盖两句）由块自己给出，不复用协议 reason。
               <SaveWorkflowPermissionBlock request={request} />
-            ) : (
+            ) : nativeDetails?.length && (request.kind === "NetworkAccess" || request.kind === "permissionsRequest") ? null : (
               // 审批直接使用 renderer，绕过 ToolCallBlock 时也必须提供宿主展示能力。
               <ToolPresentationCapabilitiesProvider value={presentationCapabilities}>
                 <PermissionBlock {...blockContext} />
@@ -982,8 +1005,10 @@ export function PermissionDialog({
                   ? "chat.permission.cua.allowForProject.description"
                   : labelMessageId === "chat.permission.allowCommand"
                     ? "chat.permission.allowCommand.description"
-                    : (nameMessageIds?.description ??
-                      getOptionDescriptionMessageId(option.kind, preview.scope));
+                    : nameMessageIds?.description === null
+                      ? null
+                      : (nameMessageIds?.description ??
+                        getOptionDescriptionMessageId(option.kind, preview.scope));
                 // 工作流确认窗改过设置：放行的两项改口说「按调整后的设置」（docs/dynamic-workflow/launch.md
                 // 「The options」）。
                 const descriptionMessageId =
@@ -1009,7 +1034,10 @@ export function PermissionDialog({
                 const description =
                   (preferOptionName && !knownNameLabel) || !descriptionMessageId
                     ? null
-                    : intl.formatMessage({ id: descriptionMessageId });
+                    : intl.formatMessage(
+                        { id: descriptionMessageId },
+                        { scope: option.description ?? "" },
+                      );
                 const ruleScopes =
                   getPermissionOptionDisplayKind(option.kind) === "allowAlways"
                     ? readPermissionRuleScopes(option)
@@ -1090,7 +1118,7 @@ export function PermissionDialog({
                             {ruleScopes.length > 0 ? (
                               <InlinePermissionPrefixScopes scopes={ruleScopes} />
                             ) : description ? (
-                              <span className="text-ui-base leading-4 text-foreground-subtle">
+                              <span className="min-w-0 [overflow-wrap:anywhere] text-ui-base leading-4 text-foreground-subtle">
                                 {description}
                               </span>
                             ) : null}

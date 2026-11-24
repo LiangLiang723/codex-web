@@ -336,6 +336,10 @@ export function useDraftConfigControl(params: {
     "remote-waiting",
     {
       selection: modelSelectionInput ?? null,
+      workspacePath,
+      ...(sessionConfig?.nativeModelProvider
+        ? { nativeModelProvider: sessionConfig.nativeModelProvider }
+        : {}),
     },
   );
   const modelSelectionView =

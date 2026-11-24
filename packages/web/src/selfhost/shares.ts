@@ -2,6 +2,7 @@ import { z } from "zod";
 import { type Gateway, type Message } from "./gateway.js";
 import { array, rec, str } from "./threadProjection.js";
 const day = 86400000;
+const allSelections = new WeakMap<Gateway, Map<string, string[]>>();
 export async function shareOperation(
   g: Gateway,
   hostId: number,
@@ -42,41 +43,52 @@ export async function shareOperation(
   if (method !== "preflight" && method !== "publish")
     throw Error("Unsupported private share operation");
   const id = str(p.sessionId),
-    info = await g.call("thread.activate", { hostId, threadId: id, limit: 100 });
-  const turns = array(rec(rec(info.history).thread).turns),
     selection = rec(p.selection);
   if (selection.kind === "rowAnchors") throw Error("请选择完整的对话轮次");
-  const selected =
-    selection.kind === "all"
-      ? turns
-      : turns.filter(
-          (t) => Array.isArray(selection.productTurnIds) && selection.productTurnIds.includes(t.id),
-        );
-  const turnResults = selected.map((t) => ({
-    productTurnId: t.id,
-    blockingIssues:
-      t.status === "inProgress" ? [{ reasonCode: "running_turn", productTurnId: t.id }] : [],
-    skippableWarnings: [],
-    deferredIssues: [],
-  }));
-  if (method === "preflight")
-    return {
-      revision: info.lastEventId,
-      logEpoch: info.eventEpoch,
-      capabilitiesFingerprint: "selfhost-private-text-v1",
-      turnResults,
-      blockingIssues: turnResults.flatMap((t) => t.blockingIssues),
+  const key = JSON.stringify([hostId, id]);
+  const all = selection.kind === "all";
+  const saved = allSelections.get(g) ?? new Map<string, string[]>();
+  let ids = all
+    ? saved.get(key)
+    : Array.isArray(selection.productTurnIds)
+      ? selection.productTurnIds.map(String)
+      : undefined;
+  if (!all && !ids?.length) throw Error("请选择完整的对话轮次");
+  if (method === "preflight" || !ids) {
+    const info = await call("preflight", { hostId, threadId: id, ...(all ? {} : { turns: ids }) });
+    const selected = array(info.turns);
+    ids = selected.map((t) => str(t.id));
+    if (all) {
+      saved.set(key, ids);
+      if (saved.size > 32) saved.delete(saved.keys().next().value!);
+      allSelections.set(g, saved);
+    }
+    const turnResults = selected.map((t) => ({
+      productTurnId: t.id,
+      blockingIssues:
+        t.status === "inProgress" ? [{ reasonCode: "running_turn", productTurnId: t.id }] : [],
       skippableWarnings: [],
       deferredIssues: [],
-      supportedArtifactTypes: [],
-      ttlOptions: { minMs: day, maxMs: 30 * day, defaultMs: 7 * day },
-    };
+    }));
+    if (method === "preflight")
+      return {
+        revision: info.revision,
+        logEpoch: info.logEpoch,
+        capabilitiesFingerprint: "selfhost-private-text-v1",
+        turnResults,
+        blockingIssues: turnResults.flatMap((t) => t.blockingIssues),
+        skippableWarnings: [],
+        deferredIssues: [],
+        supportedArtifactTypes: [],
+        ttlOptions: { minMs: day, maxMs: 30 * day, defaultMs: 7 * day },
+      };
+  }
   if (p.accessMode !== "private") throw Error("中心服务器仅支持账户私有分享");
   return link(
     await call("publish", {
       hostId,
       threadId: id,
-      turns: selected.map((t) => t.id),
+      turns: ids,
       title: p.title,
       requestId: p.clientRequestId,
       ttlMs: p.ttlMs,

@@ -35,4 +35,4 @@ apps/zcode-cli/packages/design-plugin/hooks/design-rules text eol=lf
 apps/zcode-cli/packages/design-plugin/hooks/run-hook.cmd text eol=lf
 
 # A single space denotes an empty context line in a unified diff.
-selfhost/gateway/*.patch whitespace=-blank-at-eol
+selfhost/gateway/**/*.patch whitespace=-blank-at-eol

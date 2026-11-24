@@ -52,17 +52,38 @@ export function writeThreadName(
   nameWrites.set(client, writes);
   const previous = writes.get(threadId);
   const current = (previous?.catch(() => {}) ?? Promise.resolve()).then(async () => {
-    if (automatic) {
-      // 两端共用 Codex 保存的名字。后台结果返回较晚时，先确认桌面和 Web 都未手动改名。
+    const write = (value: string) =>
+      client.request("thread/name/set", { threadId, name: value }, timeoutMs);
+    if (!automatic) return write(name);
+    let externalName: string | undefined;
+    const stop = client.on("notification", (event) => {
+      const params = recordFromUnknown(event.params);
+      if (
+        event.method === "thread/name/updated" &&
+        params?.threadId === threadId &&
+        typeof params.threadName === "string" &&
+        params.threadName !== name
+      )
+        externalName = params.threadName;
+    });
+    const readName = async () => {
       const { thread } = await client.request(
         "thread/read",
         { threadId, includeTurns: false },
         timeoutMs,
         parseThreadReadResult,
       );
-      if (thread.name) return;
+      return thread.name;
+    };
+    try {
+      // 两端可能在 read 与 name/set 之间改名；只在自动结果仍占位时恢复已观察到的手工名字。
+      if ((await readName()) || externalName !== undefined) return;
+      const result = await write(name);
+      if (externalName && (await readName()) === name) await write(externalName);
+      return result;
+    } finally {
+      stop();
     }
-    return client.request("thread/name/set", { threadId, name }, timeoutMs);
   });
   writes.set(threadId, current);
   return current.finally(() => {

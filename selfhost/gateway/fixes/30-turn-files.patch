@@ -1,0 +1,21 @@
+--- a/server/utils/gateway/runtime/thread-runtime-events.ts
++++ b/server/utils/gateway/runtime/thread-runtime-events.ts
+@@ -12,6 +12,7 @@
+ import { threadRuntimeStatusHub } from "./thread-runtime-status-hub";
+ import { runtimeLog } from "./runtime-log";
+ import { remoteHosts } from "../state/remote-hosts";
++import { captureTurnFiles } from "../../selfhost-turn-files";
+ 
+ type ThreadEventSubscriber = (event: GatewayEvent) => void;
+ export type ThreadGoalResolver = () => Promise<unknown>;
+@@ -96,6 +97,10 @@
+       this.publish(gatewayEvent);
+       return gatewayEvent;
+     }
++    // 已完成的文件凭据跨 SSH 重连保留；在途观察仍按当前连接隔离。
++    const verified = remoteHosts.verifiedIdentityKey(hostId);
++    if (verified)
++      captureTurnFiles(verified, threadId, event, threadSnapshotStore.get(hostId, threadId)?.thread.cwd, remoteKey);
+     remoteHosts.forEachAlias(remoteKey, (aliasHostId) => {
+       // Only the small transport envelope changes. Every alias uses the same provider payload,
+       // snapshot, replay cursor and history pages; user settings and delivery remain scoped here.

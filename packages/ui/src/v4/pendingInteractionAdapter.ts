@@ -62,7 +62,7 @@ export function pendingPermissionToLegacyRequest(
 ): ZCodePermissionRequest {
   const { payload } = interaction;
   // 自主模式的危险请求仍给旧端两个普通选项；新版单独呈现显式切换动作。
-  const switchOption =
+  const switchOption: PermissionRequestPayload["options"][number] | undefined =
     payload.fullAccessOption ??
     (payload.modeSwitch === "fullAccessOnly"
       ? {
@@ -77,6 +77,7 @@ export function pendingPermissionToLegacyRequest(
     optionId: option.optionId,
     kind: option.kind,
     name: option.label,
+    ...(option.description === undefined ? {} : { description: option.description }),
     response: option.response ?? permissionKindToResponse(option.kind, payload),
   }));
 

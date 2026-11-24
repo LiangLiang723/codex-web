@@ -1,5 +1,6 @@
 import { stageV4ComposerDraftAttachments } from "@/v4/composer/composerDraftWorkspaceTransfer.js";
 import { readProjectSidebarView } from "@/project-sidebar/index.js";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 /* eslint-disable max-lines -- Root workspace action hook 集中编排项目、远程和 conversation 入口；合并期保持动作边界完整，后续按领域拆分。 */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
@@ -366,7 +367,9 @@ export function useRootWorkspaceActions({
             throw new Error("project.remote-project-required");
         }
         if (!isCurrent()) return;
-        if (workbenchGroupClientMode === "web-remote-replayable") {
+        // 自托管手机端的项目服务已绑定当前 SSH 主机。将它派给远控 bridge 会缺失
+        // openProjectDraft，导致列表的新建任务入口在草稿准备前就失败。
+        if (workbenchGroupClientMode === "web-remote-replayable" && !selfHostedBuild) {
           if (!openMobileProjectDraft) throw new Error("project.remote-navigation-unavailable");
           // 归属先在共享入口解析，目录仍只由 bridge owner 准备；旧 Root 不写交接后的草稿。
           await openMobileProjectDraft({

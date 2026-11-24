@@ -6,7 +6,7 @@ import {
   testId,
 } from "@zcode/shared/test-ids";
 import { z } from "zod";
-import type { NativeMcpElicitation } from "@zcode/shared/zcode-protocol-v4";
+import type { NativeCodexQuestions, NativeMcpElicitation } from "@zcode/shared/zcode-protocol-v4";
 import { Textarea } from "@/components/ui/textarea.js";
 import { Button } from "@/components/ui/button.js";
 import { Input } from "@/components/ui/input.js";
@@ -84,6 +84,121 @@ export function V4UserInputDialog({ model, onSubmit }: V4UserInputDialogProps) {
         ) : null}
       </div>
     </div>
+  );
+}
+
+/** 原生问题使用题目 ID 收集答案，秘密字段只保留在当前表单 DOM 内。 */
+export function CodexQuestionsForm({
+  request,
+  respond,
+}: {
+  request: NativeCodexQuestions;
+  respond: (answers: Record<string, string>) => Promise<boolean>;
+}) {
+  const { intl } = useZCodeIntl();
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [selections, setSelections] = useState<Record<string, string>>({});
+  const inFlight = useRef(false);
+
+  async function send(answers: Record<string, string>) {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    setFailed(false);
+    try {
+      if (await respond(answers)) return;
+    } catch {
+      // 保留当前页的回答供重试，快照清场后销毁这个表单。
+    }
+    inFlight.current = false;
+    setBusy(false);
+    setFailed(true);
+  }
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const answers = Object.fromEntries(
+      request.questions.flatMap(({ id, options }) => {
+        const selection = data.get(`option-${id}`);
+        const text = data.get(`answer-${id}`);
+        const value =
+          selection === "other" || !options?.length
+            ? text
+            : typeof selection === "string" && selection !== ""
+              ? options[Number(selection)]?.label
+              : undefined;
+        return typeof value === "string" && value.trim() ? [[id, value]] : [];
+      }),
+    );
+    void send(answers);
+  }
+
+  return (
+    <form
+      onSubmit={submit}
+      data-testid="codex-user-input"
+      className="grid max-h-[65dvh] gap-3 overflow-y-auto rounded-xl border border-card-border bg-card p-4 text-ui-sm text-foreground"
+    >
+      {request.questions.map(({ id, header, question, options, isOther, isSecret }) => (
+        <fieldset key={id} className="grid min-w-0 gap-2" disabled={busy}>
+          <legend className="mb-1 text-ui-xs text-foreground-subtle">{header}</legend>
+          <p className="break-words font-medium">{question}</p>
+          {options?.length ? (
+            <select
+              className="min-w-0 rounded-md border border-input-border bg-input px-2 py-1.5 max-sm:text-mobile-input-safe"
+              name={`option-${id}`}
+              aria-label={header || question}
+              value={selections[id] ?? ""}
+              onChange={(event) =>
+                setSelections((prior) => ({ ...prior, [id]: event.target.value }))
+              }
+            >
+              <option value="">—</option>
+              {options.map((option, index) => (
+                <option key={option.label} value={index}>
+                  {option.description ? `${option.label} · ${option.description}` : option.label}
+                </option>
+              ))}
+              {isOther && (
+                <option value="other">
+                  {intl.formatMessage({ id: "selfhost.question.other" })}
+                </option>
+              )}
+            </select>
+          ) : null}
+          {!options?.length || (isOther && selections[id] === "other") ? (
+            <Input
+              name={`answer-${id}`}
+              aria-label={header || question}
+              autoComplete="off"
+              type={isSecret ? "password" : "text"}
+              className="max-sm:text-mobile-input-safe"
+            />
+          ) : null}
+        </fieldset>
+      ))}
+      {failed && (
+        <p role="alert" className="text-destructive">
+          {intl.formatMessage({ id: "chat.permission.responseFailed" })}
+        </p>
+      )}
+      <div className="flex justify-end gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          onClick={() => void send({})}
+        >
+          {intl.formatMessage({ id: "selfhost.question.skip" })}
+        </Button>
+        <Button size="sm" disabled={busy}>
+          {intl.formatMessage({ id: "chat.elicitation.submit" })}
+        </Button>
+      </div>
+    </form>
   );
 }
 

@@ -30,11 +30,13 @@ function Login({ onLogin }: { onLogin: (token: string) => void }) {
     [busy, setBusy] = useState(false);
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const form = new FormData(e.currentTarget);
+    const { username, password } = Object.fromEntries(new FormData(e.currentTarget));
     setBusy(true);
     setError("");
     try {
-      onLogin(await Gateway.login(String(form.get("username")), String(form.get("password"))));
+      if (typeof username !== "string" || typeof password !== "string")
+        throw Error("请输入用户名和密码");
+      onLogin(await Gateway.login({ username, password }));
     } catch (e) {
       setError(String(e));
     } finally {
@@ -88,7 +90,12 @@ function Workbench({
     query.addEventListener("change", change);
     return () => query.removeEventListener("change", change);
   }, []);
-  const [opened, setOpened] = useState<Awaited<ReturnType<typeof openWorkspace>> | null>(null);
+  const [mounted, setMounted] = useState<{
+    gateway: Gateway;
+    identity: string;
+    workspace: Awaited<ReturnType<typeof openWorkspace>>;
+  } | null>(null);
+  const [catalogIssue, setCatalogIssue] = useState("");
   const [error, setError] = useState("");
   const [webReconnecting, setWebReconnecting] = useState(false);
   const [hostConnections, setHostConnections] = useState<
@@ -102,12 +109,36 @@ function Workbench({
   const selectedId = host?.id,
     selectedName = host?.name,
     selectedAvatar = host?.avatar;
-  const readVersion = useRef(0);
+  // 切换同目录的另一台 SSH 主机时，旧服务会存活到 effect cleanup；渲染前必须校验归属。
+  const identity =
+    host &&
+    JSON.stringify([
+      host.id,
+      host.createdAt,
+      host.sshHost,
+      host.port,
+      host.username,
+      host.proxyUrl,
+      host.hostKeyFingerprint,
+      cwd,
+    ]);
+  const opened =
+    mounted?.gateway === gateway && mounted.identity === identity ? mounted.workspace : null;
+  const { current: catalogReads } = useRef({ generation: 0 });
   const refresh = useCallback(async () => {
-    const version = ++readVersion.current;
-    const next = await gateway.config();
-    if (version === readVersion.current) setCatalog(next);
-  }, [gateway]);
+    const version = ++catalogReads.generation;
+    try {
+      const next = await gateway.config();
+      if (version === catalogReads.generation) {
+        setCatalog(next);
+        setCatalogIssue("");
+      }
+    } catch (cause) {
+      if (version === catalogReads.generation)
+        setCatalogIssue(cause instanceof Error ? cause.message : String(cause));
+      throw cause;
+    }
+  }, [gateway, catalogReads]);
   const navigate = useCallback((params: URLSearchParams) => {
     const search = params.toString();
     history.pushState({}, "", location.pathname + (search ? "?" + search : ""));
@@ -159,16 +190,15 @@ function Workbench({
     };
   }, []);
   useEffect(() => {
-    let active = true;
-    void refresh().catch((e) => active && setError(String(e)));
+    void refresh().catch(() => {});
     const off = gateway.on((m) => {
-      if (m.type === "config.catalog.changed")
-        void refresh().catch((e) => active && setError(String(e)));
+      if (m.type === "config.catalog.changed") void refresh().catch(() => {});
       else if (m.type === "disconnected") {
         setWebReconnecting(true);
         setHostConnections({});
       } else if (m.type === "ready") {
         setWebReconnecting(false);
+        void refresh().catch(() => {});
         void gateway.send({ type: "host.lifecycle.subscribe" }).catch(() => {});
       } else if (m.type === "host.lifecycle") {
         const parsed = hostConnectionEvent.safeParse(m.event);
@@ -183,19 +213,19 @@ function Workbench({
     // 已打开的工作区应在实时连接恢复时继续使用原会话。
     void gateway.connect().catch(() => {});
     return () => {
-      active = false;
+      catalogReads.generation++;
       off();
     };
-  }, [gateway, refresh]);
+  }, [gateway, refresh, catalogReads]);
   useEffect(() => {
     let active = true;
     let resource: Awaited<ReturnType<typeof openWorkspace>> | undefined;
-    setOpened(null);
-    if (selectedId !== undefined && cwd) {
+    setMounted(null);
+    if (selectedId !== undefined && identity && cwd) {
       void openWorkspace(gateway, selectedId, cwd, manage).then(
         (r) => {
           resource = r;
-          if (active) setOpened(r);
+          if (active) setMounted({ gateway, identity, workspace: r });
           else r.dispose();
         },
         (e) => {
@@ -207,7 +237,7 @@ function Workbench({
       active = false;
       resource?.dispose();
     };
-  }, [gateway, selectedId, cwd, manage]);
+  }, [gateway, selectedId, identity, cwd, manage]);
   const platform = useMemo(
     () => ({
       ...createWebPlatform(),
@@ -238,7 +268,7 @@ function Workbench({
     ? intl.formatMessage({ id: "selfhost.network.webReconnecting" })
     : host && sshStatus && sshStatus !== "connected"
       ? intl.formatMessage({ id: hostConnectionMessages[sshStatus] }, { host: host.name })
-      : null;
+      : catalogIssue || null;
   const connectionNotice = noticeMessage && (
     <div
       className="pointer-events-none fixed inset-x-3 top-[max(0.5rem,env(safe-area-inset-top))] z-40 mx-auto w-fit max-w-[calc(100%_-_1.5rem)] rounded-lg border border-border bg-popover px-3 py-2 text-ui-sm text-popover-foreground shadow-sm"
@@ -247,12 +277,12 @@ function Workbench({
       {noticeMessage}
     </div>
   );
-  if (error)
+  if (error || (!catalog && catalogIssue))
     return (
       <WebLoginPage
         local={{
           title: "连接工作区失败",
-          description: error,
+          description: error || catalogIssue,
           form: (
             <div className="flex gap-2">
               <Button onClick={() => location.reload()}>重试</Button>
@@ -323,7 +353,7 @@ function Workbench({
       broadcastService={services.broadcastService}
     >
       <Root
-        key={host.id + " " + cwd + " " + (thread ?? "")}
+        key={identity + " " + (thread ?? "")}
         initialWebRemoteControlMobileNavigationIntent={mobile && thread ? "chat" : undefined}
         webRemoteControlWorkspaceSwitcher={mobile ? switcher : undefined}
         services={services}

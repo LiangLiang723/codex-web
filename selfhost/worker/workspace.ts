@@ -1,5 +1,8 @@
 import { projects } from "./projects.js";
 import { workflows } from "./workflows.js";
+import { turnFileRewind } from "./turn-file-rewind.js";
+import { realpath, stat } from "node:fs/promises";
+import { isAbsolute } from "node:path";
 import { homedir, platform } from "node:os";
 import { createInterface } from "node:readline";
 import { createFileService } from "../../packages/services/src/file/fileService.js";
@@ -17,10 +20,17 @@ const services = new Map<string, object>([
   ["git", createGitService()],
   ["workflows", workflows],
   ["projects", projects],
+  ["turn-file-rewind", turnFileRewind],
   [
     "system",
     {
       info: () => ({ homedir: homedir(), platform: platform() }),
+      async resolveDirectory({ path }: { path: string }) {
+        if (!isAbsolute(path)) throw Error("需要 SSH 工作区的绝对路径");
+        const canonical = await realpath(path);
+        if (!(await stat(canonical)).isDirectory()) throw Error("SSH 工作区不是目录");
+        return canonical;
+      },
       listIntegratedTerminalShells: () => [],
     },
   ],

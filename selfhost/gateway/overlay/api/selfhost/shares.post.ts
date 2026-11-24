@@ -7,9 +7,11 @@ import { defineGatewayEventHandler } from "../../utils/gateway/http/errors";
 import { requireRecord } from "../../utils/gateway/http/validation/common";
 import { hostStore } from "../../utils/gateway/state/hosts";
 import { threadBroker } from "../../utils/gateway/runtime/broker";
+import { readShareTurns } from "../../utils/selfhost-share-turns";
+import { gatewayEventStore } from "../../utils/gateway/state/gateway-events";
 const day = 86400000;
 const input = z.object({
-  operation: z.enum(["publish", "read", "list", "restore", "revoke", "delete"]),
+  operation: z.enum(["preflight", "publish", "read", "list", "restore", "revoke", "delete"]),
   id: z.string().max(100).optional(),
   hostId: z.number().int().positive().optional(),
   threadId: z.string().max(120).optional(),
@@ -50,24 +52,33 @@ export default defineGatewayEventHandler(async (event) => {
         .all(user)
         .map(meta),
     };
-  if (p.operation === "publish") {
-    if (!p.hostId || !p.threadId || !p.requestId || !p.turns)
+  if (p.operation === "publish" || p.operation === "preflight") {
+    if (!p.hostId || !p.threadId || (p.operation === "publish" && (!p.requestId || !p.turns)))
       throw Error("Incomplete share selection");
     const existing = db
       .prepare("SELECT * FROM zcode_private_shares WHERE user_id=? AND request_id=?")
-      .get(user, p.requestId);
+      .get(user, p.requestId ?? null);
     if (existing) return meta(existing);
     const host = requireRecord(hostStore.getWithSecret(p.hostId), "Host not found");
-    const thread = (await threadBroker.selfhostCapability(host, "thread/read", {
-      threadId: p.threadId,
-      includeTurns: true,
-    })) as {
-      thread: { turns: { id: string; status: string; items: Record<string, unknown>[] }[] };
-    };
-    const selected = new Set(p.turns),
-      turns = thread.thread.turns.filter((t) => selected.has(t.id));
-    if (turns.length !== selected.size || turns.some((t) => t.status === "inProgress"))
-      throw Error("部分轮次尚未完成或已不可用");
+    // 预检和发布都按原生轮次分页，不能让激活时最后一页截断用户的选择。
+    const turns = await readShareTurns(
+      (cursor) =>
+        threadBroker.selfhostCapability(host, "thread/turns/list", {
+          threadId: p.threadId,
+          cursor,
+          limit: 20,
+          sortDirection: "asc",
+          itemsView: p.operation === "preflight" ? "notLoaded" : "full",
+        }),
+      p.turns,
+    );
+    if (p.operation === "preflight")
+      return {
+        turns: turns.map(({ id, status }) => ({ id, status })),
+        revision: gatewayEventStore.latestId(host.id, p.threadId),
+        logEpoch: gatewayEventStore.epoch(host.id),
+      };
+    if (turns.some((t) => t.status === "inProgress")) throw Error("部分轮次尚未完成或已不可用");
     const clean = turns.map((t) => ({
       id: t.id,
       status: t.status,
@@ -100,11 +111,11 @@ export default defineGatewayEventHandler(async (event) => {
       throw Error("所选文本超过 4 MiB");
     db.prepare(
       "INSERT INTO zcode_private_shares VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,request_id) DO NOTHING",
-    ).run(id, user, p.requestId, "active", now, now + (p.ttlMs ?? 7 * day), encryptJson(data));
+    ).run(id, user, p.requestId!, "active", now, now + (p.ttlMs ?? 7 * day), encryptJson(data));
     return meta(
       db
         .prepare("SELECT * FROM zcode_private_shares WHERE user_id=? AND request_id=?")
-        .get(user, p.requestId)!,
+        .get(user, p.requestId!)!,
     );
   }
   const row = db

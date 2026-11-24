@@ -42,6 +42,7 @@ def main():
     if source_digest(dest) != pin["sourceSha256"]:
         raise SystemExit("Gateway source digest differs from the reviewed commit")
     patches = [str(HERE / name) for name in ("secure-central.patch", "native-ui.patch", "workspace-avatar.patch", "native-thread-metadata.patch", "native-approvals.patch", "native-session-continuity.patch")]
+    patches.extend(str(path) for path in sorted((HERE / "fixes").glob("*.patch")))
     # The destination may be inside the parent checkout. Git must apply paths relative
     # to the exported tree, even when that build directory is gitignored.
     env = {**os.environ, "GIT_CEILING_DIRECTORIES": str(dest.parent)}
@@ -51,6 +52,8 @@ def main():
     if "A verified SSH host fingerprint" not in (dest / "server/utils/gateway/infra/ssh/ssh-host-trust.ts").read_text():
         raise RuntimeError("Strict host identity overlay was not applied")
     shutil.copytree(HERE / "overlay", dest / "server", dirs_exist_ok=True)
+    # Web 排队与 Gateway 直接发送共用同一个原生 UserInput 构造器。
+    shutil.copy2(ROOT / "packages/web/src/selfhost/nativeTurnInput.ts", dest / "server/utils/selfhost-native-turn-input.ts")
     for name in ("package.json","package-lock.json","nitro.config.ts"):
         if (HERE/name).exists():
             shutil.copy2(HERE/name, dest/name)

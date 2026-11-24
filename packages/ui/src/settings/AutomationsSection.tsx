@@ -613,7 +613,9 @@ export function AutomationsSection({
   // 动态工作流灰度：未命中就没有「工作流」标签，
   // 页面退回单一的「自动化」。快照未就绪时 enabled 为 false，宁可标题晚半拍长出切换，也不先闪
   // 一个标签再收起——中枢很少是用户进 app 后第一眼看的东西。
-  const { enabled: dynamicWorkflowEnabled } = useDynamicWorkflowAvailability();
+  const { enabled: workflowRuntimeEnabled } = useDynamicWorkflowAvailability();
+  // SSH 工作区拥有工作流文件管理服务，脚本运行能力则由各自的运行时单独提供。
+  const dynamicWorkflowEnabled = workflowRuntimeEnabled || Boolean(platform.sshWorkspace);
   // 顶级标签「自动化 / 工作流」：页标题即切换。中枢已是跨项目视图，记忆不再按项目分桶，用 app 级单 key。
   const [storedPageTab, setPageTabState] = useState<AutomationsPageTab>(() =>
     readAutomationsPageTab(),
