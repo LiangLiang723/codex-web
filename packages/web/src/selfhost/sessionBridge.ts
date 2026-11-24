@@ -581,7 +581,7 @@ export class SessionBridge {
         answer = rec(p.answer),
         choice = str(answer.optionId) || str(answer.action);
       const live = [...this.subscriptions.values()].find(
-        (s) => s.session === sessionId,
+        (s) => s.kind === "conversation" && s.session === sessionId && s.activation,
       )?.activation;
       const items = array(rec(rec(live?.history).thread).turns).flatMap((t) => array(t.items));
       const item = items.find(
@@ -592,7 +592,20 @@ export class SessionBridge {
         method = str(item.method ?? pending.method),
         params = rec(item.params ?? pending.params);
       let result: unknown;
-      if (method === "item/tool/requestUserInput") {
+      if (method === "mcpServer/elicitation/request") {
+        // MCP 回答使用 action/content；命令审批的 decision 会被远端拒绝。
+        const action = answer.action;
+        if (action !== "accept" && action !== "decline" && action !== "cancel")
+          throw Error("无效的 MCP 决定");
+        const value = rec(answer.content).value;
+        if (action === "accept" && params.mode !== "url" && value === undefined)
+          throw Error("MCP 表单未填写");
+        result = {
+          action,
+          content: action === "accept" && params.mode !== "url" ? value : null,
+          _meta: null,
+        };
+      } else if (method === "item/tool/requestUserInput") {
         const answers = rec(rec(answer.content).answers),
           response: Message = {};
         for (const q of array(params.questions)) {

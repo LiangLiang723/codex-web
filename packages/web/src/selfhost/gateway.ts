@@ -4,6 +4,7 @@ import { z } from "zod";
 const record = z.record(z.string(), z.unknown());
 export const hostSchema = z.object({
   id: z.number(),
+  avatar: z.string().default("server"),
   name: z.string(),
   sshHost: z.string(),
   username: z.string().nullable(),
@@ -67,7 +68,10 @@ export class Gateway {
   private readonly pending = new Map<string, Flight>();
   private readonly watchers = new Set<(message: Message) => void>();
   private readonly terminals = new Set<(frame: ArrayBuffer) => void>();
-  constructor(private readonly token: string) {}
+  constructor(
+    private readonly token: string,
+    private readonly sessionExpired: () => void = () => {},
+  ) {}
   static async login(username: string, password: string) {
     const response = await fetch("/api/auth/login", {
       method: "POST",
@@ -94,6 +98,7 @@ export class Gateway {
     headers.set("Authorization", "Bearer " + this.token);
     const response = await fetch(target, { ...options, headers });
     if (!response.ok) {
+      if (response.status === 401) this.sessionExpired();
       const err = await response.json().catch(() => ({}));
       throw new Error(
         typeof err.message === "string" ? err.message : "Gateway HTTP " + response.status,
@@ -157,7 +162,7 @@ export class Gateway {
         for (const cb of this.watchers) cb(msg);
       };
       ws.onerror = () => ws.close();
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         clearTimeout(handshake);
         if (this.socket !== ws) return;
         reject(new Error("Gateway disconnected"));
@@ -168,6 +173,13 @@ export class Gateway {
           req.reject(new Error("Connection lost. Check remote state before retrying."));
         }
         this.pending.clear();
+        if (
+          event.code === 1008 &&
+          ["Invalid or expired session", "Session revoked"].includes(event.reason)
+        ) {
+          this.closed = true;
+          this.sessionExpired();
+        }
         if (!this.closed) {
           for (const cb of this.watchers) cb({ type: "disconnected" });
           this.timer = setTimeout(

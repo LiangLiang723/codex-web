@@ -1,0 +1,50 @@
+--- a/shared/types/records.ts
++++ b/shared/types/records.ts
+@@ -10,6 +10,7 @@
+ export type HostAuthMode = "agent" | "privateKey" | "password";
+ 
+ export interface HostRecord {
++  avatar?: string;
+   id: number;
+   name: string;
+   sshHost: string;
+@@ -39,6 +40,7 @@
+ }
+ 
+ export interface HostCreateInput {
++  avatar?: string;
+   name: string;
+   sshHost: string;
+   username?: string | null;
+--- a/server/utils/gateway/http/validation/hosts-projects.ts
++++ b/server/utils/gateway/http/validation/hosts-projects.ts
+@@ -1,9 +1,11 @@
+ import { hostKeyTypes } from "~~/shared/types/records";
+ import { z } from "zod";
++import { workspaceAvatarSchema } from "../../../selfhost-avatar";
+ 
+ export const hostBaseSchema = z
+   .object({
+     name: z.string().trim().min(1),
++    avatar: workspaceAvatarSchema.optional(),
+     sshHost: z.string().trim().min(1),
+     username: z.string().trim().nullable().optional(),
+     port: z.preprocess(
+--- a/server/utils/gateway/state/hosts.ts
++++ b/server/utils/gateway/state/hosts.ts
+@@ -6,6 +6,7 @@
+   return {
+     id: host.id,
+     name: host.name,
++    avatar: host.avatar ?? "server",
+     sshHost: host.sshHost,
+     username: host.username,
+     port: host.port,
+@@ -39,6 +40,7 @@
+   return {
+     id,
+     name: input.name.trim(),
++    avatar: input.avatar ?? existing?.avatar ?? "server",
+     sshHost: input.sshHost.trim(),
+     username: trimmedOrNull(input.username),
+     port: input.port ?? null,

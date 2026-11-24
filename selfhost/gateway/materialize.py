@@ -41,7 +41,7 @@ def main():
         shutil.copy2(source/"LICENSE",dest/"LICENSE")
     if source_digest(dest) != pin["sourceSha256"]:
         raise SystemExit("Gateway source digest differs from the reviewed commit")
-    patches = [str(HERE / name) for name in ("secure-central.patch", "native-ui.patch")]
+    patches = [str(HERE / name) for name in ("secure-central.patch", "native-ui.patch", "workspace-avatar.patch", "native-thread-metadata.patch", "native-approvals.patch")]
     # The destination may be inside the parent checkout. Git must apply paths relative
     # to the exported tree, even when that build directory is gitignored.
     env = {**os.environ, "GIT_CEILING_DIRECTORIES": str(dest.parent)}

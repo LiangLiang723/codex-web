@@ -2,7 +2,7 @@ import { RemoteServiceAccess } from "@zcode/client";
 import { appSettingsSchema } from "@zcode/shared";
 import type { IChannel, IChannelClient } from "@zcode/rpc";
 import { z } from "zod";
-import { Gateway, type Host, type Message, type Project, type RemoteModel } from "./gateway.js";
+import { Gateway, type Message, type Project, type RemoteModel } from "./gateway.js";
 import { rec, str, array, num, providerId } from "./threadProjection.js";
 import { extensionRequest, codexRequest } from "./capabilities.js";
 import { FileWatches } from "./fileWatches.js";
@@ -96,9 +96,14 @@ function projectRow(project: Project, position: number) {
   };
 }
 
-export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, manage: () => void) {
+export async function openWorkspace(
+  gateway: Gateway,
+  hostId: number,
+  cwd: string,
+  manage: () => void,
+) {
   const [models, initialPrefs] = await Promise.all([
-    gateway.models(host.id),
+    gateway.models(hostId),
     gateway.request("/api/selfhost/settings", settingsSchema),
   ]);
   let preferences = initialPrefs;
@@ -110,16 +115,16 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
     for (const entry of listeners.get(channel + "." + event) ?? [])
       if (target === undefined || target === entry.arg) entry.fn(value);
   };
-  const fileWatches = new FileWatches(gateway, host.id, (id, event) =>
+  const fileWatches = new FileWatches(gateway, hostId, (id, event) =>
     emit("file-watcher", "onDynamicChange", event, id),
   );
-  const uploads = new AttachmentBridge(gateway, host.id);
+  const uploads = new AttachmentBridge(gateway, hostId);
   const bridges = new Map<string, SessionBridge>();
   const scopedBridge = (path: unknown) => {
     const target = typeof path === "string" && path.startsWith("/") ? path : cwd;
     let bridge = bridges.get(target);
     if (!bridge) {
-      bridge = new SessionBridge(gateway, host.id, target, models, emit);
+      bridge = new SessionBridge(gateway, hostId, target, models, emit);
       bridges.set(target, bridge);
     }
     return bridge;
@@ -134,7 +139,7 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
       const page = await gateway.request(
         "/api/threads?" +
           new URLSearchParams({
-            hostId: String(host.id),
+            hostId: String(hostId),
             limit: "25",
             useRemoteStateIndexOnly: "true",
           }),
@@ -205,11 +210,11 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
         "listMcpServerStatuses",
       ].includes(method)
     )
-      return extensionRequest(gateway, host.id, cwd, method, p);
+      return extensionRequest(gateway, hostId, cwd, method, p);
     if (channel === "skills" && (method === "list" || method === "setEnabled"))
       return extensionRequest(
         gateway,
-        host.id,
+        hostId,
         cwd,
         method === "setEnabled" ? "setSkillEnabled" : "listSkills",
         p,
@@ -229,7 +234,7 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
         z.object({ value: z.unknown().optional() }),
         "POST",
         {
-          hostId: host.id,
+          hostId: hostId,
           channel: "workflows",
           method,
           args: [{ ...p, cwd: str(p.workspacePath) || cwd }],
@@ -242,7 +247,7 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
         "/api/selfhost/workspace",
         z.object({ value: z.unknown().optional() }),
         "POST",
-        { hostId: host.id, channel, method, args },
+        { hostId: hostId, channel, method, args },
       );
       if (channel === "file" && method === "readFileRange") {
         const b = str(rec(response.value).binary);
@@ -291,7 +296,7 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
       if (method === "getAccountAvailability") return { china: false, global: false };
     }
     if (channel === "project") {
-      const projects = await gateway.projects(host.id);
+      const projects = await gateway.projects(hostId);
       const mapped = projects.map(projectRow);
       if (method === "readProjects") return mapped;
       if (method === "readTree") {
@@ -331,7 +336,7 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
         const path = str(p.primaryRoot) || (Array.isArray(p.roots) ? str(p.roots[0]) : "");
         if (!path) throw Error("需要远程项目路径");
         const value = {
-          hostId: host.id,
+          hostId: hostId,
           remotePath: path,
           name: str(p.name) || path.split("/").pop() || path,
         };
@@ -347,7 +352,7 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
     if (channel === "terminal") {
       if (method === "create") {
         const response = await gateway.call("terminal.open", {
-          hostId: host.id,
+          hostId: hostId,
           scope: "project",
           cwd: str(p.cwd) || cwd,
           cols: p.cols,
@@ -390,7 +395,7 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
         const path = str(p.path);
         return array((await gateway.call("terminal.list")).sessions)
           .filter(
-            (t) => t.hostId === host.id && (t.cwd === path || str(t.cwd).startsWith(path + "/")),
+            (t) => t.hostId === hostId && (t.cwd === path || str(t.cwd).startsWith(path + "/")),
           )
           .map((s) => s.sessionId);
       }
@@ -450,7 +455,7 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
       }
       if (method === "renameTask" || (method === "mutateTask" && rec(p.mutation).kind === "rename"))
         return gateway.request("/api/threads/rename", z.unknown(), "POST", {
-          hostId: host.id,
+          hostId: hostId,
           threadId: id,
           name: p.title ?? rec(p.mutation).title,
         });
@@ -460,7 +465,7 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
         (method === "mutateTask" && rec(p.mutation).kind === "archive")
       ) {
         const archive = method === "archiveTask" || rec(p.mutation).archived === true;
-        return codexRequest(gateway, host.id, archive ? "thread/archive" : "thread/unarchive", {
+        return codexRequest(gateway, hostId, archive ? "thread/archive" : "thread/unarchive", {
           threadId: id,
         });
       }
@@ -476,7 +481,7 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
         "/api/selfhost/organization",
         z.object({ value: z.unknown().optional() }),
         "POST",
-        { hostId: host.id, cwd, channel, method, args },
+        { hostId: hostId, cwd, channel, method, args },
       );
       return result.value;
     }
@@ -484,7 +489,7 @@ export async function openWorkspace(gateway: Gateway, host: Host, cwd: string, m
       return { hosts: [], entries: [] };
     if (channel === "remote-projects" && method.startsWith("list")) return [];
     if (channel === "conversation-share")
-      return shareOperation(gateway, host.id, method, p, args[0]);
+      return shareOperation(gateway, hostId, method, p, args[0]);
     if (channel === "selfhost" && method === "manage") {
       manage();
       return;

@@ -7,6 +7,7 @@ import {
 import { captureRecentOrder } from "@/lib/composerRecent.js";
 import type { ComposerScope } from "@/v4/composer/composerDraftStore.js";
 import {
+  nativeMcpElicitationSchema,
   committedPermissionGrantMode,
   permissionGrantMode,
   type ConversationSnapshot,
@@ -41,7 +42,7 @@ import {
   pendingUserInputToElicitationRequest,
   pendingUserInputToViewModel,
 } from "@/v4/pendingInteractionAdapter.js";
-import { V4UserInputDialog } from "@/v4/V4UserInputDialog.js";
+import { McpElicitationForm, V4UserInputDialog } from "@/v4/V4UserInputDialog.js";
 import { reportAppTelemetryEvent } from "@/lib/appTelemetry.js";
 import {
   buildPermissionPromptResultTelemetryEvent,
@@ -340,13 +341,12 @@ export function V4InteractionDialogs({
     [snoozeAutoResolution],
   );
 
+  const pendingId = pending?.interactionId;
+  const canSnooze = Boolean(pending?.autoResolution);
   useEffect(() => {
-    // PermissionRequested 可能先投出 userInput，紧接着 autoResolution durable event 才到。
-    // 用户若在这两帧之间完成首个分题操作，先记本地意图，registry 就绪后立即补发一次。
-    if (pending) {
-      void sendSnoozeOnce(pending.interactionId, Boolean(pending.autoResolution));
-    }
-  }, [pending?.autoResolution, pending?.interactionId, sendSnoozeOnce]);
+    // 自动结束可能晚于提问到达；由请求 ID 和可用状态决定是否补发，避免整份快照驱动重复请求。
+    if (pendingId) void sendSnoozeOnce(pendingId, canSnooze);
+  }, [pendingId, canSnooze, sendSnoozeOnce]);
 
   if (!pending) {
     return null;
@@ -470,6 +470,24 @@ export function V4InteractionDialogs({
     projectedElicitationRequest,
     botElicitationProgress,
   );
+  const mcp = nativeMcpElicitationSchema.safeParse(pending.payload.schema);
+  if (mcp.success) {
+    return (
+      <McpElicitationForm
+        key={sessionId + "-" + pending.interactionId}
+        request={mcp.data}
+        prompt={pending.payload.prompt}
+        respond={async (action, value) =>
+          (
+            await resolveInteraction(pending.interactionId, {
+              action,
+              ...(value === undefined ? {} : { content: { value } }),
+            })
+          ).accepted
+        }
+      />
+    );
+  }
   if (elicitationRequest) {
     const isExitPlanMode = pending.payload.toolName?.trim().toLowerCase() === "exitplanmode";
     const isAskUserQuestion =

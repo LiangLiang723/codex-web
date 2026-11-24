@@ -307,6 +307,16 @@ export const userInputQuestionPayloadSchema = z.object({
 });
 export type UserInputQuestionPayload = z.infer<typeof userInputQuestionPayloadSchema>;
 
+// 自托管 Codex 的 MCP 表单沿用 userInput 通道，保留请求的模式与原始 schema。
+export const nativeMcpElicitationSchema = z.object({
+  interaction: z.literal("mcp.structured"),
+  mode: z.enum(["form", "openai/form", "url"]),
+  serverName: z.string(),
+  requestedSchema: z.unknown().optional(),
+  url: z.string().optional(),
+});
+export type NativeMcpElicitation = z.infer<typeof nativeMcpElicitationSchema>;
+
 export const userInputRequestPayloadSchema = z.object({
   kind: z.literal("userInput"),
   prompt: z.string(),

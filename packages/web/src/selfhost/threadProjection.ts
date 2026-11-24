@@ -224,7 +224,29 @@ export function projectThread(
           ...(pending ? { approvalInteractionId: requestKey } : {}),
         });
         const params = rec(item.params ?? rec(item.pendingApproval).params);
-        if (pending && str(item.method).includes("requestUserInput")) {
+        const method = str(item.method ?? rec(item.pendingApproval).method);
+        if (pending && method === "mcpServer/elicitation/request") {
+          // MCP 的表单、链接与命令审批使用不同的响应结构。保留原始请求信息。
+          interactions.push({
+            interactionId: requestKey,
+            kind: "userInput",
+            anchorRowId: fields.rowId,
+            createdAt: at,
+            payload: {
+              kind: "userInput",
+              prompt: str(params.message),
+              freeText: false,
+              toolName: "McpElicitation",
+              schema: {
+                interaction: "mcp.structured",
+                mode: params.mode ?? "form",
+                serverName: str(params.serverName),
+                requestedSchema: params.requestedSchema,
+                url: params.url,
+              },
+            },
+          });
+        } else if (pending && method === "item/tool/requestUserInput") {
           const questions = array(params.questions).map((q) => ({
             question: str(q.question),
             header: str(q.header),
@@ -246,7 +268,14 @@ export function projectThread(
               questions,
             },
           });
-        } else if (pending) {
+        } else if (
+          pending &&
+          [
+            "item/commandExecution/requestApproval",
+            "item/fileChange/requestApproval",
+            "item/permissions/requestApproval",
+          ].includes(method)
+        ) {
           interactions.push({
             interactionId: requestKey,
             kind: "permission",

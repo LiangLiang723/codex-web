@@ -50,7 +50,9 @@ docker compose up -d --no-build
 - **SSH 私钥** 可粘贴到表单，服务端用 AES-GCM 加密持久化。也可将专用密钥置于只读挂载的 `ssh-keys/`，填入相对文件名。`compose.identity.yml` 可将单个密钥挂载为 `default`。密钥口令只写不回显。
 - **主机身份** 用远端控制台或可信记录核对 SHA256 指纹，也可挂载可信 OpenSSH `ssh-keys/known_hosts`。身份未知或指纹不匹配时拒绝连接。经 SOCKS5 隧道同样校验最终 SSH 主机。
 
-「同步项目」从这台主机读取 Codex 登记的工作区、可信项目和原生 Thread 工作目录，在中心按账号缓存项目分区。支持含空格、中文和符号链接的路径。「打开目录」会验证远程路径并保存项目。只有一台主机时自动同步，多个主机可分别同步。选定目录后进入 ZCode 工作区，侧栏底部可返回 SSH 主机管理。
+「SSH 工作区」每张卡对应一台主机。「进入工作区」会读取该主机的原生项目和会话，在工作区侧栏按项目展示。首次连接没有项目时使用远程用户的家目录。「打开目录」也可以直接输入远程绝对路径。通过「编辑」可更改工作区名称、选择预设图标或上传头像。同一登录账号的各台设备共用这些设置。也可在工作区左下角菜单选择「编辑工作区」。
+
+在主机列表顶部或工作区左下角菜单打开「账号设置」，输入当前密码后可单独修改用户名或密码，也可同时修改两者。修改成功后各设备重新登录，原有 SSH 主机和项目仍归原账号 ID。
 
 ## 会话和操作
 
@@ -60,6 +62,12 @@ docker compose up -d --no-build
 - 文件浏览与 Git 使用 ZCode 原服务，经校验身份的 SSH 通道在远端执行。终端复用 Gateway 的远程 PTY。展开的远程目录通过 Codex 的 `fs/watch` 更新文件树。
 - 插件、Skills 和 MCP 通过选中主机的 Codex 接口读取。输入框使用 `plugin/installed` 加载已安装插件，浏览插件市场时再查询市场目录。支持工作流文件的读取、元数据编辑、移动和删除。ZCode 的动态工作流脚本运行器尚未接入 Codex。自动化界面可保存任务，由中心调度器发起 Codex Thread 和 Turn。
 - 私有分享保存选定轮次的用户和助手文本，使用同一中心账号查看、撤销或删除。文本分享省略图片附件和工具输出。
+
+## 远程执行链路
+
+浏览器向中心服务鉴权，中心通过校验主机身份的 SSH 连接远端官方 Codex。Gateway 通过 `codex app-server proxy` 接到那台机器上已运行的 daemon，并使用 WebSocket 与 Codex RPC。网页登录令牌用于中心服务，模型认证、服务商与出站网络由远端 Codex 配置决定。
+
+普通输入会裁去首尾空白，作为原生 `text` 输入发送。模型、推理强度、推理摘要、权限和 Plan 模式走独立协议字段，Web 的协作模式设置传入 `developer_instructions: null`。用户主动选择的代码批注、网页元素等上下文按 ZCode 输入框规则序列化，附件和图片通过原生附件与图片通道传送。Codex 自带的模式指令和项目指令由远端 CLI 加载。
 
 ## 直接在 Linux 运行
 
@@ -85,6 +93,8 @@ python3 selfhost/upstreams.py status
 python3 selfhost/upstreams.py check
 python3 -m unittest discover -s selfhost/tests
 ```
+
+使用临时测试账号时，`SELFHOST_TEST_ROTATE_ACCOUNT=1` 验证改名、改密及旧会话撤销。`SELFHOST_TEST_IDENTITY=1` 在专用 QA 主机上验证多浏览器头像和名称同步。`SELFHOST_TEST_COMPAT_HOST` 可指定另一台已有原生会话的主机，验证不同 Codex 版本的项目发现。MCP 浏览器验收可用 `SELFHOST_TEST_MCP_THREAD` 指定已收到 `selfhost/tests/fixtures/mcp-confirmation.mjs` 请求的独立测试 Thread。
 
 桌面与手机回归脚本为 `selfhost/tests/browser.mjs`。设置 `SELFHOST_TEST_URL`、`SELFHOST_TEST_USER`、`SELFHOST_TEST_PASSWORD_FILE`、`SELFHOST_TEST_HOST`、`SELFHOST_TEST_CWD` 和 `SELFHOST_TEST_THREAD`，选择至少有一轮已完成对话的测试 Thread，在已安装 Chrome 的开发机执行 `node selfhost/tests/browser.mjs`。`SELFHOST_TEST_PANEL=1` 验证有 Git 更改的测试项目的 v4 状态栏。`SELFHOST_TEST_FILE_WATCH=1` 会在指定的测试项目创建并清理临时文件，验证文件树随远端变动刷新。`SELFHOST_TEST_MUTATE=1` 会创建、编辑并删除仅属于本次测试的临时主机。
 

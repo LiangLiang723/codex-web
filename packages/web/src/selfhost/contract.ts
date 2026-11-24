@@ -1,10 +1,10 @@
-import type { Gateway, Host } from "./gateway.js";
+import type { Gateway } from "./gateway.js";
 import type { RemoteServiceAccess } from "@zcode/client";
 
 /** One authenticated gateway user and one verified SSH host own each mounted workbench. */
 export type OpenRemoteWorkspace = (
   gateway: Gateway,
-  host: Host,
+  hostId: number,
   cwd: string,
   manage: () => void,
 ) => Promise<{

@@ -817,6 +817,15 @@ export type CuaOsSupport =
  * 业务服务（文件、终端、凭据等）走 IServiceAccessor 的 RPC 通道。
  */
 export interface IPlatformService {
+  /** 自托管 SSH 工作区入口。认证账号和工作区显示身份分别由中心服务管理。 */
+  readonly sshWorkspace?: {
+    name: string;
+    avatar: string;
+    manage(): void;
+    edit(): void;
+    account(): void;
+    logout(): void;
+  };
   getPreinstalledToolsState?(): Promise<PreinstalledToolsState>;
   executePreinstalledToolsCommand?(command: PreinstalledToolsCommand): Promise<void>;
   onPreinstalledToolsState?(callback: (state: PreinstalledToolsState) => void): () => void;

@@ -1,5 +1,5 @@
 import "./bootstrap.js";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { Root, ZCodeIntlProvider, AppErrorBoundary, Button } from "@zcode/ui";
 import { Input } from "@zcode/ui/input";
@@ -8,7 +8,8 @@ import { createWebPlatform } from "#src/platform/index.js";
 import { WebLoginPage } from "../auth/index.js";
 import { ConversationShareReadonlyTimeline } from "@zcode/ui/conversation-share-readonly";
 import { projectThread, str } from "./threadProjection.js";
-import { Catalog } from "./Catalog.js";
+import { AccountSettings } from "./AccountSettings.js";
+import { Catalog, HostForm } from "./Catalog.js";
 import { Gateway, type Host, type Project } from "./gateway.js";
 import { openWorkspace } from "./services.js";
 import "../styles.css";
@@ -57,8 +58,17 @@ function Login({ onLogin }: { onLogin: (token: string) => void }) {
     />
   );
 }
-function Workbench({ gateway, logout }: { gateway: Gateway; logout: () => void }) {
+function Workbench({
+  gateway,
+  logout,
+  account,
+}: {
+  gateway: Gateway;
+  logout: () => void;
+  account: () => void;
+}) {
   const [catalog, setCatalog] = useState<{ hosts: Host[]; projects: Project[] } | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [route, setRoute] = useState(location.search);
   const [mobile, setMobile] = useState(() => matchMedia("(max-width: 767px)").matches);
   useEffect(() => {
@@ -74,13 +84,20 @@ function Workbench({ gateway, logout }: { gateway: Gateway; logout: () => void }
     cwd = query.get("cwd") ?? "",
     thread = query.get("thread") ?? undefined;
   const host = catalog?.hosts.find((h) => h.id === hostId);
+  const selectedId = host?.id,
+    selectedName = host?.name,
+    selectedAvatar = host?.avatar;
+  const readVersion = useRef(0);
   const refresh = useCallback(async () => {
-    setCatalog(await gateway.config());
+    const version = ++readVersion.current;
+    const next = await gateway.config();
+    if (version === readVersion.current) setCatalog(next);
   }, [gateway]);
   const navigate = useCallback((params: URLSearchParams) => {
     const search = params.toString();
     history.pushState({}, "", location.pathname + (search ? "?" + search : ""));
     setRoute(location.search);
+    setEditingId(null);
     setError("");
   }, []);
   const manage = useCallback(() => navigate(new URLSearchParams({ manage: "1" })), [navigate]);
@@ -122,12 +139,10 @@ function Workbench({ gateway, logout }: { gateway: Gateway; logout: () => void }
   useEffect(() => {
     const pop = () => setRoute(location.search);
     window.addEventListener("popstate", pop);
-    window.addEventListener("zcode-selfhost-manage", manage);
     return () => {
       window.removeEventListener("popstate", pop);
-      window.removeEventListener("zcode-selfhost-manage", manage);
     };
-  }, [manage]);
+  }, []);
   useEffect(() => {
     let active = true;
     void refresh().catch((e) => active && setError(String(e)));
@@ -145,8 +160,8 @@ function Workbench({ gateway, logout }: { gateway: Gateway; logout: () => void }
     let active = true;
     let resource: Awaited<ReturnType<typeof openWorkspace>> | undefined;
     setOpened(null);
-    if (host && cwd) {
-      void openWorkspace(gateway, host, cwd, manage).then(
+    if (selectedId !== undefined && cwd) {
+      void openWorkspace(gateway, selectedId, cwd, manage).then(
         (r) => {
           resource = r;
           if (active) setOpened(r);
@@ -161,19 +176,31 @@ function Workbench({ gateway, logout }: { gateway: Gateway; logout: () => void }
       active = false;
       resource?.dispose();
     };
-  }, [gateway, host?.id, cwd, manage]);
+  }, [gateway, selectedId, cwd, manage]);
   const platform = useMemo(
     () => ({
       ...createWebPlatform(),
+      ...(selectedId !== undefined && selectedName
+        ? {
+            sshWorkspace: {
+              name: selectedName,
+              avatar: selectedAvatar ?? "server",
+              edit: () => setEditingId(selectedId),
+              manage,
+              account,
+              logout,
+            },
+          }
+        : {}),
       activateOrSetWorkspace: async (path: string) => {
-        if (host) {
-          navigate(new URLSearchParams({ host: String(host.id), cwd: path }));
+        if (selectedId !== undefined) {
+          navigate(new URLSearchParams({ host: String(selectedId), cwd: path }));
           return { activated: true };
         }
         return { activated: false };
       },
     }),
-    [host?.id, navigate],
+    [selectedId, selectedName, selectedAvatar, navigate, manage, account, logout],
   );
   if (error)
     return (
@@ -207,11 +234,18 @@ function Workbench({ gateway, logout }: { gateway: Gateway; logout: () => void }
     );
   if (!host || !cwd || !opened)
     return (
-      <Catalog gateway={gateway} {...catalog} refresh={refresh} logout={logout} select={select} />
+      <Catalog
+        gateway={gateway}
+        hosts={catalog.hosts}
+        refresh={refresh}
+        logout={logout}
+        account={account}
+        select={select}
+      />
     );
   const services = opened.services;
   const switcher: NonNullable<Parameters<typeof Root>[0]["webRemoteControlWorkspaceSwitcher"]> = {
-    deviceNavigation: { deviceName: host.name, devicePlatform: "linux", chooseOtherDevice: manage },
+    deviceNavigation: { deviceName: host.name, chooseOtherDevice: manage },
     async listWorkspaces() {
       const { projects } = await gateway.config();
       return {
@@ -256,6 +290,15 @@ function Workbench({ gateway, logout }: { gateway: Gateway; logout: () => void }
         supportsEmbeddedBrowser={false}
         webRemoteControlFeatureEnabled={false}
       />
+      {editingId === host.id && (
+        <HostForm
+          key={host.id}
+          host={host}
+          gateway={gateway}
+          finish={refresh}
+          onClose={() => setEditingId(null)}
+        />
+      )}
     </ZCodeIntlProvider>
   );
 }
@@ -297,11 +340,28 @@ function PrivateShare({ gateway, id }: { gateway: Gateway; id: string }) {
 }
 function App() {
   const [token, setToken] = useState(() => localStorage.getItem(tokenKey) || "");
-  const gateway = useMemo(() => (token ? new Gateway(token) : null), [token]);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const showAccount = useCallback(() => setAccountOpen(true), []);
   const logout = useCallback(() => {
-    localStorage.removeItem(tokenKey);
-    setToken("");
+    // 旧请求可能在新登录后才收到 401；只清理发起该请求的令牌。
+    if (localStorage.getItem(tokenKey) === token) localStorage.removeItem(tokenKey);
+    setToken((current) => (current === token ? "" : current));
+    setAccountOpen(false);
+  }, [token]);
+  const gateway = useMemo(() => (token ? new Gateway(token, logout) : null), [token, logout]);
+  useEffect(() => {
+    const changed = (event: StorageEvent) => {
+      if (event.key === tokenKey) {
+        setToken(event.newValue ?? "");
+        setAccountOpen(false);
+      }
+    };
+    window.addEventListener("storage", changed);
+    return () => window.removeEventListener("storage", changed);
   }, []);
+  const endSession = useCallback(() => {
+    if (gateway) void gateway.request("/api/auth/logout", z.unknown(), "POST").then(logout, logout);
+  }, [gateway, logout]);
   useEffect(() => {
     if (!gateway) return;
     let active = true;
@@ -316,12 +376,12 @@ function App() {
   const share = new URLSearchParams(location.search).get("share");
   if (gateway && share) return <PrivateShare gateway={gateway} id={share} />;
   return gateway ? (
-    <Workbench
-      gateway={gateway}
-      logout={() => {
-        void gateway.request("/api/auth/logout", z.unknown(), "POST").finally(logout);
-      }}
-    />
+    <>
+      <Workbench gateway={gateway} logout={endSession} account={showAccount} />
+      {accountOpen && (
+        <AccountSettings gateway={gateway} close={() => setAccountOpen(false)} signOut={logout} />
+      )}
+    </>
   ) : (
     <Login
       onLogin={(value) => {

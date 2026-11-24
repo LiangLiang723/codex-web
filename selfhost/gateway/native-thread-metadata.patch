@@ -1,0 +1,31 @@
+--- a/shared/runtime/app-server.ts
++++ b/shared/runtime/app-server.ts
+@@ -379,7 +379,8 @@
+       .nullable(),
+     turns: z.array(threadTurnSchema),
+   })
+-  .strict();
++  // 各 SSH 主机可运行不同版本的 Codex。新增的 Thread 元数据不应阻断整个分页或恢复，已消费字段仍严格校验。
++  .strip();
+ 
+ export type AppServerThread = z.infer<typeof appServerThreadSchema>;
+ export type AppServerThreadSection = NonNullable<AppServerThread["section"]>;
+--- a/server/utils/gateway/http/errors.ts
++++ b/server/utils/gateway/http/errors.ts
+@@ -1,3 +1,4 @@
++import { ZodError } from "zod";
+ import { defineEventHandler, getRequestURL, setResponseStatus, type H3Event } from "h3";
+ import type { GatewayConfig, HostRecord } from "~~/shared/types";
+ import { normalizeNotificationSettings } from "~~/shared/config";
+@@ -195,6 +196,11 @@
+ }
+ 
+ export function publicErrorMessage(error: unknown) {
++  if (error instanceof ZodError) {
++    // 分页响应可能每行报同一个字段错误，只给浏览器必要的定位信息。
++    const field = error.issues[0]?.path.map(String).join(".");
++    return field ? "远程数据格式不兼容（" + field + "），请核对 Codex 版本。" : "远程数据格式不兼容，请核对 Codex 版本。";
++  }
+   if (isAppServerShuttingDownError(error)) {
+     return "Codex app-server is shutting down for an update or restart. Wait for it to reconnect before trying again.";
+   }

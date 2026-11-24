@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./workspace-avatar": "./src/components/ui/avatar.tsx",
     "./input": "./src/components/ui/input.tsx",
     "./textarea": "./src/components/ui/textarea.tsx",
     "./button": "./src/components/ui/button.tsx",

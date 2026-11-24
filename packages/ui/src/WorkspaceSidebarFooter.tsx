@@ -11,7 +11,7 @@ import {
   TID_LOGOUT_BUTTON,
   TID_TASK_SETTINGS_BUTTON,
 } from "@zcode/shared/test-ids";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar.js";
+import { Avatar, AvatarFallback, AvatarImage, WorkspaceAvatar } from "@/components/ui/avatar.js";
 import { cn } from "@/components/lib/utils.js";
 import { Button } from "@/components/ui/button.js";
 import { toast } from "@/components/ui/toast.js";
@@ -141,7 +141,8 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   const zoomOutShortcutLabel = useShortcutCommandLabel("zoomOut");
   const resetZoomShortcutLabel = useShortcutCommandLabel("resetZoom");
   const isRestoringOAuthSession = useZCodeStore((state) => state.isRestoringOAuthSession);
-  const profileBadge = selfHostedBuild && !user ? "工作区账户" : getSidebarProfileBadge(user, intl.formatMessage);
+  const workspace = platform.sshWorkspace;
+  const profileBadge = workspace?.name ?? getSidebarProfileBadge(user, intl.formatMessage);
   const avatarFallbackText = getAvatarFallbackText(user);
   const avatarKey = user?.avatarUrl ?? user?.id ?? "guest";
   const showAuthRestoreLoading = !user && isRestoringOAuthSession;
@@ -161,24 +162,28 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   };
   const profileContent = (
     <>
-      <Avatar key={avatarKey} size="default">
-        {user?.avatarUrl ? <AvatarImage src={user.avatarUrl} alt={profileBadge} /> : null}
-        <AvatarFallback className="bg-background text-foreground">
-          {user ? (
-            avatarFallbackText
-          ) : showAuthRestoreLoading ? (
-            <>
-              {/* Bugfix: OAuth 启动恢复未落定前，footer 之前会直接显示未登录头像，
+      {workspace ? (
+        <WorkspaceAvatar value={workspace.avatar} />
+      ) : (
+        <Avatar key={avatarKey} size="default">
+          {user?.avatarUrl ? <AvatarImage src={user.avatarUrl} alt={profileBadge} /> : null}
+          <AvatarFallback className="bg-background text-foreground">
+            {user ? (
+              avatarFallbackText
+            ) : showAuthRestoreLoading ? (
+              <>
+                {/* Bugfix: OAuth 启动恢复未落定前，footer 之前会直接显示未登录头像，
                   用户很容易把“还在校验”误判成“已经退出”。
                   这里用 loading 图标明确表达“状态确认中”，等恢复成功或失败后再展示最终状态。 */}
-              <LoaderCircle className="size-4 animate-spin" />
-              <span className="sr-only">{intl.formatMessage({ id: "common.loading" })}</span>
-            </>
-          ) : (
-            <User className="size-4" />
-          )}
-        </AvatarFallback>
-      </Avatar>
+                <LoaderCircle className="size-4 animate-spin" />
+                <span className="sr-only">{intl.formatMessage({ id: "common.loading" })}</span>
+              </>
+            ) : (
+              <User className="size-4" />
+            )}
+          </AvatarFallback>
+        </Avatar>
+      )}
       <div className="min-w-0 flex-1 overflow-hidden text-left">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="min-w-0 truncate text-ui-base font-semibold text-foreground">
@@ -234,7 +239,19 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   return (
     // footer 被 Settings 复用，页面专属边距由调用方传入，避免修改共享默认样式。
     <footer className={cn("flex shrink-0 flex-col gap-2.5 px-4 pt-2 pb-4", className)}>
-      {selfHostedBuild ? <Button type="button" size="sm" variant="ghost" className="justify-start" onClick={() => window.dispatchEvent(new Event("zcode-selfhost-manage"))}>SSH 工作区</Button> : banner}
+      {workspace ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="justify-start"
+          onClick={workspace.manage}
+        >
+          {intl.formatMessage({ id: "selfhost.hosts" })}
+        </Button>
+      ) : (
+        banner
+      )}
       <div className="flex min-w-0 gap-2">
         <DropdownMenu open={profileMenuOpen} onOpenChange={setProfileMenuOpen}>
           <DropdownMenuTrigger asChild>
@@ -428,11 +445,13 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
               </DropdownMenuSub>
             ) : null}
             {/* Bugfix: 升级入口状态不再以菜单开关为生命周期边界。 */}
-            {!selfHostedBuild && <WorkspaceSidebarFooterUsageSummaryContent
-              state={usageSummaryState}
-              onUsageClick={usageButtonClick}
-              onUpgradeClick={onUpgradeClick}
-            />}
+            {!selfHostedBuild && (
+              <WorkspaceSidebarFooterUsageSummaryContent
+                state={usageSummaryState}
+                onUsageClick={usageButtonClick}
+                onUpgradeClick={onUpgradeClick}
+              />
+            )}
             {!selfHostedBuild && user ? (
               <DropdownMenuItem onSelect={() => openRewards?.()} data-testid="rewards-menu-item">
                 <Gift className="size-4" />
@@ -454,6 +473,23 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
                 </DropdownMenuItem>
               </>
             ) : null}
+            {workspace && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={workspace.edit}>
+                  <PencilRuler className="size-4" />
+                  {intl.formatMessage({ id: "selfhost.editWorkspace" })}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={workspace.account}>
+                  <Settings className="size-4" />
+                  {intl.formatMessage({ id: "selfhost.account" })}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={workspace.logout}>
+                  <LogOut className="size-4" />
+                  {intl.formatMessage({ id: "app.logout" })}
+                </DropdownMenuItem>
+              </>
+            )}
             {!selfHostedBuild && onLogout ? <DropdownMenuSeparator /> : null}
             {!selfHostedBuild && onLogout ? (
               <DropdownMenuItem onSelect={onLogout} data-testid={TID_LOGOUT_BUTTON}>

@@ -2,6 +2,8 @@ import { SidebarNativeTooltip } from "@/ControlHintTooltip.js";
 import { ChevronsUpDownIcon } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { DevicePlatformIcon } from "@/components/mobile-ui/DevicePlatformIcon.js";
+import { useOptionalPlatform } from "@/hooks/usePlatform.js";
+import { WorkspaceAvatar } from "@/components/ui/avatar.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import type { WebRemoteControlDeviceNavigation } from "@/web-remote-control/contract.js";
 
@@ -11,6 +13,7 @@ export function WebRemoteControlDeviceHeader({
 }: {
   navigation: WebRemoteControlDeviceNavigation;
 }) {
+  const workspace = useOptionalPlatform()?.sshWorkspace;
   const { intl } = useZCodeIntl();
   const deviceName =
     navigation.deviceName?.trim() || intl.formatMessage({ id: "webRemoteControl.unnamedDevice" });
@@ -27,7 +30,11 @@ export function WebRemoteControlDeviceHeader({
         className="w-full justify-start gap-2"
         onClick={navigation.chooseOtherDevice}
       >
-        <DevicePlatformIcon platform={navigation.devicePlatform} className="size-4" />
+        {workspace ? (
+          <WorkspaceAvatar value={workspace.avatar} size="sm" />
+        ) : (
+          <DevicePlatformIcon platform={navigation.devicePlatform} className="size-4" />
+        )}
         <span className="min-w-0 flex-1 truncate text-left font-medium">{deviceName}</span>
         <ChevronsUpDownIcon className="size-4 shrink-0 text-foreground-subtle" />
       </Button>

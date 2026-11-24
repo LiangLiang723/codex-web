@@ -1,3 +1,6 @@
+import { verifyElicitation } from "./elicitation.mjs";
+import { verifyWorkspaceIdentity } from "./workspace-identity.mjs";
+import { verifyAccount } from "./account.mjs";
 import { verifyNativeRecovery } from "./native-history.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -95,9 +98,12 @@ async function catalog(page, mutation) {
   );
   await dismiss(page);
   const roots = await api(page, "/api/selfhost/projects?hostId=" + hostId);
-  await button(card, "同步项目").click();
-  await button(card, "同步项目").waitFor({ timeout: 60000 });
-  for (const project of roots) await card.getByText(project.remotePath, { exact: true }).waitFor();
+  await button(card, "进入工作区").waitFor();
+  for (const project of roots)
+    assert.equal(await card.getByText(project.remotePath, { exact: true }).count(), 0);
+  await button(page, "账号设置").click();
+  await page.getByRole("dialog").getByLabel("当前密码").waitFor();
+  await dismiss(page);
   if (mutation) {
     const name = "ui-check-" + randomUUID(),
       renamed = name + "-renamed";
@@ -105,6 +111,7 @@ async function catalog(page, mutation) {
       await button(page, "添加主机").click();
       dialog = page.getByRole("dialog");
       await dialog.locator("[name=name]").fill(name);
+      await dialog.getByRole("radio", { name: "终端", exact: true }).locator("..").click();
       await dialog.locator("[name=address]").fill(host.sshHost);
       await dialog.locator("[name=user]").fill(host.username);
       await dialog.locator("[name=port]").fill(String(host.port));
@@ -116,11 +123,13 @@ async function catalog(page, mutation) {
         .filter({ has: page.getByRole("heading", { name, exact: true }) });
       await button(newCard, "编辑").click();
       dialog = page.getByRole("dialog");
+      assert.equal(await dialog.getByRole("radio", { name: "终端" }).isChecked(), true);
       await dialog.locator("[name=name]").fill(renamed);
       await button(dialog, "保存").click();
       const changed = page
         .locator("section")
         .filter({ has: page.getByRole("heading", { name: renamed, exact: true }) });
+      await changed.locator('[data-workspace-avatar="terminal"]').waitFor();
       await button(changed, "删除").click();
       await button(page.getByRole("dialog"), "删除主机").click();
       await changed.waitFor({ state: "hidden" });
@@ -276,26 +285,52 @@ async function workspace(page, width, projects) {
   await verify(page);
 }
 try {
-  for (const width of [1480, 390]) {
-    const ctx = await browser.newContext({
-      viewport: { width, height: 900 },
-      isMobile: width < 600,
-      hasTouch: width < 600,
-    });
-    try {
-      const page = await ctx.newPage();
-      const errors = [];
-      page.on("pageerror", (e) => errors.push(e.message));
-      await login(page);
-      const roots = await catalog(page, width > 1000 && process.env.SELFHOST_TEST_MUTATE === "1");
-      await workspace(page, width, roots);
-      if (width >= 1300 && thread) await verifyNativeRecovery(page, hostId, thread);
-      assert.deepEqual(errors, []);
-      console.log(width + "px passed (" + roots.length + " remote projects)");
-    } finally {
-      await ctx.close();
+  if (process.env.SELFHOST_TEST_ROTATE_ACCOUNT === "1")
+    await verifyAccount(browser, base, username, password);
+  else
+    for (const width of [1480, 390]) {
+      const ctx = await browser.newContext({
+        viewport: { width, height: 900 },
+        isMobile: width < 600,
+        hasTouch: width < 600,
+      });
+      try {
+        const page = await ctx.newPage();
+        const errors = [];
+        page.on("pageerror", (e) => errors.push(e.message));
+        await login(page);
+        const roots = await catalog(page, width > 1000 && process.env.SELFHOST_TEST_MUTATE === "1");
+        if (width === 1480 && process.env.SELFHOST_TEST_COMPAT_HOST) {
+          const id = Number(process.env.SELFHOST_TEST_COMPAT_HOST);
+          const projects = await api(page, "/api/selfhost/projects?hostId=" + id + "&refresh=1");
+          assert(Array.isArray(projects), "Newer Codex project discovery");
+          const list = await api(page, "/api/threads?hostId=" + id + "&limit=10");
+          assert(
+            list.data.some((row) => typeof row.id === "string"),
+            "Newer Codex thread listing",
+          );
+        }
+        if (width === 1480 && process.env.SELFHOST_TEST_IDENTITY === "1") {
+          assert(username.startsWith("qa-"));
+          await verifyWorkspaceIdentity({ page, browser, base, hostId, cwd, login, api });
+        }
+        await workspace(page, width, roots);
+        if (width === 390 && process.env.SELFHOST_TEST_MCP_THREAD)
+          await verifyElicitation(page, {
+            base,
+            hostId,
+            cwd,
+            thread: process.env.SELFHOST_TEST_MCP_THREAD,
+            action: process.env.SELFHOST_TEST_MCP_ACTION || "accept",
+            mode: process.env.SELFHOST_TEST_MCP_MODE || "form",
+          });
+        if (width >= 1300 && thread) await verifyNativeRecovery(page, hostId, thread);
+        assert.deepEqual(errors, []);
+        console.log(width + "px passed (" + roots.length + " remote projects)");
+      } finally {
+        await ctx.close();
+      }
     }
-  }
 } catch (error) {
   console.error(error);
   process.exitCode = 1;

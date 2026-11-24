@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Server, Terminal, Cloud, CodeXml, Cpu, Laptop } from "lucide-react";
 import { Avatar as AvatarPrimitive } from "radix-ui";
 
 import { cn } from "../lib/utils.js";
@@ -92,3 +93,35 @@ function AvatarGroupCount({ className, ...props }: React.ComponentProps<"div">) 
 }
 
 export { Avatar, AvatarImage, AvatarFallback, AvatarGroup, AvatarGroupCount, AvatarBadge };
+
+const workspaceIcons = {
+  server: Server,
+  terminal: Terminal,
+  cloud: Cloud,
+  code: CodeXml,
+  cpu: Cpu,
+  laptop: Laptop,
+};
+export const workspaceIconNames = Object.keys(workspaceIcons) as (keyof typeof workspaceIcons)[];
+
+export function WorkspaceAvatar({
+  value = "server",
+  size = "default",
+}: {
+  value?: string;
+  size?: "sm" | "default" | "lg";
+}) {
+  const uploaded = value.startsWith("data:image/png;base64,");
+  const preset = Object.hasOwn(workspaceIcons, value)
+    ? (value as keyof typeof workspaceIcons)
+    : "server";
+  const Icon = workspaceIcons[preset];
+  return (
+    <Avatar size={size} aria-hidden="true" data-workspace-avatar={uploaded ? "image" : preset}>
+      {uploaded && <AvatarImage src={value} alt="" />}
+      <AvatarFallback className="bg-surface text-foreground">
+        <Icon className="size-4" />
+      </AvatarFallback>
+    </Avatar>
+  );
+}
