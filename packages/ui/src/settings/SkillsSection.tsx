@@ -25,6 +25,7 @@ import type {
 } from "@zcode/shared";
 import type { IServiceAccessor } from "@zcode/services";
 import { ZCODE_AGENT_PROVIDER } from "@zcode/shared";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import type { CreateTaskRequest } from "@/app-shell/types.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { toast } from "@/components/ui/toast.js";
@@ -214,6 +215,8 @@ export function SkillsSection({
   const [loadedSkillTargetKey, setLoadedSkillTargetKey] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [writingSkill, setWritingSkill] = useState(false);
+  const writingSkillRef = useRef(false);
   const query = searchQuery;
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
   useEffect(() => {
@@ -232,7 +235,7 @@ export function SkillsSection({
     !activeWorkspacePath || loadedSkillTargetKey === activeSkillTargetKey;
 
   useEffect(() => {
-    if (!activeWorkspacePath || !targetServiceResolution.rpcReady) return;
+    if (selfHostedBuild || !activeWorkspacePath || !targetServiceResolution.rpcReady) return;
     void initializePlugins({
       workspacePath: activeWorkspacePath,
       workspaceIdentity: activeWorkspaceIdentity,
@@ -270,6 +273,15 @@ export function SkillsSection({
 
   const renderScopeLabel = useCallback(
     (skill: SkillSummary): string => {
+      if (skill.codexScope === "system")
+        return intl.formatMessage({
+          id: "settings.skills.codexSystem",
+        });
+      if (skill.codexScope === "admin")
+        return intl.formatMessage({
+          id: "settings.skills.codexAdmin",
+        });
+      if (selfHostedBuild && skill.pluginId) return skill.pluginId;
       switch (skill.scope) {
         case "workspace":
           // workspace 作用域显示 workspace 名，没有 workspace 时退回到通用文案。
@@ -384,9 +396,11 @@ export function SkillsSection({
 
   const setEnabled = useCallback(
     async (skillId: string, enabled: boolean) => {
-      if (!activeWorkspacePath) {
+      if (!activeWorkspacePath || writingSkillRef.current) {
         return;
       }
+      writingSkillRef.current = true;
+      setWritingSkill(true);
       // 移除三方来源后，技能状态统一写入 ZCode Agent 上下文，避免旧 provider 前缀带来分桶漂移。
       const targetSkill = skills.find((skill) => skill.id === skillId);
       const effectiveProvider: ZCodeProvider = ZCODE_AGENT_PROVIDER;
@@ -409,6 +423,9 @@ export function SkillsSection({
         setError(
           setEnabledError instanceof Error ? setEnabledError.message : String(setEnabledError),
         );
+      } finally {
+        writingSkillRef.current = false;
+        setWritingSkill(false);
       }
     },
     [
@@ -471,6 +488,12 @@ export function SkillsSection({
   );
 
   const scopedProviderSkills = useMemo(() => {
+    // 原生技能表已经含有效插件归属。由插件管理目录再次过滤会丢失同名或处于独立来源的技能。
+    if (selfHostedBuild)
+      return skills.filter(
+        (skill) =>
+          skill.scope === scopeFilter || (scopeFilter === "user" && skill.scope === "plugin"),
+      );
     const allProviderSkills = filterSkillsForProvider(skills, ZCODE_AGENT_PROVIDER);
     const pluginStoreMatchesTarget =
       (pluginWorkspaceIdentity?.trim() || pluginWorkspacePath || "") ===
@@ -528,9 +551,9 @@ export function SkillsSection({
       return;
     }
     const effectiveProvider: ZCodeProvider = ZCODE_AGENT_PROVIDER;
-    const skillCreator = filterSkillsForProvider(skills, effectiveProvider).find(
-      (skill) => skill.name === "skill-creator",
-    );
+    const skillCreator = (
+      selfHostedBuild ? skills : filterSkillsForProvider(skills, effectiveProvider)
+    ).find((skill) => skill.name === "skill-creator" && (!selfHostedBuild || skill.enabled));
     const markdown = buildSkillMentionMarkdown("skill-creator", skillCreator?.path);
 
     // v4 迁移删除旧 pendingComposerPrefill 后，这个入口仍手工操作 session
@@ -600,6 +623,7 @@ export function SkillsSection({
     return (
       <div
         key={skill.id}
+        data-skill-path={selfHostedBuild ? skill.path : undefined}
         className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 transition-colors hover:bg-hover"
       >
         {skill.scope === "plugin" && pluginIconItem ? (
@@ -633,12 +657,27 @@ export function SkillsSection({
                 id: "settings.skills.noDescription",
               })}
           </div>
+          {selfHostedBuild ? (
+            <div className="mt-0.5 truncate text-ui-sm text-foreground-subtle" title={skill.path}>
+              {skill.path}
+            </div>
+          ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {skill.scope === "plugin" ? null : (
+          {selfHostedBuild ? (
+            skill.path.startsWith("/") && (
+              <Switch
+                checked={skill.enabled}
+                disabled={writingSkill}
+                aria-label={skill.name}
+                onCheckedChange={(checked) => void setEnabled(skill.id, checked)}
+              />
+            )
+          ) : skill.scope === "plugin" ? null : (
             <>
               <Switch
                 checked={skill.enabled}
+                disabled={writingSkill}
                 onCheckedChange={(checked) => {
                   void setEnabled(skill.id, checked);
                 }}
@@ -672,8 +711,12 @@ export function SkillsSection({
   const skillHeaderActions = (
     <SettingsResourceHeaderActions
       onRefresh={() => void Promise.all([refresh(), refreshSharedSkillStoreForCurrentWorkspace()])}
-      onImport={() => setImportDialogOpen(true)}
-      onNew={handleCreateSkill}
+      onImport={selfHostedBuild ? undefined : () => setImportDialogOpen(true)}
+      onNew={
+        selfHostedBuild && !skills.some((skill) => skill.name === "skill-creator" && skill.enabled)
+          ? undefined
+          : handleCreateSkill
+      }
       importDisabled={!capability?.userScopeAvailable}
       importActionId="settings.skills.import.open"
       newActionId="settings.skills.create.open"
@@ -795,7 +838,7 @@ export function SkillsSection({
         </div>
       ) : null}
 
-      {targetServiceResolution.rpcReady && !capability?.userScopeAvailable ? (
+      {!selfHostedBuild && targetServiceResolution.rpcReady && !capability?.userScopeAvailable ? (
         <div className="rounded-lg border border-border bg-card px-3 py-2 text-ui-base text-foreground-subtle">
           {intl.formatMessage({ id: "settings.skills.userScopeDesktopOnly" })}
         </div>
@@ -831,6 +874,10 @@ export function SkillsSection({
             </div>
             {groupedSkills.local.length > 0 ? (
               renderSkillList(groupedSkills.local)
+            ) : directInstalledSkillCount === 0 && !query.trim() && selfHostedBuild ? (
+              <PluginSearchEmptyState
+                label={intl.formatMessage({ id: "settings.plugin.skills.emptyInstalledTitle" })}
+              />
             ) : directInstalledSkillCount === 0 && !query.trim() ? (
               <PluginInstallEmptyState
                 title={intl.formatMessage({
@@ -870,15 +917,18 @@ export function SkillsSection({
               <section key={group.id} className="space-y-4">
                 <SettingsResourceGroupHeader
                   count={group.skills.length}
-                  title={resolvePluginDisplayName(
-                    {
-                      name: group.label,
-                      listing:
-                        (group.pluginId ? pluginListingById.get(group.pluginId) : undefined) ??
-                        resolveUniquePluginListingByName(availablePlugins, group.label),
-                    },
-                    locale,
-                  )}
+                  title={
+                    (selfHostedBuild && group.pluginId) ||
+                    resolvePluginDisplayName(
+                      {
+                        name: group.label,
+                        listing:
+                          (group.pluginId ? pluginListingById.get(group.pluginId) : undefined) ??
+                          resolveUniquePluginListingByName(availablePlugins, group.label),
+                      },
+                      locale,
+                    )
+                  }
                 />
                 {renderSkillList(group.skills)}
               </section>
@@ -963,16 +1013,25 @@ export function SkillsSection({
                     mono
                     className="col-span-2"
                   />
-                  <SkillPathDetailField
-                    label={intl.formatMessage({
-                      id: "settings.skills.detail.path",
-                    })}
-                    path={detailSkill.path}
-                    openLabel={intl.formatMessage({
-                      id: "settings.skills.detail.openPath",
-                    })}
-                    onOpen={() => void openSkillFilePath(detailSkill.path)}
-                  />
+                  {selfHostedBuild ? (
+                    <SkillDetailField
+                      label={intl.formatMessage({ id: "settings.skills.detail.path" })}
+                      value={detailSkill.path}
+                      className="col-span-2"
+                      mono
+                    />
+                  ) : (
+                    <SkillPathDetailField
+                      label={intl.formatMessage({
+                        id: "settings.skills.detail.path",
+                      })}
+                      path={detailSkill.path}
+                      openLabel={intl.formatMessage({
+                        id: "settings.skills.detail.openPath",
+                      })}
+                      onOpen={() => void openSkillFilePath(detailSkill.path)}
+                    />
+                  )}
                 </div>
               </div>
             </div>

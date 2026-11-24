@@ -1,4 +1,5 @@
 import { ChevronDown, LoaderCircle, Plus, Sparkles } from "lucide-react";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import type { CreateTaskRequest } from "@/app-shell/types.js";
 import { Button } from "@/components/ui/button.js";
 import {
@@ -28,6 +29,18 @@ export function PluginAddMenu({
 }) {
   const { intl } = useZCodeIntl();
   const creator = usePluginCreator(onCreateTask, isWebRemoteControl);
+  if (selfHostedBuild)
+    return (
+      <Button
+        type="button"
+        variant={variant}
+        size={size}
+        data-testid={testId}
+        onClick={onAddMarketplace}
+      >
+        {intl.formatMessage({ id: "pluginCreator.addMarketplace" })}
+      </Button>
+    );
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>

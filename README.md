@@ -70,6 +70,8 @@ sh selfhost/update.sh --no-build
 - 插件、Skills 和 MCP 通过选中主机的 Codex 接口读取。输入框使用 `plugin/installed` 加载已安装插件，浏览插件市场时再查询市场目录。支持工作流文件的读取、元数据编辑、移动和删除。ZCode 的动态工作流脚本运行器尚未接入 Codex。自动化界面可保存任务，由中心调度器发起 Codex Thread 和 Turn。
 - 私有分享保存选定轮次的用户和助手文本，使用同一中心账号查看、撤销或删除。文本分享省略图片附件和工具输出。
 
+在「设置 → Agent 能力」打开「应用」「插件」或「技能」，管理当前 SSH 主机上的 Codex。应用可查看连接入口、有效开关、工具列表和当前可调用状态。插件使用 ZCode 的商店和已安装列表，技能按所在项目与原生路径启停。应用的外部授权在 Codex 提供的页面完成。[官方 App Server 文档](https://learn.chatgpt.com/docs/app-server)
+
 ## 远程执行链路
 
 浏览器向中心服务鉴权，中心通过校验主机身份的 SSH 连接远端官方 Codex。Gateway 通过 `codex app-server proxy` 接到那台机器上已运行的 daemon，并使用 WebSocket 与 Codex RPC。网页登录令牌用于中心服务，模型认证、服务商与出站网络由远端 Codex 配置决定。

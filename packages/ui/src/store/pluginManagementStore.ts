@@ -7,7 +7,6 @@ import type {
   ZCodePluginInfo,
   ZCodePluginMarketplaceSummary,
   ZCodePluginScope,
-  ZCodePluginsDescribeResult,
 } from "@zcode/shared";
 import { CLAUDE_OFFICIAL_PLUGIN_MARKETPLACE_ID } from "@zcode/shared";
 import type { IPluginManagementService } from "@zcode/services";
@@ -25,7 +24,7 @@ import { setPluginEnabledOptimistically } from "@/store/pluginManagementStoreEna
 // 市场详情按需拉取的组件清单缓存：按 pluginId 记 loading/data/error，避免重复请求与切换闪烁。
 export interface PluginDescribeEntry {
   status: "loading" | "loaded" | "error";
-  data?: ZCodePluginsDescribeResult;
+  data?: Awaited<ReturnType<IPluginManagementService["describePlugin"]>>;
   error?: string;
 }
 

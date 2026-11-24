@@ -64,6 +64,7 @@ export function WebRemoteControlMobileShell({
   activeWorkspacePath,
   taskViewEnabled = true,
   chatContent,
+  workspaceContent,
   chatOverlay,
   initialNavigationIntent,
   isSidePaneOpen = false,
@@ -90,6 +91,7 @@ export function WebRemoteControlMobileShell({
   }) => ReactNode;
   renderChatHeader: (options: { onBackHome: () => void }) => ReactNode;
   chatContent: ReactNode;
+  workspaceContent?: ReactNode;
   chatOverlay?: ReactNode;
   sidePaneContent?: ReactNode;
   webRemoteControlTerminalTransportState?: WebRemoteControlTerminalTransportState;
@@ -160,11 +162,13 @@ export function WebRemoteControlMobileShell({
       />
       {isMobileViewport ? (
         <div className="relative flex h-full min-h-0 min-w-0 flex-col bg-background">
-          {currentPage === "home" ? (
+          {workspaceContent}
+          {!workspaceContent && currentPage === "home" ? (
             <section className="flex h-full min-h-0 min-w-0 flex-col" data-mobile-page="home">
               {renderTaskHome({ navigateToChat, setSwitching: setSwitchingWorkspace })}
             </section>
-          ) : (
+          ) : null}
+          {!workspaceContent && currentPage === "chat" ? (
             <section
               className="flex h-full min-h-0 min-w-0 flex-col bg-background text-foreground"
               data-mobile-page="chat"
@@ -195,9 +199,9 @@ export function WebRemoteControlMobileShell({
                   inert={shouldInertChatSurface ? true : undefined}
                 >
                   {/* Bugfix: 手机侧栏打开时底部 composer 会被抽屉覆盖。
-                  如果聊天区仍留在交互树里，模型选择等控件会被遮挡但仍可被浏览器命中，
-                  造成“按钮不可点”的误导。这里把被覆盖的聊天表面设为 inert，
-                  让右侧抽屉成为唯一可交互区域。 */}
+                如果聊天区仍留在交互树里，模型选择等控件会被遮挡但仍可被浏览器命中，
+                造成“按钮不可点”的误导。这里把被覆盖的聊天表面设为 inert，
+                让右侧抽屉成为唯一可交互区域。 */}
                   {chatContent}
                 </main>
                 {sidePaneContent ? (
@@ -222,8 +226,8 @@ export function WebRemoteControlMobileShell({
                       ].join(" ")}
                     >
                       {/* Bugfix: 手机远控之前把 side pane 作为底部纵向面板渲染，
-                      会挤压聊天区且不像桌面右侧栏。这里改成右侧覆盖抽屉，
-                      只覆盖手机聊天区，不改变桌面端分栏布局。 */}
+                    会挤压聊天区且不像桌面右侧栏。这里改成右侧覆盖抽屉，
+                    只覆盖手机聊天区，不改变桌面端分栏布局。 */}
                       {sidePaneContent}
                     </div>
                   </div>
@@ -234,13 +238,13 @@ export function WebRemoteControlMobileShell({
                     data-mobile-chat-overlay="true"
                   >
                     {/* Bugfix: 查找框属于聊天视觉区域，但不能成为 inert 聊天表面的后代。
-                    独立 overlay 保留抽屉隔离，同时让文件变更查找仍可聚焦、切换和关闭。 */}
+                  独立 overlay 保留抽屉隔离，同时让文件变更查找仍可聚焦、切换和关闭。 */}
                     <div className="pointer-events-auto">{chatOverlay}</div>
                   </div>
                 ) : null}
               </div>
             </section>
-          )}
+          ) : null}
 
           {switchingWorkspace ? (
             <div

@@ -17,6 +17,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import type { ZCodePluginComponentKind, ZCodePluginsDescribeResult } from "@zcode/shared";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import {
   EXTENSION_GRANTS,
   normalizeGrants,
@@ -118,25 +119,25 @@ export function PluginStoreDetailView({
   advanced?: ReactNode;
 }) {
   const { intl, locale } = useZCodeIntl();
-  const displayName = resolveItemDisplayName(item, locale);
-  const description = resolveItemDescription(item, locale);
+  const describeData = describeEntry?.status === "loaded" ? describeEntry.data : undefined;
+  const describeMetadata = describeData?.metadata;
+  const displayName = describeMetadata?.displayName || resolveItemDisplayName(item, locale);
+  const description = resolveItemDescription(item, locale) || describeMetadata?.description;
   const heroImage = item.listing?.heroImage;
   const examplePrompts =
     resolveLocalizedList(locale, item.listing?.examplePrompts, item.listing?.examplePromptsI18n) ??
     [];
-  const describeMetadata =
-    describeEntry?.status === "loaded" ? describeEntry.data?.metadata : undefined;
-
-  const componentGroups: PluginComponentDisplayGroup[] = item.info
-    ? buildInstalledPluginDisplayGroups(item.info)
-    : describeEntry?.status === "loaded" && describeEntry.data
-      ? describeResultToDisplayGroups(describeEntry.data)
+  const runtimeInfo = selfHostedBuild ? undefined : item.info;
+  const componentGroups: PluginComponentDisplayGroup[] = runtimeInfo
+    ? buildInstalledPluginDisplayGroups(runtimeInfo)
+    : describeData
+      ? describeResultToDisplayGroups(describeData)
       : [];
   const orderedGroups = SECTION_ORDER.map((kind) =>
     componentGroups.find((group) => group.kind === kind),
   ).filter((group): group is PluginComponentDisplayGroup => group !== undefined);
-  const componentsLoading = !item.info && (describeEntry?.status ?? "loading") === "loading";
-  const componentsFailed = !item.info && describeEntry?.status === "error";
+  const componentsLoading = !runtimeInfo && (describeEntry?.status ?? "loading") === "loading";
+  const componentsFailed = !runtimeInfo && describeEntry?.status === "error";
 
   return (
     <div className="space-y-8" data-testid="plugin-store-detail" data-plugin-id={item.id}>
@@ -190,6 +191,14 @@ export function PluginStoreDetailView({
             )}
           </div>
         </div>
+        {selfHostedBuild ? (
+          <p className="text-ui-base text-foreground-subtle">{item.marketplace}</p>
+        ) : null}
+        {item.info?.source === "codex-account" ? (
+          <p className="text-ui-base text-foreground-subtle">
+            {intl.formatMessage({ id: "settings.plugins.codexAccountManaged" })}
+          </p>
+        ) : null}
         {description ? (
           <p data-testid="plugin-store-description" className="text-ui-base text-foreground-subtle">
             {description}

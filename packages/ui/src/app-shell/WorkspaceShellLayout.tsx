@@ -1485,7 +1485,8 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
   useEffect(() => {
     if (
       isWebRemoteControlShell &&
-      (workspaceMainView === "automations" || workspaceMainView === "plugin-store")
+      (workspaceMainView === "automations" ||
+        (!selfHostedBuild && workspaceMainView === "plugin-store"))
     ) {
       // 修复原因：手机远控复用桌面 shell 时可能保留上一次主视图状态；
       // 远控不承载 Automations，必须立即回落到 continuous/replayable 边界之外的聊天页。
@@ -2450,6 +2451,21 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
         isSidePaneOpen={isSidePaneOpen}
         onCloseSidePane={isSidePaneOpen ? handleToggleSidePane : undefined}
         renderTaskHome={renderWorkspaceSidebar}
+        workspaceContent={
+          selfHostedBuild && workspaceMainView === "plugin-store" ? (
+            <main className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+              <PluginStorePage
+                key={`plugin-store:${pluginStoreOpenVersion}`}
+                isWebRemoteControl
+                workspacePath={workspaceAbsPath}
+                workspaceIdentity={workspaceIdentity}
+                onCreateTask={handleCreateTaskInChat}
+                sessionId={activeTaskId}
+                onBack={showChatMainView}
+              />
+            </main>
+          ) : undefined
+        }
         switcher={webRemoteControlWorkspaceSwitcher}
         renderChatHeader={() =>
           shouldRenderWorkspaceHeader ? (
@@ -3013,7 +3029,8 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
                               </div>
                             </AutomationsMainBreadcrumbFrame>
                           </main>
-                        ) : workspaceMainView === "plugin-store" && !isWebRemoteControlShell ? (
+                        ) : workspaceMainView === "plugin-store" &&
+                          (!isWebRemoteControlShell || selfHostedBuild) ? (
                           <main className="flex h-full min-h-0 flex-1 flex-col bg-background">
                             <AutomationsMainBreadcrumbFrame
                               isDesktop={Boolean(isDesktop)}

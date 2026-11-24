@@ -16,12 +16,14 @@ export function PluginUninstallConfirmDialog({
   open,
   pluginName,
   pending,
+  error,
   onCancel,
   onConfirm,
 }: {
   open: boolean;
   pluginName: string;
   pending: boolean;
+  error?: string | null;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -45,6 +47,11 @@ export function PluginUninstallConfirmDialog({
             {intl.formatMessage({ id: "settings.plugins.uninstall.confirmDescription" })}
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {error ? (
+          <p role="alert" className="break-words text-ui-base text-destructive">
+            {error}
+          </p>
+        ) : null}
         <AlertDialogFooter>
           <AlertDialogCancel
             type="button"

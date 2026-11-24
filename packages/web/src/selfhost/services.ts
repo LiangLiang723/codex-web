@@ -4,7 +4,8 @@ import type { IChannel, IChannelClient } from "@zcode/rpc";
 import { z } from "zod";
 import { Gateway, type Message, type Project, type RemoteModel } from "./gateway.js";
 import { rec, str, array, num, providerId } from "./threadProjection.js";
-import { extensionRequest, codexRequest } from "./capabilities.js";
+import { extensionRequest } from "./capabilities.js";
+import { createCodexAppsService } from "./codexApps.js";
 import { FileWatches } from "./fileWatches.js";
 import { AttachmentBridge } from "./attachments.js";
 import { shareOperation } from "./shares.js";
@@ -20,7 +21,6 @@ const remoteChannels = new Set([
   "system",
   "git",
   "memory",
-  "skills",
   "commands",
   "output-style",
 ]);
@@ -320,24 +320,30 @@ export async function openWorkspace(
         "listPlugins",
         "getPluginReferenceCatalog",
         "getPluginDetail",
+        "describePlugin",
         "addPluginMarketplace",
         "removePluginMarketplace",
         "updatePluginMarketplace",
         "installPlugin",
         "uninstallPlugin",
+        "setPluginEnabled",
+        "updatePlugin",
         "getSkillReferenceCatalog",
         "listMcpServerStatuses",
       ].includes(method)
     )
       return extensionRequest(gateway, hostId, str(p.workspacePath) || cwd, method, p);
-    if (channel === "skills" && (method === "list" || method === "setEnabled"))
-      return extensionRequest(
-        gateway,
-        hostId,
-        str(p.workspacePath) || cwd,
-        method === "setEnabled" ? "setSkillEnabled" : "listSkills",
-        p,
-      );
+    if (channel === "skills") {
+      if (method === "list" || method === "setEnabled")
+        return extensionRequest(
+          gateway,
+          hostId,
+          str(p.workspacePath) || cwd,
+          method === "setEnabled" ? "setSkillEnabled" : "listSkills",
+          p,
+        );
+      throw Error("This skill operation is unavailable on the selected Codex host.");
+    }
     if (
       channel === "zcode-agent" &&
       [
@@ -692,7 +698,7 @@ export async function openWorkspace(
     },
   };
   return {
-    services: new RemoteServiceAccess(client),
+    services: Object.assign(new RemoteServiceAccess(client), {codexAppsService:createCodexAppsService(gateway,hostId)}),
     dispose() {
       for (const bridge of bridges.values()) bridge.dispose();
       bridges.clear();

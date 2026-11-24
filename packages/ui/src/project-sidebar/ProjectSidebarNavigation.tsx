@@ -1,6 +1,7 @@
 import { Blocks, CalendarClock } from "lucide-react";
 import { memo } from "react";
 import { TID_AUTOMATIONS_OPEN } from "@zcode/shared/test-ids";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import type { ProjectSidebarProps } from "@/project-sidebar/contract.js";
 import { Button } from "@/components/ui/button.js";
 import { NewTaskButtonGroup } from "@/NewTaskButtonGroup.js";
@@ -54,7 +55,7 @@ export const ProjectSidebarNavigation = memo(function ProjectSidebarNavigation({
           {intl.formatMessage({ id: "workspace.openScheduledSettings" })}
         </Button>
       ) : null}
-      {!props.isWebRemoteControl ? (
+      {!props.isWebRemoteControl || selfHostedBuild ? (
         <Button
           variant="ghost"
           size="lg"

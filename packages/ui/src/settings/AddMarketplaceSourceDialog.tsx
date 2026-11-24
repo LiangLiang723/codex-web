@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type DragEvent } from "react";
 import { FolderOpen, LoaderCircle, Plus } from "lucide-react";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { Button } from "@/components/ui/button.js";
 import { Checkbox } from "@/components/ui/checkbox.js";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog.js";
@@ -156,7 +157,11 @@ export function AddMarketplaceSourceDialog({
             event.preventDefault();
             void handleAdd();
           }}
-          placeholder={intl.formatMessage({ id: "settings.plugins.marketplaces.source" })}
+          placeholder={intl.formatMessage(
+            selfHostedBuild
+              ? { id: "settings.plugins.marketplaces.codexSource" }
+              : { id: "settings.plugins.marketplaces.source" },
+          )}
         />
         {canPickPath ? (
           <p className="text-ui-base text-foreground-subtle">

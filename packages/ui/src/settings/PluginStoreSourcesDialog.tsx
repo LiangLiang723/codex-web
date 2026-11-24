@@ -1,5 +1,6 @@
 import { AlertTriangle, LoaderCircle, RefreshCw, Trash2 } from "lucide-react";
 import type { ZCodePluginMarketplaceSummary } from "@zcode/shared";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { CLAUDE_OFFICIAL_PLUGIN_MARKETPLACE_ID } from "@zcode/shared";
 import { Button } from "@/components/ui/button.js";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog.js";
@@ -13,6 +14,8 @@ import { DEFAULT_MARKETPLACE_ID } from "@/settings/recommendedPlugins.js";
 
 // 官方市场不可移除：移除后启动时会被重新补种，只会造成「删了又回来」的困惑。
 function isRemovableMarketplace(marketplace: ZCodePluginMarketplaceSummary): boolean {
+  if (selfHostedBuild)
+    return marketplace.source.configured === true && marketplace.isOfficial !== true;
   if (isPublicStoreMarketplaceId(marketplace.id)) return false;
   if (marketplace.id === DEFAULT_MARKETPLACE_ID) return false;
   return true;
@@ -49,6 +52,7 @@ export function PluginStoreSourcesDialog({
   onUpdateMarketplace,
   onRemoveMarketplace,
   activeOperations,
+  error,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -56,6 +60,7 @@ export function PluginStoreSourcesDialog({
   onUpdateMarketplace: (marketplace: string) => void;
   onRemoveMarketplace: (marketplace: string) => void;
   activeOperations: ReadonlyArray<{ id: string }>;
+  error?: string | null;
 }) {
   const { intl, locale } = useZCodeIntl();
   const claudeCodePlugins = intl.formatMessage({
@@ -71,6 +76,11 @@ export function PluginStoreSourcesDialog({
         <DialogTitle className="text-ui-lg font-medium text-foreground">
           {intl.formatMessage({ id: "settings.plugins.store.sources.title" })}
         </DialogTitle>
+        {error ? (
+          <p role="alert" className="break-words text-ui-base text-destructive">
+            {error}
+          </p>
+        ) : null}
         <div className="max-h-[min(420px,60vh)] space-y-1 overflow-y-auto">
           {sortedMarketplaces.length === 0 ? (
             <p className="px-1 py-2 text-ui-base text-foreground-subtle">
@@ -101,6 +111,16 @@ export function PluginStoreSourcesDialog({
                         )}
                       </span>
                     </div>
+                    {selfHostedBuild &&
+                    typeof marketplace.source.path === "string" &&
+                    marketplace.source.path ? (
+                      <div
+                        className="truncate text-ui-sm text-foreground-subtle"
+                        title={marketplace.source.path}
+                      >
+                        {marketplace.source.path}
+                      </div>
+                    ) : null}
                     <div className="mt-0.5 truncate text-ui-base text-foreground-subtle">
                       {intl.formatMessage(
                         { id: "settings.plugins.store.sources.pluginCount" },
@@ -119,23 +139,25 @@ export function PluginStoreSourcesDialog({
                       <PluginStoreSourceRefreshFailure failure={marketplace.refreshFailure} />
                     ) : null}
                   </div>
-                  <Button
-                    type="button"
-                    data-testid="plugin-store-source-update"
-                    data-marketplace-id={marketplace.id}
-                    variant="ghost"
-                    size="icon-lg"
-                    aria-label={intl.formatMessage({
-                      id: "settings.plugins.store.sources.update",
-                    })}
-                    disabled={updating}
-                    onClick={() => onUpdateMarketplace(marketplace.id)}
-                  >
-                    <RefreshCw
-                      className={updating ? "size-3.5 animate-spin" : "size-3.5"}
-                      aria-hidden="true"
-                    />
-                  </Button>
+                  {!selfHostedBuild || marketplace.source.type === "git" ? (
+                    <Button
+                      type="button"
+                      data-testid="plugin-store-source-update"
+                      data-marketplace-id={marketplace.id}
+                      variant="ghost"
+                      size="icon-lg"
+                      aria-label={intl.formatMessage({
+                        id: "settings.plugins.store.sources.update",
+                      })}
+                      disabled={updating}
+                      onClick={() => onUpdateMarketplace(marketplace.id)}
+                    >
+                      <RefreshCw
+                        className={updating ? "size-3.5 animate-spin" : "size-3.5"}
+                        aria-hidden="true"
+                      />
+                    </Button>
+                  ) : null}
                   {isRemovableMarketplace(marketplace) ? (
                     <Button
                       type="button"

@@ -9,6 +9,7 @@ import {
   TriangleAlert,
   Trash2,
 } from "lucide-react";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { Button } from "@/components/ui/button.js";
 import { Switch } from "@/components/ui/switch.js";
 import {
@@ -166,10 +167,12 @@ export function PluginStoreItemMenu({
   const { intl } = useZCodeIntl();
   const enabled = item.info?.enabled ?? false;
   const busy = isItemBusy(item, actions);
+  const managedByAccount = item.info?.source === "codex-account";
   const canToggleEnabled =
     showEnabledAction &&
     Boolean(item.info && actions.onSetEnabled) &&
-    !isWorkspaceTrustPending(item);
+    !isWorkspaceTrustPending(item) &&
+    !managedByAccount;
   // 分隔线不应跟随 item.installed 无条件渲染；启停/更新/恢复配置都不出现时，
   // 菜单只剩「卸载」一项，上方却留下一条孤立横线。分隔线只在卸载前确有其他操作项时才有意义。
   const hasActionsBeforeUninstall = canToggleEnabled;
@@ -198,6 +201,11 @@ export function PluginStoreItemMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
+        {managedByAccount ? (
+          <DropdownMenuItem disabled>
+            {intl.formatMessage({ id: "settings.plugins.codexAccountManaged" })}
+          </DropdownMenuItem>
+        ) : null}
         {canToggleEnabled ? (
           <DropdownMenuItem
             data-testid="plugin-store-menu-enabled"
@@ -450,6 +458,12 @@ export function PluginStoreCard({
           </div>
         ) : null}
         <div className="mt-0.5 min-h-5 truncate text-ui-caption leading-5 text-foreground-subtle">
+          {selfHostedBuild && item.marketplace ? (
+            <span>
+              {item.marketplace}
+              {description ? " · " : ""}
+            </span>
+          ) : null}
           {description}
         </div>
       </div>
@@ -470,7 +484,7 @@ export function PluginStoreCard({
             {/* 启停中的加载提示只由「…」菜单按钮承担（isItemBusy 含 togglingPluginId）。
                 这里曾另放一个独立 LoaderCircle，点开关时卡片处于 hover/focus-within，菜单按钮显形，
                 同一状态并排出现两个 spinner。开关自身保留 disabled + aria-busy。 */}
-            {item.info && actions.onSetEnabled ? (
+            {item.info && item.info.source !== "codex-account" && actions.onSetEnabled ? (
               <Switch
                 className="after:-inset-x-2"
                 data-testid={

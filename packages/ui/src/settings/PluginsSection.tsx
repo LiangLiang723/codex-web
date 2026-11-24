@@ -6,6 +6,7 @@ import {
 } from "@/settings-scope/index.js";
 /* eslint-disable max-lines -- 共享能力外壳聚合 Scope，并承载 Plugin tabs 与独立 Commands 入口。 */
 import { PluginAddMenu } from "@/conversation-workspace-target/PluginAddMenu.js";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Monitor, Plus, UploadCloud } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
@@ -187,6 +188,9 @@ function PluginList({
   const restorableBuiltins = usePluginManagementStore((state) => state.restorableBuiltins);
   const loading = usePluginManagementStore((state) => state.loading);
   const pluginDiagnostics = usePluginManagementStore((state) => state.diagnostics);
+  const loadError = usePluginManagementStore((state) => state.error);
+  const pluginDescriptions = usePluginManagementStore((state) => state.describeCache);
+  const describePlugin = usePluginManagementStore((state) => state.describePlugin);
   const currentWorkspacePath = usePluginManagementStore((state) => state.workspacePath);
   const currentWorkspaceIdentity = usePluginManagementStore((state) => state.workspaceIdentity);
   const initialize = usePluginManagementStore((state) => state.initialize);
@@ -292,6 +296,7 @@ function PluginList({
     workspaceIdentity: target?.workspaceIdentity,
   });
   const showUnavailableComputerUse = Boolean(
+    !selfHostedBuild &&
     configScope === "user" &&
     target &&
     !loading &&
@@ -381,6 +386,7 @@ function PluginList({
       plugins,
       setEnabled,
       storeItemById,
+      usePluginManagementStore,
     ],
   );
   const handleTrustWorkspacePlugin = useCallback(
@@ -433,7 +439,15 @@ function PluginList({
       }
       toast(intl.formatMessage({ id: "settings.plugins.scope.restored" }, { plugin: pluginLabel }));
     },
-    [intl, locale, pluginManagementService, plugins, resetPluginConfig, storeItemById],
+    [
+      intl,
+      locale,
+      pluginManagementService,
+      plugins,
+      resetPluginConfig,
+      storeItemById,
+      usePluginManagementStore,
+    ],
   );
   const uninstall = usePluginUninstall({
     store: usePluginManagementStore,
@@ -449,7 +463,7 @@ function PluginList({
       if (usePluginManagementStore.getState().error) return;
       await refreshAfterPluginChange();
     },
-    [pluginManagementService, refreshAfterPluginChange, updatePlugin],
+    [pluginManagementService, refreshAfterPluginChange, updatePlugin, usePluginManagementStore],
   );
   const [updatingAll, setUpdatingAll] = useState(false);
   const updateAllAbortRef = useRef<AbortController | null>(null);
@@ -606,6 +620,9 @@ function PluginList({
       onOpenDetail: (pluginId) => {
         setSelectedPluginId(pluginId);
         onDetailOpenChange?.(true);
+        const item = storeItemById.get(pluginId);
+        if (selfHostedBuild && item)
+          void describePlugin(item.id, item.name, item.marketplace, pluginManagementService);
       },
       onOpenUi: onOpenUi
         ? (item) =>
@@ -637,6 +654,7 @@ function PluginList({
     }),
     [
       configScope,
+      describePlugin,
       handleResetPluginConfig,
       handleTrustWorkspacePlugin,
       handleSetEnabled,
@@ -649,6 +667,7 @@ function PluginList({
       onOpenUi,
       target,
       setEnabled,
+      storeItemById,
       pluginManagementService,
       confirmEnable,
       locale,
@@ -750,7 +769,17 @@ function PluginList({
         <PluginStoreDetailView
           item={selectedStoreItem}
           actions={actions}
-          onRetryDescribe={() => {}}
+          describeEntry={selfHostedBuild ? pluginDescriptions[selectedStoreItem.id] : undefined}
+          onRetryDescribe={() => {
+            if (selfHostedBuild)
+              void describePlugin(
+                selectedStoreItem.id,
+                selectedStoreItem.name,
+                selectedStoreItem.marketplace,
+                pluginManagementService,
+                true,
+              );
+          }}
           onUsePrompt={(item, prompt) => {
             if (!onCreateTask) return;
             onCreateTask({
@@ -812,6 +841,7 @@ function PluginList({
           }
         />
         <PluginUninstallConfirmDialog
+          error={uninstall.error}
           open={uninstall.pendingPlugin !== null}
           pluginName={
             uninstall.pendingPlugin
@@ -833,6 +863,14 @@ function PluginList({
 
   return (
     <section className="space-y-6" aria-labelledby="plugin-installed-title">
+      {selfHostedBuild && storeMatchesTarget && (loadError || pluginDiagnostics.length > 0) ? (
+        <div
+          role="alert"
+          className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-ui-base whitespace-pre-line text-destructive"
+        >
+          {loadError ?? pluginDiagnostics.map((diagnostic) => diagnostic.message).join("\n")}
+        </div>
+      ) : null}
       {hasEmptySearchResult ? (
         <EmptyState
           message={intl.formatMessage({
@@ -969,6 +1007,7 @@ function PluginList({
         </div>
       ) : null}
       <PluginUninstallConfirmDialog
+        error={uninstall.error}
         open={uninstall.pendingPlugin !== null}
         pluginName={
           uninstall.pendingPlugin
@@ -1079,10 +1118,11 @@ export function PluginsSection({
   const activeSearchQuery = searchQueries[selectedTab];
   const selectedScope: PluginScope = useMemo(() => {
     const resolution = scope.resolution;
+    if (selfHostedBuild && selectedTab === "plugins") return { kind: "user", key: "user" };
     return resolution.status === "ready" && resolution.kind === "workspace"
       ? { kind: "workspace", key: resolution.key, tab: resolution.target }
       : { kind: "user", key: "user" };
-  }, [scope.resolution]);
+  }, [scope.resolution, selectedTab]);
   // 插件商店作用于当前 workspace 的 Host；只有选中当前 workspace 所在设备的「用户」时提供入口，
   // 否则在商店里安装会写到另一台设备。
   const marketplaceAvailable = selectedScope.kind === "user" && scope.isActiveWorkspaceDevice;
@@ -1210,17 +1250,21 @@ export function PluginsSection({
           {!mcpEditorOpen && !pluginDetailOpen && !commandEditorOpen ? (
             <div className="flex min-w-0 flex-wrap items-center gap-3">
               <div className="flex min-w-0 flex-wrap items-center gap-3">
-                <PluginScopeMenu
-                  align="start"
-                  groups={scope.groups}
-                  selectedScopeKey={selectedScopeKey}
-                  selectedDevice={scope.device}
-                  triggerTestId="plugin-settings-scope-trigger"
-                  userOptionTestId="plugin-settings-scope-user-option"
-                  workspaceOptionTestIdPrefix="plugin-settings-scope-option"
-                  onScopeKeyChange={scope.setSelectedScopeKey}
-                />
-                <div className="hidden h-4 w-px bg-border sm:block" aria-hidden="true" />
+                {(!selfHostedBuild || selectedTab !== "plugins") && (
+                  <>
+                    <PluginScopeMenu
+                      align="start"
+                      groups={scope.groups}
+                      selectedScopeKey={selectedScopeKey}
+                      selectedDevice={scope.device}
+                      triggerTestId="plugin-settings-scope-trigger"
+                      userOptionTestId="plugin-settings-scope-user-option"
+                      workspaceOptionTestIdPrefix="plugin-settings-scope-option"
+                      onScopeKeyChange={scope.setSelectedScopeKey}
+                    />
+                    <div className="hidden h-4 w-px bg-border sm:block" aria-hidden="true" />
+                  </>
+                )}
                 {mode === "plugin" ? (
                   <TabsList variant="line" className="h-7 max-w-full gap-1 overflow-x-auto p-0">
                     <TabsTrigger

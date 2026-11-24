@@ -1,4 +1,5 @@
 /* eslint-disable max-lines -- 设置导航意图集中管理 sessionStorage、事件桥接和解析校验，拆分会让一次性意图消费顺序更难保证。 */
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { logger } from "@/logger.js";
 
 export type SettingsSectionId =
@@ -12,6 +13,7 @@ export type SettingsSectionId =
   | "dataSync"
   | "personalization"
   | "memory"
+  | "codexApps"
   | "plugin"
   | "mcp"
   | "skill"
@@ -83,6 +85,7 @@ function isSettingsSectionId(value: string): value is SettingsSectionId {
     value === "dataSync" ||
     value === "personalization" ||
     value === "memory" ||
+    value === "codexApps" ||
     value === "plugin" ||
     value === "mcp" ||
     value === "skill" ||
@@ -102,7 +105,7 @@ function isSettingsSectionId(value: string): value is SettingsSectionId {
 }
 
 export function isSettingsSectionEnabled(section: SettingsSectionId): boolean {
-  return !HIDDEN_SETTINGS_SECTIONS.has(section);
+  return (section !== "codexApps" || selfHostedBuild) && !HIDDEN_SETTINGS_SECTIONS.has(section);
 }
 
 export function resolveSettingsSection(

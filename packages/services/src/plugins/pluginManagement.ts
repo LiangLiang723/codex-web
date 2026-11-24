@@ -46,6 +46,11 @@ import type {
   ZCodeAgentValidatePluginParams,
 } from "../zcode-agent/zcodeAgentPluginParams.js";
 
+// SSH Codex 的清单可以补充商店展示文案。原生 ZCode CLI 的严格 describe 响应仍可直接使用。
+type PluginManagementDescription = ZCodePluginsDescribeResult & {
+  metadata?: { displayName?: string; description?: string };
+};
+
 export interface IPluginManagementService {
   listPlugins(params: ZCodeAgentPluginViewParams): Promise<ZCodePluginsListResult>;
   /**
@@ -86,7 +91,7 @@ export interface IPluginManagementService {
     params: ZCodeAgentResetPluginConfigParams,
   ): Promise<ZCodePluginsConfigureResult>;
   validatePlugin(params: ZCodeAgentValidatePluginParams): Promise<ZCodePluginsValidateResult>;
-  describePlugin(params: ZCodeAgentDescribePluginParams): Promise<ZCodePluginsDescribeResult>;
+  describePlugin(params: ZCodeAgentDescribePluginParams): Promise<PluginManagementDescription>;
   setPluginEnabled(params: ZCodeAgentSetPluginEnabledParams): Promise<ZCodePluginsSetEnabledResult>;
   /** 信任项目目录插件：只写目标 Host 的用户域记录，对之后新建的会话生效。 */
   setWorkspacePluginTrust(

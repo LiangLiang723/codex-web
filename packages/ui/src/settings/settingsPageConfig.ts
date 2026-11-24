@@ -108,6 +108,12 @@ const BASE_SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
     groupId: "agentCapabilities",
   },
   {
+    id: "codexApps",
+    icon: Cable,
+    titleId: "settings.codexApps.title",
+    groupId: "agentCapabilities",
+  },
+  {
     id: "plugin",
     icon: Blocks,
     titleId: "settings.plugins.title",

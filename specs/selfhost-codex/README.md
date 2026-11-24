@@ -18,6 +18,33 @@ sequenceDiagram
 
 Acceptance includes a real model list and reasoning control, native prompt editor with draft retention, original layout at desktop and phone widths, independent browser login, real model/tool/approval events, history after reconnect, remote Git/files/PTY, host key mismatch, and persistent server configuration. Commercial service endpoints are excluded from the self-host build. The external deployment port is 33723.
 
+## SSH 主机上的应用管理
+
+在设置的「Agent 能力」中，应用、插件、技能使用独立入口。应用列表属于当前 SSH 主机上的 Codex 账号。首屏读取一页目录与独立的安装快照，后续随展开或搜索按原生游标读 `app/list`，以 `app/installed` 区分已安装、已启用与当前可调用，并在打开详情时用 `app/read` 读取工具及所属插件。安装或连接从 Codex 返回的 HTTPS 地址进入，由用户在官方页面完成；返回后可以刷新。原生没有返回的状态显示为未知。目录或可选接口故障仍保留能读到的信息，旧主机的回包不能更新新主机的界面。
+
+应用开关将一个应用 ID 和布尔值提交到已认证主机，经限定操作写入 `apps.<id>.enabled`。单工具开关只写该应用的相应工具，配置服务处理策略覆盖。写完重新读取远端有效状态。浏览器不能从这个接口指定任意配置键或文件。点击应用详情不启动工具，也不自动向服务商授权。
+
+| 验收 | 场景 | 通过条件 |
+| --- | --- | --- |
+| SH-APP-MANAGEMENT | 两台主机、目录多页、未连接/已禁用/已连接但不可调用的应用、旧版本缺少运行态接口 | 桌面与手机从设置找到三类入口；按 ID 合并并区分状态，连接打开原生链接，详情显示该应用的工具，主机切换隔离旧响应。 |
+| SH-APP-WRITE | 启用或禁用应用及单个工具，策略覆盖或配置写失败 | 远端收到单个原生配置叶子的修改。覆盖或失败在页面可见，另一个应用及其他权限配置保留。 |
+
+```mermaid
+sequenceDiagram
+    participant W as ZCode 设置
+    participant G as 已验证主机的 Gateway
+    participant C as 远端 Codex
+    W->>G: 打开应用或选择某个应用
+    G->>C: app/list、app/installed 或 app/read
+    C-->>W: 当前目录、运行状态或工具
+    W->>G: 用户变更应用或工具开关
+    G->>C: config/value/write 写单个键
+    C-->>W: 写入结果及策略覆盖信息
+    W->>G: 刷新远端有效状态
+```
+
+参见 [App Server 应用与配置协议](https://learn.chatgpt.com/docs/app-server#apps) 和 [Codex 应用配置项](https://learn.chatgpt.com/docs/config-file/config-reference)。
+
 ## 原生协议与工作区验收
 
 每个 Web 工作区的服务归已验证的 SSH 主机和目录所有。浏览器只投影原生事实，Gateway 按账号、主机、Thread 和连接世代路由。桌面和手机 Web 使用同一可回放订阅，原生 Electron 的连续投递仍走窗口 Host。
@@ -81,6 +108,34 @@ sequenceDiagram
     W->>G: 提交草稿和选中的身份
     G->>C: 原生 mention 或 skill 输入
 ```
+
+### SSH 主机上的插件与技能设置
+
+插件管理、插件商店和技能设置复用 ZCode 的原有页面。插件管理以当前 SSH 用户的 Codex 安装状态为准，商店按原生市场分组，安装与卸载使用完整的 `名称@市场`。远端账号市场与 SSH 主机上的本地或 Git 市场各自保留来源。插件详情显示原生目录和本机包中可读取的资料，已安装插件的技能用完整插件 ID 关联。打开详情不安装插件。
+
+受限的 Gateway 接口用远端 `codex plugin list/add/remove/marketplace` 的 JSON 输出读取和管理目录。设置与输入框的已安装视图使用 `plugin/installed`，并保留独立错误反馈。OpenAI 标为开发中的市场协议不用于生产客户端。插件用户级开关只写 `plugins."名称@市场".enabled` 的布尔值。账号市场的启用状态由官方服务管理，SSH 本机配置无法覆盖时在页面说明。技能目录采用 `skills/list`，按当前目录与 `SKILL.md` 的绝对路径读取，技能开关调用 `skills/config/write`，保留作用域与来源。同名条目保留各自身份。
+
+完成修改后重新读取远端状态。写入失败可从原页面重试，列表保留各接口能读取的事实。安装、卸载与新增市场不作为读取或刷新目录的副作用。页面切换 SSH 主机时不会套用上一次读取或操作的结果。
+
+| 验收 | 场景 | 通过条件 |
+| --- | --- | --- |
+| SH-PLUGIN-MANAGEMENT | 设置、插件商店、两个来源的同名插件及同一插件的工作区切换 | 桌面与手机展示真实来源与安装态。详情、安装、停用、恢复和卸载针对完整插件 ID。操作后以远端目录刷新，另一来源的条目保持原状态。 |
+| SH-PLUGIN-MARKETPLACE | 添加 SSH 主机本地市场或 Git 市场，刷新、移除及附带的官方目录 | 按原有确认流程接收来源，保留 CLI 正常与失败响应。官方账号市场和本地市场各自显示名称与可执行操作。 |
+| SH-SKILL-MANAGEMENT | 本地与插件技能同名、切换 User/Workspace、读取或写入失败 | 当前 SSH 目录的原生技能路径和来源可辨识。开关提交相应的 `SKILL.md` 路径，随后重新读取有效状态。技能目录失败时仍可独立查看插件。 |
+
+```mermaid
+sequenceDiagram
+    participant W as ZCode 设置与商店
+    participant G as 已验证主机的 Gateway
+    participant C as SSH 主机上的 Codex
+    W->>G: 查询当前目录或提交选定条目的修改
+    G->>C: CLI 插件操作或受限的 App Server 请求
+    C-->>G: 目录、写入结果或失败原因
+    G-->>W: 可显示的远端结果
+    W->>G: 写入完成后重新查询
+```
+
+参见 [App Server 技能与插件协议](https://learn.chatgpt.com/docs/app-server) 和 [Codex CLI 插件实现](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/cli/src/plugin_cmd.rs)。
 
 ## 会话状态栏
 

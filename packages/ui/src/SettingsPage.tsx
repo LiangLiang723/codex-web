@@ -92,6 +92,7 @@ import { buildPersonalCodingPlanUsageSource } from "@/lib/codingPlanUsageSources
 import { SubagentsSection } from "@/settings/SubagentsSection.js";
 import { AutomationsSection } from "@/settings/AutomationsSection.js";
 import { SegmentPill } from "@/settings/PluginStoreListView.js";
+import { CodexAppsSection } from "@/settings/codex-apps/index.js";
 import { PluginsSection } from "@/settings/PluginsSection.js";
 import { HooksSection } from "@/settings/HooksSection.js";
 import { WorkspaceFileSearchSection } from "@/settings/WorkspaceFileSearchSection.js";
@@ -2133,6 +2134,8 @@ export function SettingsPage({
                               isDesktop={Boolean(isDesktop)}
                               workspaceDisplayNames={memoryWorkspaceDisplayNames}
                             />
+                          ) : activeSection === "codexApps" ? (
+                            <CodexAppsSection/>
                           ) : activeSection === "plugin" ? (
                             <PluginsSection
                               key={`plugin:${settingsSectionNavigationVersion}`}

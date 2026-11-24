@@ -51,6 +51,7 @@ import {
   type StorePluginItem,
 } from "@/settings/pluginStoreListing.js";
 import { ZCODE_OFFICIAL_PLUGIN_MARKETPLACE_ID } from "@zcode/shared";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { useOAuth } from "@/hooks/useOAuth.js";
 import { useZCodeStore } from "@/store/StoreProvider.js";
 import { PluginUninstallConfirmDialog } from "@/settings/PluginUninstallConfirmDialog.js";
@@ -98,7 +99,7 @@ export function PluginStorePage({
 }: PluginStorePageProps) {
   const platform = usePlatform();
   const { intl, locale } = useZCodeIntl();
-  const { order: storeOrder, refresh: refreshStoreOrder } = usePluginStoreOrder();
+  const { order: storeOrder, refresh: refreshStoreOrder } = usePluginStoreOrder(!selfHostedBuild);
   const { pluginManagementService, skillsService } = useServices();
   const usePluginManagementStore = useScopedPluginManagementStore(pluginManagementService);
   // 市场卡片读写 User 层；当前项目覆盖禁用导致打不开时，引导到插件管理的当前项目视图处理覆盖。
@@ -133,6 +134,7 @@ export function PluginStorePage({
   const activeOperations = usePluginManagementStore((state) => state.activeOperations);
   const describeCache = usePluginManagementStore((state) => state.describeCache);
   const initialize = usePluginManagementStore((state) => state.initialize);
+  const reload = usePluginManagementStore((state) => state.refresh);
   const updateMarketplace = usePluginManagementStore((state) => state.updateMarketplace);
   const addMarketplace = usePluginManagementStore((state) => state.addMarketplace);
   const removeMarketplace = usePluginManagementStore((state) => state.removeMarketplace);
@@ -157,7 +159,9 @@ export function PluginStorePage({
   }, [pluginManagementService, embedded, isWebRemoteControl, view]);
 
   const [detailPluginId, setDetailPluginId] = useState<string | null>(null);
-  const [segment, setSegment] = useState<PluginStoreSegment>("public");
+  const [segment, setSegment] = useState<PluginStoreSegment>(
+    selfHostedBuild ? "personal" : "public",
+  );
   const [query, setQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
@@ -333,7 +337,7 @@ export function PluginStorePage({
 
   // 详情页数据补齐：无运行时信息的条目（未安装候选）按需 describe，拿组件清单 + manifest 回退字段。
   useEffect(() => {
-    if (view !== "detail" || !detailItem || detailItem.info) return;
+    if (view !== "detail" || !detailItem || (detailItem.info && !selfHostedBuild)) return;
     void describePlugin(
       detailItem.id,
       detailItem.name,
@@ -404,10 +408,11 @@ export function PluginStorePage({
   // 操作内部完成后会重载概览），随后按更新徽标数量给完成提示。只做本地重载时，
   // 用户点了刷新看不到 CDN 新插件（与规格「刷新→update(null)」不符）。
   const handleRefresh = async () => {
-    void refreshStoreOrder(true);
+    if (!selfHostedBuild) void refreshStoreOrder(true);
     setRefreshing(true);
     try {
-      await handleCheckForUpdates();
+      if (selfHostedBuild) await reload(pluginManagementService);
+      else await handleCheckForUpdates();
     } finally {
       setRefreshing(false);
     }
@@ -463,7 +468,7 @@ export function PluginStorePage({
       // 已预热的草稿 session 继续携带旧版本甚至空能力，导致“升级成功”后新会话仍不可用。
       await refreshAfterPluginChange();
     },
-    [operationService, refreshAfterPluginChange, updatePlugin],
+    [operationService, refreshAfterPluginChange, updatePlugin, usePluginManagementStore],
   );
 
   const handleCheckForUpdates = useCallback(async () => {
@@ -488,7 +493,7 @@ export function PluginStorePage({
       return;
     }
     toast(intl.formatMessage({ id: "settings.plugins.checkForUpdates.none" }));
-  }, [intl, operationService, updateMarketplace]);
+  }, [intl, operationService, updateMarketplace, usePluginManagementStore]);
 
   const handleAddMarketplace = useCallback(
     async (source: string) => {
@@ -501,7 +506,7 @@ export function PluginStorePage({
       if (succeeded) setSegment("personal");
       return succeeded;
     },
-    [addMarketplace, operationService],
+    [addMarketplace, operationService, usePluginManagementStore],
   );
 
   const handleUsePrompt = useCallback(
@@ -686,12 +691,12 @@ export function PluginStorePage({
       ) : null}
 
       {/* 来源错误可能带连续长路径；允许断行，避免窄屏内容被错误文本撑宽。 */}
-      {error && !addSourceOpen ? (
+      {(error || (selfHostedBuild && pluginDiagnostics.length > 0)) && !addSourceOpen ? (
         <div
           className="break-words rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-ui-base text-destructive"
           data-testid="plugin-store-error"
         >
-          {error}
+          {error ?? pluginDiagnostics.map((diagnostic) => diagnostic.message).join("\n")}
         </div>
       ) : null}
 
@@ -872,6 +877,7 @@ export function PluginStorePage({
       </Dialog>
 
       <PluginUninstallConfirmDialog
+        error={uninstall.error}
         open={uninstall.pendingPlugin !== null}
         pluginName={
           uninstall.pendingPlugin
@@ -891,6 +897,7 @@ export function PluginStorePage({
         open={sourcesOpen}
         onOpenChange={setSourcesOpen}
         marketplaces={marketplaces}
+        error={selfHostedBuild ? error : undefined}
         onUpdateMarketplace={(marketplace) => void updateMarketplace(marketplace, operationService)}
         onRemoveMarketplace={(marketplace) => void removeMarketplace(marketplace, operationService)}
         activeOperations={activeOperations}

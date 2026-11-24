@@ -7,14 +7,7 @@ import { requireRecord } from "../../utils/gateway/http/validation/common";
 const methods = z.enum([
   "skills/list",
   "skills/config/write",
-  "plugin/list",
   "plugin/installed",
-  "plugin/read",
-  "plugin/install",
-  "plugin/uninstall",
-  "marketplace/add",
-  "marketplace/remove",
-  "marketplace/upgrade",
   "mcpServerStatus/list",
   "thread/archive",
   "thread/unarchive",
@@ -39,6 +32,11 @@ export default defineGatewayEventHandler(async (event) => {
       })
       .parse(params);
     return { value: await threadBroker.renameThread(host, threadId, name) };
+  }
+  if (method === "skills/config/write") {
+    const skill = z.object({ path: z.string().startsWith("/").max(4096), enabled: z.boolean() })
+      .strict().parse(params);
+    return { value: await threadBroker.selfhostCapability(host, method, skill) };
   }
   return { value: await threadBroker.selfhostCapability(host, method, params) };
 });

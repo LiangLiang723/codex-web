@@ -25,6 +25,8 @@ export interface SkillSummary {
   pluginName?: string;
   /** plugin scope 时为来源插件完整 ID（name@marketplace）；旧 payload 可缺省。 */
   pluginId?: string;
+  /** Codex 将内置技能和系统管理员配置的技能单独标记。 */
+  codexScope?: "system" | "admin";
   metadata?: SkillMetadata;
 }
 

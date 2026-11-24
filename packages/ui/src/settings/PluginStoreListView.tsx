@@ -1,3 +1,4 @@
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { useUiPluginRecommendations } from "@/plugin-ui/index.js";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
 /* eslint-disable max-lines -- 商店列表页把搜索/公开-社区-个人分段/Featured/分类折叠聚合成一个连贯浏览面，拆散反而难以维持 1:1 布局。 */
@@ -63,10 +64,11 @@ export function PluginStoreListView({
   const items = useMemo(() => allItems.filter((item) => isPluginStoreVisible(item.id)), [allItems]);
 
   const segmentItems = useMemo(
-    () => items.filter((item) => resolvePluginStoreSegment(item) === segment),
+    () =>
+      selfHostedBuild ? items : items.filter((item) => resolvePluginStoreSegment(item) === segment),
     [items, segment],
   );
-  const { recommendations } = useUiPluginRecommendations(true);
+  const { recommendations } = useUiPluginRecommendations(!selfHostedBuild);
   const uiItems = useMemo(() => {
     // 市场目录顺序与新标签页推荐顺序不同；复用推荐配置，未推荐项稳定排到末尾。
     const ranks = new Map<string, number>();
@@ -146,30 +148,32 @@ export function PluginStoreListView({
     <div className="space-y-6" data-testid="plugin-store-list">
       {/* 对齐原型：来源分段在左、搜索右对齐同一行；搜索及专区均限定当前来源。 */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <SegmentPill
-            active={segment === "public"}
-            testId="plugin-store-segment-public"
-            label={intl.formatMessage({
-              id: "settings.plugins.store.segment.public",
-            })}
-            onClick={() => onSegmentChange("public")}
-          />
-          <SegmentPill
-            active={segment === "community"}
-            testId="plugin-store-segment-community"
-            label={intl.formatMessage({ id: "settings.plugins.store.segment.community" })}
-            onClick={() => onSegmentChange("community")}
-          />
-          <SegmentPill
-            active={segment === "personal"}
-            testId="plugin-store-segment-personal"
-            label={intl.formatMessage({
-              id: "settings.plugins.store.segment.personal",
-            })}
-            onClick={() => onSegmentChange("personal")}
-          />
-        </div>
+        {!selfHostedBuild && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <SegmentPill
+              active={segment === "public"}
+              testId="plugin-store-segment-public"
+              label={intl.formatMessage({
+                id: "settings.plugins.store.segment.public",
+              })}
+              onClick={() => onSegmentChange("public")}
+            />
+            <SegmentPill
+              active={segment === "community"}
+              testId="plugin-store-segment-community"
+              label={intl.formatMessage({ id: "settings.plugins.store.segment.community" })}
+              onClick={() => onSegmentChange("community")}
+            />
+            <SegmentPill
+              active={segment === "personal"}
+              testId="plugin-store-segment-personal"
+              label={intl.formatMessage({
+                id: "settings.plugins.store.segment.personal",
+              })}
+              onClick={() => onSegmentChange("personal")}
+            />
+          </div>
+        )}
         <SettingsSearchInput
           data-testid="plugin-store-search"
           containerClassName="ml-auto min-w-0 flex-[1_1_14rem] sm:max-w-xs"
@@ -220,7 +224,11 @@ export function PluginStoreListView({
             <CardGrid items={searchResults} actions={actions} locale={locale} />
           )}
         </StoreSection>
-      ) : segment !== "personal" ? (
+      ) : loading && selfHostedBuild && personalGroups.length === 0 ? (
+        <p className="text-ui-base text-foreground-subtle">
+          {intl.formatMessage({ id: "common.loading" })}
+        </p>
+      ) : !selfHostedBuild && segment !== "personal" ? (
         <>
           {segment === "community" && segmentItems.length === 0 && !loading ? (
             <p

@@ -16,6 +16,7 @@ interface UsePluginUninstallInput {
 export interface PluginUninstallController {
   pendingPlugin: ZCodePluginInfo | ZCodeInstalledPluginSummary | null;
   uninstalling: boolean;
+  error: string | null;
   requestUninstall: (pluginId: string) => void;
   cancelUninstall: () => void;
   confirmUninstall: () => Promise<void>;
@@ -35,6 +36,7 @@ export function usePluginUninstall({
 }: UsePluginUninstallInput): PluginUninstallController {
   const uninstallPlugin = store((state) => state.uninstallPlugin);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const pendingPlugin = useMemo(() => {
     if (!pendingId) return null;
@@ -50,6 +52,7 @@ export function usePluginUninstall({
     activeOperations.some((operation) => operation.id === `plugin:uninstall:${pendingId}`);
 
   const requestUninstall = useCallback((pluginId: string) => {
+    setError(null);
     setPendingId(pluginId);
   }, []);
 
@@ -59,11 +62,23 @@ export function usePluginUninstall({
 
   const confirmUninstall = useCallback(async () => {
     if (!pendingId) return;
+    setError(null);
     await uninstallPlugin(pendingId, pluginService);
-    if (store.getState().error) return;
+    const failure = store.getState().error;
+    if (failure) {
+      setError(failure);
+      return;
+    }
     await onAfterUninstall();
     setPendingId(null);
   }, [pluginService, onAfterUninstall, pendingId, store, uninstallPlugin]);
 
-  return { pendingPlugin, uninstalling, requestUninstall, cancelUninstall, confirmUninstall };
+  return {
+    pendingPlugin,
+    uninstalling,
+    error,
+    requestUninstall,
+    cancelUninstall,
+    confirmUninstall,
+  };
 }

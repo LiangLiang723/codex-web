@@ -1,3 +1,4 @@
+import type { ICodexAppsService } from "@zcode/shared";
 import type { IRemoteProjectService } from "#src/remote-projects/contract.js";
 import type { ITaskGroupService } from "#src/task-groups/contract.js";
 import type { WindowProjectDirectoryServices } from "#src/window-project-directory/contract.js";
@@ -65,6 +66,8 @@ import type { IConversationShareService } from "./conversation-share/conversatio
 
 /** UI 层消费的统一服务接口 */
 export interface IServiceAccessor {
+  /** 绑定当前已验证的 SSH 主机，仅自托管 Codex 提供。 */
+  readonly codexAppsService?: ICodexAppsService;
   readonly taskGroupService?: ITaskGroupService;
   readonly projectService?: IProjectService;
   /** 受管 worktree 管理；仅本地桌面 Host 提供，手机与旧 Host 缺省。 */

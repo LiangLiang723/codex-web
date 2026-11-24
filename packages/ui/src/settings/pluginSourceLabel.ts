@@ -35,7 +35,7 @@ export function resolvePluginSourceLabel(input: {
   claudeCodePluginsLabel: string;
   formatFromMarketplace: (marketplaceName: string) => string;
 }): string {
-  if (input.source !== MARKETPLACE_INSTALLED_SOURCE) {
+  if (input.source !== MARKETPLACE_INSTALLED_SOURCE && input.source !== "codex-account") {
     return input.builtinLabel;
   }
   const marketplaceName = resolveMarketplaceDisplayName(

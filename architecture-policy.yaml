@@ -2050,6 +2050,33 @@ modules:
       adapters: .
     owner: selfhost
 
+  # codex-apps-contract：由 architecture:adopt 登记
+  - id: codex-apps-contract
+    roots:
+      - packages/shared/src/codex-apps
+    managed: true
+    requires: []
+    publicEntrypoints:
+      - packages/shared/src/codex-apps/index.ts
+      - packages/shared/src/codex-apps/contract.ts
+    layers:
+      domain: .
+    owner: selfhost
+  # codex-apps-settings：由 architecture:adopt 登记
+  - id: codex-apps-settings
+    roots:
+      - packages/ui/src/settings/codex-apps
+    managed: true
+    requires:
+      - shared
+      - ui
+    publicEntrypoints:
+      - packages/ui/src/settings/codex-apps/index.ts
+      - packages/ui/src/settings/codex-apps/contract.ts
+    layers:
+      ui: .
+    owner: settings
+
 global:
   # 临时时间戳（2026-09-10）：unmanaged-new-file 只约束此日期之后首次入库的文件。
   # 基于领先 staging 很多的分支开工时，merge-base 之前的"新增"文件不应被追溯。

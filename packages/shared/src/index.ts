@@ -415,6 +415,7 @@ export * from "./attachment-source.js";
 
 export * from "./channel-mention.js";
 export * from "./plugin-store-visibility.js";
+export * from "./codex-apps/index.js";
 
 export {
   requestSecuritySensitiveHeaders,
