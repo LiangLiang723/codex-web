@@ -8,4 +8,4 @@ if [ ! -f .env ]; then
   (set -C; printf 'CODEX_GATEWAY_CONFIG_SECRET=%s\nCODEX_WEB_PORT=33723\nCODEX_WEB_BIND=127.0.0.1\n' "$secret" > .env)
 fi
 chmod 600 .env
-printf '%s\n' '配置已就绪。使用 docker compose up -d --build 启动。'
+printf '%s\n' '配置已就绪。使用 sh selfhost/update.sh 启动。'

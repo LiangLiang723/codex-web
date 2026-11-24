@@ -9,7 +9,7 @@
 ```sh
 git submodule update --init --recursive
 sh selfhost/setup.sh
-docker compose up -d --build
+sh selfhost/update.sh
 docker compose ps
 ```
 
@@ -39,8 +39,10 @@ ssh -N -L 33723:127.0.0.1:33723 admin@agents.example.net
 ```sh
 docker load -i /path/to/zcode-web-linux-amd64.tar.gz
 sh selfhost/setup.sh
-docker compose up -d --no-build
+sh selfhost/update.sh --no-build
 ```
+
+每次用 `selfhost/update.sh` 更新时，Compose 在 `codex-web` 健康后清理 `zcode-selfhost` 仓库下已被替换的镜像，并用 `zcode-selfhost:rollback` 保留上一版健康镜像。通过其他流程切换版本时，验收后可在同一部署目录运行 `sh selfhost/update.sh --cleanup zcode-selfhost:<上一版标签>`。镜像通过 Mac 或其他构建机中转时，发布完成后清除该次构建和上传的临时目录、旧归档，以及构建机上明确已用完的候选镜像。服务端的 SQLite、SSH 配置、数据卷和备份有各自的保留周期。
 
 ## 连接和切换主机
 
