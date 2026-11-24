@@ -2171,7 +2171,8 @@ export function SelfhostConversationStatusPanel(props: SelfhostConversationStatu
       ref={root}
       aria-label={title}
       data-status-placement={inline ? "inline" : "trigger"}
-      className="peer/session-status absolute right-3 top-2 z-30"
+      // 桌面浮层和锚点一起向内留出对话滚动条的命中空间。
+      className={cn("peer/session-status absolute top-2 z-30", mobile ? "right-3" : "right-6")}
     >
       {mobile ? (
         <BottomSheet open={open} onOpenChange={setOpen}>

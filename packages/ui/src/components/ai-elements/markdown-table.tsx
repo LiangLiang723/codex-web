@@ -157,7 +157,10 @@ function getMarkdownTableRootInlineInsets(root: HTMLElement) {
   if (typeof window !== "undefined" && root.matches('[data-markdown-table-layout-root="true"]')) {
     return {
       leftInset: readCssPixelValue(root, MARKDOWN_TABLE_LAYOUT_LEFT_INSET_PROPERTY),
-      rightInset: readCssPixelValue(root, MARKDOWN_TABLE_LAYOUT_RIGHT_INSET_PROPERTY),
+      // 状态栏展开后，滚动视口延伸到会话右侧；表格的借位仍受内容内边距约束。
+      rightInset:
+        readCssPixelValue(root, MARKDOWN_TABLE_LAYOUT_RIGHT_INSET_PROPERTY) +
+        readCssPixelValue(root, "padding-right"),
     };
   }
 

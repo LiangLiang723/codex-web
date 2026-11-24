@@ -1958,7 +1958,8 @@ function ConversationTimelineImpl({
       ref={timelineRootRef}
       className={cn(
         "relative flex min-h-0 flex-1 flex-col",
-        "peer-data-[status-placement=inline]/session-status:mr-80 peer-data-[status-placement=trigger]/session-status:pt-11",
+        "mr-[var(--v4-status-panel-inset)] [--v4-status-panel-inset:0px]",
+        "peer-data-[status-placement=inline]/session-status:[--v4-status-panel-inset:21rem] peer-data-[status-placement=trigger]/session-status:pt-11",
         compactForRemoteControl && "min-w-0",
         // 原先消息层的 mask 靠 scroll 回调追赶合成滚动，快速滚动会闪黑并漏字。
         // 把底部留白移到视口外，由原生 overflow 裁剪；输入框仍在同一视口内 sticky。
@@ -2025,6 +2026,9 @@ function ConversationTimelineImpl({
           // 只声明 overflow-y-auto 会让浏览器把横轴计算为 auto，宽内容会把
           // 整条 Conversation 撑出横向滚动；表格和代码块应由各自内部容器滚动。
           "min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable_both-edges] [--markdown-table-layout-left-inset:16px] [--markdown-table-layout-right-inset:16px] max-md:[--markdown-table-layout-left-inset:8px] max-md:[--markdown-table-layout-right-inset:8px]",
+          // 状态栏留位曾把原生滚动条也推到内侧。将滚动视口延伸到会话边缘，
+          // 用等量内边距给消息与输入区留位，时间线根继续约束浮动控件。
+          "mr-[calc(-1*var(--v4-status-panel-inset))] pr-[var(--v4-status-panel-inset)]",
           // 分享选择面板展开时改为 overflow-hidden：scrollTop 与 scrollbar-gutter 都保持不变，
           // 但原生滚动条、滚轮和键盘翻页都不再能移动背景，勾选目标不会漂走。
           backgroundScrollLocked && "!overflow-y-hidden",
