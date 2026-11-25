@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ComponentPropsWithoutRef } from "react";
-import { BotAvatar } from "@/brand/index.js";
+import { BotAvatar, useBotActivity } from "@/brand/index.js";
 import { cn } from "@/components/lib/utils.js";
 import { formatRunningWorkDuration } from "@/lib/workDuration.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
@@ -20,6 +20,7 @@ export function ChatLoading({
   ...props
 }: ChatLoadingProps) {
   const { intl, locale } = useZCodeIntl();
+  const activity = useBotActivity();
   const [elapsedMs, setElapsedMs] = useState(initialElapsedMs);
   const baselineRef = useRef<{ elapsedMs: number; startedAt: number } | null>(null);
   useEffect(() => {
@@ -57,9 +58,15 @@ export function ChatLoading({
       {...props}
       className={cn("inline-flex w-fit items-center gap-2", className)}
     >
-      {/* 与摘要保持相同的 16px 图标槽，替换动效时不改变文字对齐。 */}
-      <span data-chat-loading-icon className="flex size-4 shrink-0 items-center justify-center">
-        <BotAvatar className="size-4" mood="working" animated />
+      {/* 原生形变会跨过旧的放大视口。工作与思考使用同尺寸的完整画布。 */}
+      <span data-chat-loading-icon className="flex size-5 shrink-0 items-center justify-center">
+        <BotAvatar
+          className="size-5"
+          mood="working"
+          animated
+          renderSize={20}
+          motion={activity && activity.activity !== "idle" ? activity.motion : "working"}
+        />
       </span>
       <span className="animated-gradient-text animated-gradient-text-foreground text-ui-base font-normal motion-reduce:animate-none!">
         {intl.formatMessage({ id: "chat.loading.working" })}

@@ -109,7 +109,9 @@ import {
 } from "@/settings-search/index.js";
 import { resolveComputerUseAvailability } from "@/settings/computerUseAvailability.js";
 import { MigrationSection } from "@/settings/MigrationSection.js";
-import { SETTINGS_FRAME_CONTENT_CLASSNAME } from "@/settings/SettingsPageParts.js";
+import { SETTINGS_FRAME_CONTENT_CLASSNAME, SettingsRow } from "@/settings/SettingsPageParts.js";
+import { Switch } from "@/components/ui/switch.js";
+import { BotStudio } from "@/brand/index.js";
 import {
   SettingsBreadcrumbProvider,
   SettingsHeaderBreadcrumb,
@@ -344,7 +346,7 @@ export function SettingsPage({
   onLogout?: () => void;
   user?: UserInfo | null;
 }) {
-  const { intl, localePreference, setLocalePreference } = useZCodeIntl();
+  const { intl, locale, localePreference, setLocalePreference } = useZCodeIntl();
   const { settingsSectionGroups, settingsSections } = useMemo(
     () =>
       createSettingsPageConfig({
@@ -457,6 +459,10 @@ export function SettingsPage({
   const setInterfaceMode = useSetInterfaceModeWithTelemetry(platform, "app.setting");
   const theme = useZCodeStore((state) => state.theme);
   const setTheme = useZCodeStore((state) => state.setTheme);
+  const conversationPetEnabled = useZCodeStore((state) => state.conversationPetEnabled);
+  const setConversationPetEnabled = useZCodeStore((state) => state.setConversationPetEnabled);
+  const petPreferences = useZCodeStore((state) => state.conversationPetPreferences);
+  const setPetPreferences = useZCodeStore((state) => state.setConversationPetPreferences);
   const codePreviewSettings = useZCodeStore((state) => state.codePreviewSettings);
   const setCodePreviewSettings = useZCodeStore((state) => state.setCodePreviewSettings);
   const fontSmoothingEnabled = useZCodeStore((state) => state.fontSmoothingEnabled);
@@ -2077,6 +2083,48 @@ export function SettingsPage({
                                 })}
                               </p>
                             )
+                          ) : activeSection === "conversationPet" ? (
+                            <div className="space-y-5">
+                              <BotStudio
+                                locale={locale}
+                                preferences={petPreferences}
+                                onChange={setPetPreferences}
+                                format={(key, values) =>
+                                  intl.formatMessage({ id: `settings.botStudio.${key}` }, values)
+                                }
+                              />
+                              <div className="rounded-xl border border-border">
+                                <SettingsRow
+                                  searchId="settings.conversationPet"
+                                  label={intl.formatMessage({ id: "settings.conversationPet" })}
+                                  description={intl.formatMessage({ id: "settings.conversationPetDescription" })}
+                                  control={
+                                    <Switch
+                                      aria-label={intl.formatMessage({ id: "settings.conversationPet" })}
+                                      checked={conversationPetEnabled}
+                                      onCheckedChange={setConversationPetEnabled}
+                                    />
+                                  }
+                                />
+                                {(["followPointer", "idleMotion", "clickReactions"] as const).map((key) => {
+                                  const label = intl.formatMessage({ id: `settings.botStudio.${key}` });
+                                  return (
+                                    <SettingsRow
+                                      key={key}
+                                      label={label}
+                                      control={
+                                        <Switch
+                                          data-testid={`bot-studio-${key}`}
+                                          aria-label={label}
+                                          checked={petPreferences[key]}
+                                          onCheckedChange={(checked) => setPetPreferences({ [key]: checked })}
+                                        />
+                                      }
+                                    />
+                                  );
+                                })}
+                              </div>
+                            </div>
                           ) : activeSection === "appearance" ? (
                             <AppearanceSectionContent
                               isMacDesktop={Boolean(isDesktop && isMacDesktop)}

@@ -30,6 +30,7 @@ type PetCue =
   | ConversationPetActivity
   | "finished"
   | "failed"
+  | "alerting"
   | "waking"
   | "listening"
   | (typeof idleTimeline)[number]["motion"]
@@ -42,15 +43,22 @@ export function usePetBehavior(
   completion: ConversationPetProps["completion"],
   conversationKey: ConversationPetProps["conversationKey"],
   onComposerActivity: ConversationPetProps["onComposerActivity"],
+  { idleMotion, clickReactions }: ConversationPetProps["preferences"],
 ) {
   const [displayed, setDisplayed] = useState<PetCue>("idle");
-  const last = useRef({ activity, conversationKey });
+  const last = useRef({ activity, conversationKey, activeSince: 0 });
   const interact = useRef<(() => void) | null>(null);
   const reactionIndex = useRef(0);
 
   useEffect(() => {
     const previous = last.current;
-    last.current = { activity, conversationKey };
+    const sameConversation = previous.conversationKey === conversationKey;
+    const now = performance.now();
+    last.current = {
+      activity,
+      conversationKey,
+      activeSince: activity === "idle" ? 0 : (sameConversation && previous.activeSince) || now,
+    };
     const pane = pet.current?.parentElement;
     if (!enabled || !pane || activity !== "idle") {
       setDisplayed("idle");
@@ -72,6 +80,10 @@ export function usePetBehavior(
     const rest = () => {
       window.clearTimeout(timer);
       if (document.hidden) return;
+      if (!idleMotion) {
+        show("idle");
+        return;
+      }
       const elapsed = performance.now() - idleSince;
       show(idleTimeline.findLast(({ at }) => at <= elapsed)?.motion ?? "idle");
       const upcoming = idleTimeline.find(({ at }) => at > elapsed);
@@ -82,11 +94,11 @@ export function usePetBehavior(
       idleSince = performance.now();
       rest();
     };
-    const play = (motion: PetCue, duration: number) => {
+    const play = (motion: PetCue, duration: number, next = restartIdle) => {
       window.clearTimeout(timer);
       cuePlaying = true;
       show(motion);
-      timer = window.setTimeout(restartIdle, duration);
+      timer = window.setTimeout(next, duration);
     };
     const presence = () => {
       if (cuePlaying || performance.now() - idleSince < 300) return;
@@ -98,7 +110,7 @@ export function usePetBehavior(
       if (document.hidden) window.clearTimeout(timer);
       else restartIdle();
     };
-    interact.current = () => {
+    interact.current = clickReactions ? () => {
       if (cue === "sleeping" || cue === "drowsy") {
         play("waking", 1700);
         return;
@@ -106,9 +118,15 @@ export function usePetBehavior(
       const reaction = reactions[reactionIndex.current % reactions.length]!;
       reactionIndex.current++;
       play(reaction.motion, reaction.duration);
-    };
-    if (completedHere) play(completedHere, completedHere === "finished" ? 6200 : 3500);
-    else rest();
+    } : null;
+    if (completedHere === "finished") {
+      const longTurn = previous.activeSince > 0 && now - previous.activeSince >= 20_000;
+      play("finished", 6200, longTurn ? () => play("celebrate", 6300) : restartIdle);
+    } else if (completedHere === "failed") {
+      play("failed", 3500, () => play("alerting", 1700));
+    } else {
+      rest();
+    }
 
     pane.addEventListener("pointermove", presence, { passive: true });
     pane.addEventListener("focusin", presence);
@@ -121,7 +139,7 @@ export function usePetBehavior(
       pane.removeEventListener("focusin", presence);
       document.removeEventListener("visibilitychange", visibility);
     };
-  }, [activity, completion, conversationKey, enabled, onComposerActivity, pet]);
+  }, [activity, clickReactions, completion, conversationKey, enabled, idleMotion, onComposerActivity, pet]);
 
   return { motion: activity === "idle" ? displayed : activity, interact };
 }

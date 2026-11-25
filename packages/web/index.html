@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#161616" />
     <meta name="color-scheme" content="dark" />
-    <link rel="icon" type="image/svg+xml" href="/codex-bot-dark.svg" data-codex-bot-favicon />
+    <link rel="icon" type="image/svg+xml" href="/codex-bot-dark.svg?v=3" data-codex-bot-favicon />
     <title>Codex Web</title>
     <script>
       (() => {
@@ -35,7 +35,7 @@
             ?.setAttribute("content", BROWSER_THEME_COLORS[theme]);
           document.querySelector('meta[name="color-scheme"]')?.setAttribute("content", theme);
           const icon = document.querySelector("link[data-codex-bot-favicon]");
-          if (icon) icon.href = new URL(`codex-bot-${theme}.svg`, icon.href).href;
+          if (icon) icon.href = new URL(`codex-bot-${theme}.svg?v=3`, icon.href).href;
         };
 
         try {

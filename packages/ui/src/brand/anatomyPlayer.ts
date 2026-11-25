@@ -1,13 +1,17 @@
 import { useEffect, useState } from "react";
+import type { BotShape } from "./contract.js";
 
 interface AnatomyPlayer {
   setState: (state: string) => void;
+  poke: (motion: "bounce") => void;
   destroy: () => void;
 }
 
 interface AnatomyProfile {
   clips: string[];
   lifecycleGroups: { label: string; states: string[] }[];
+  shapes: BotShape[];
+  states: Record<string, { clips: string[]; face?: string; morph?: string; next?: string; holdSeconds?: number }>;
   createBot: (
     container: SVGElement,
     options: {
@@ -18,6 +22,10 @@ interface AnatomyProfile {
       follow: boolean;
       staticMode: boolean;
       reducedMotion: boolean;
+      shape: BotShape;
+      frontFacing: boolean;
+      maxFps: number;
+      firstPhase?: number;
       theme: { inkPaint: string; spotPaint: string; cutout: boolean };
     },
   ) => AnatomyPlayer;

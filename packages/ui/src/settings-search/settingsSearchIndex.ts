@@ -202,7 +202,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "settings.conversationPet",
-    section: "appearance",
+    section: "conversationPet",
     description: "settings.conversationPetDescription",
     visibility: "selfHosted",
   },

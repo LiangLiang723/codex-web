@@ -1,6 +1,48 @@
 import type { ComponentPropsWithoutRef, RefObject } from "react";
 
 export type BotMood = "idle" | "thinking" | "working";
+export const BOT_SHAPE_NAMES = [
+  "sphere", "cloud", "square", "sparkle", "clover", "heartChubby", "starFlower", "teardrop",
+  "tablet", "wedge", "house", "star6", "pebble", "bean", "egg", "squircle", "capsule", "cylinder",
+  "hex", "gem", "crystal", "shield", "dome", "arch", "leaf",
+] as const;
+export type BotShape = (typeof BOT_SHAPE_NAMES)[number];
+export const BOT_SIZES = { small: 0.8, regular: 1, large: 1.22 } as const;
+
+export interface ConversationPetPreferences {
+  shape: BotShape;
+  color: string | null;
+  size: keyof typeof BOT_SIZES;
+  followPointer: boolean;
+  idleMotion: boolean;
+  clickReactions: boolean;
+}
+
+export const DEFAULT_PET_PREFERENCES: ConversationPetPreferences = {
+  shape: "sphere",
+  color: null,
+  size: "regular",
+  followPointer: true,
+  idleMotion: true,
+  clickReactions: true,
+};
+
+export function normalizePetPreferences(value: unknown): ConversationPetPreferences {
+  const saved = value && typeof value === "object"
+    ? (value as Partial<ConversationPetPreferences>)
+    : DEFAULT_PET_PREFERENCES;
+  return {
+    shape: saved.shape && BOT_SHAPE_NAMES.includes(saved.shape) ? saved.shape : "sphere",
+    color: typeof saved.color === "string" && /^#[0-9a-f]{6}$/iu.test(saved.color)
+      ? saved.color.toLowerCase()
+      : null,
+    size: saved.size && Object.hasOwn(BOT_SIZES, saved.size) ? saved.size : "regular",
+    followPointer: saved.followPointer !== false,
+    idleMotion: saved.idleMotion !== false,
+    clickReactions: saved.clickReactions !== false,
+  };
+}
+
 export type ConversationPetActivity =
   | BotMood
   | "sending"
@@ -10,17 +52,29 @@ export type ConversationPetActivity =
   | "reading"
   | "writing"
   | "running"
-  | "spawning";
+  | "spawning"
+  | "coding"
+  | "computing"
+  | "controlling"
+  | "loading"
+  | "waiting";
 
 export interface BotAvatarProps extends Omit<
   ComponentPropsWithoutRef<"svg">,
-  "viewBox" | "children"
+  "viewBox" | "children" | "color" | "scale"
 > {
   mood?: BotMood;
   animated?: boolean;
   followPointer?: boolean;
   motion?: string;
   explicitPlayback?: boolean;
+  shape?: BotShape;
+  color?: string | null;
+  scale?: number;
+  renderSize?: number;
+  frontFacing?: boolean;
+  seed?: string;
+  pokeCount?: number;
 }
 
 export interface ConversationPetProps {
@@ -31,10 +85,12 @@ export interface ConversationPetProps {
   conversationKey: string | null;
   interactionLabel: string;
   onComposerActivity: RefObject<(() => void) | null>;
+  preferences: ConversationPetPreferences;
 }
 
-export interface BotMotionPreviewProps {
-  label: string;
-  allClipsLabel: string;
-  clipsLabel: string;
+export interface BotStudioProps {
+  locale: string;
+  preferences: ConversationPetPreferences;
+  onChange: (preferences: Partial<ConversationPetPreferences>) => void;
+  format: (key: string, values?: Record<string, string | number>) => string;
 }

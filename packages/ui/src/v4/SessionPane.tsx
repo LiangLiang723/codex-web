@@ -1,6 +1,6 @@
 import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
-import { ConversationPet } from "@/brand/index.js";
-import type { ConversationPetActivity } from "@/brand/contract.js";
+import { BotActivityProvider, ConversationPet } from "@/brand/index.js";
+import { DEFAULT_PET_PREFERENCES, type ConversationPetActivity } from "@/brand/contract.js";
 import { GitBranchActionsHost } from "@/GitBranchSwitcher.js";
 import { completeNewModelSelection } from "@zcode/provider";
 import { useSubagents } from "@/hooks/useSubagents.js";
@@ -9,6 +9,7 @@ import { ToolPresentationCapabilitiesProvider } from "@/ToolCallBlocks/presentat
 import { V4_PRIMARY_PANE_ID } from "@/v4/paneLayoutStore.js";
 import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
 import { useSessionRuntimeRestart } from "@/app-shell/useWorkspaceSessionReload.js";
+import { isZCodeCuaToolName } from "@/lib/cuaPermissionAction.js";
 import { isRequestVerificationConfigNetworkError } from "@/request-security-edition/errors.js";
 import { useShallow } from "zustand/react/shallow";
 import { remoteHostIdFromWorkspaceIdentity } from "@zcode/shared";
@@ -5630,6 +5631,10 @@ export function SessionPane({
   const editActionsEnabled = runtimeReady && !readOnly && !selectionSideChat && Boolean(sessionId);
   const isDraft = sessionId === null;
   const petEnabled = useZCodeStoreWithDefault((store) => store.conversationPetEnabled, true);
+  const petPreferences = useZCodeStoreWithDefault(
+    (store) => store.conversationPetPreferences,
+    DEFAULT_PET_PREFERENCES,
+  );
   // 滚动恢复必须使用与 sessionId 匹配的 lease projection。切换 session 的 render 与
   // passive effect 不在同一时刻，旧 lease 的 rows 若提前交给 timeline，会让新记忆按旧
   // 内容高度 clamp，后续目标 rows 到达时也无法区分这次临时落点。
@@ -6825,7 +6830,7 @@ export function SessionPane({
     !errored &&
     !isFloatingPresentation &&
     !shareSelectionPanelVisible;
-  const petPhase = showConversationPet && !isDraft ? snapshot?.control.phase : undefined;
+  const petPhase = !isDraft ? snapshot?.control.phase : undefined;
   const currentPetRow =
     petPhase === "running"
       ? snapshot?.rows.window.findLast((row) =>
@@ -6837,7 +6842,7 @@ export function SessionPane({
         )
       : undefined;
   let petActivity: ConversationPetActivity = "idle";
-  if (showConversationPet && !isDraft && blockingInteractionId) petActivity = "blocked";
+  if (!isDraft && blockingInteractionId) petActivity = "blocked";
   else if (petPhase === "running") {
     if (currentPetRow?.kind === "reasoning") petActivity = "thinking";
     else if (currentPetRow?.kind === "assistantText") petActivity = "streaming";
@@ -6847,7 +6852,18 @@ export function SessionPane({
       if (/^(websearch|searchweb|grep|glob|rg)$/u.test(name)) petActivity = "searching";
       else if (/^(bash|shell|terminal|execcommand|commandexecution)$/u.test(name)) {
         petActivity = "running";
-      } else if (/^(filechange|applypatch|edit|write|writefile)$/u.test(name)) {
+      } else if (
+        currentPetRow.cuaApp ||
+        isZCodeCuaToolName(currentPetRow.toolName) ||
+        name === "cua" ||
+        name.includes("browseruse")
+      ) {
+        petActivity = "controlling";
+      } else if (/^(noderepl|calculator|calculate)$/u.test(name)) {
+        petActivity = "computing";
+      } else if (/^(filechange|applypatch|edit)$/u.test(name)) {
+        petActivity = "coding";
+      } else if (/^(write|writefile)$/u.test(name)) {
         petActivity = "writing";
       } else if (/^(read|readfile|listdirectory)$/u.test(name)) {
         petActivity = "reading";
@@ -6856,6 +6872,8 @@ export function SessionPane({
       } else petActivity = "working";
     } else petActivity = "working";
   } else if (petPhase === "prewarming" || composerInputPending) petActivity = "sending";
+  else if (showConversationPet && (draftRuntimeRebuilding || modelSelectionPending)) petActivity = "loading";
+  else if (showConversationPet && visibleQueue?.items.length) petActivity = "waiting";
   const conversationBottomDock = conversationBottomDockContent ? (
     <>
       {showConversationPet && !isDraft ? (
@@ -7190,6 +7208,7 @@ export function SessionPane({
                 conversationKey={isDraft ? null : `${workspaceKey}\u0000${sessionId}`}
                 interactionLabel={intl.formatMessage({ id: "settings.conversationPet" })}
                 onComposerActivity={notifyPetComposerActivity}
+                preferences={petPreferences}
               />
             </>
           ) : null}
@@ -7206,7 +7225,9 @@ export function SessionPane({
         dirtyFileCount={gitDirtyFileCount ?? 0}
         onRefreshGit={onRefreshGit}
       >
-        {paneContent}
+        <BotActivityProvider enabled={selfHostedBuild} scope={`${workspaceKey}\u0000${sessionId}`} activity={petActivity}>
+          {paneContent}
+        </BotActivityProvider>
       </GitBranchActionsHost>
     </ToolPresentationCapabilitiesProvider>
   );

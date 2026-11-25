@@ -16,6 +16,14 @@ function AnatomyAvatar({
   followPointer = false,
   motion = mood,
   explicitPlayback = false,
+  shape = "sphere",
+  color,
+  scale = 1,
+  renderSize = 300,
+  frontFacing = false,
+  seed = "hero",
+  pokeCount,
+  style,
   className = "",
   ...props
 }: BotAvatarProps & { profile: NonNullable<ReturnType<typeof useBotAnatomy>> }) {
@@ -30,13 +38,17 @@ function AnatomyAvatar({
     const mountPlayer = () => {
       player.current?.destroy();
       player.current = profile.createBot(element, {
-        size: 300,
+        size: renderSize,
         state: startingMotion(),
-        compact: !followPointer && !explicitPlayback,
-        seed: "hero",
+        compact: renderSize < 48,
+        shape,
+        seed,
+        frontFacing,
         follow: followPointer,
         staticMode: !animated,
         reducedMotion: reduced.matches && !explicitPlayback,
+        maxFps: followPointer || explicitPlayback ? 60 : 30,
+        firstPhase: explicitPlayback ? 0 : undefined,
         theme: { inkPaint: "currentColor", spotPaint: "currentColor", cutout: true },
       });
     };
@@ -47,19 +59,26 @@ function AnatomyAvatar({
       player.current?.destroy();
       player.current = null;
     };
-  }, [animated, explicitPlayback, followPointer, profile]);
+  }, [animated, explicitPlayback, followPointer, frontFacing, profile, renderSize, seed, shape]);
 
   useEffect(() => {
     player.current?.setState(motion);
   }, [motion]);
+  useEffect(() => {
+    if (pokeCount) player.current?.poke("bounce");
+  }, [pokeCount]);
 
+  const viewport = renderSize / scale;
+  const inset = (renderSize - viewport) / 2;
   return (
     <svg
       {...props}
       data-codex-bot={mood}
       data-bot-motion={motion}
       data-bot-engine="anatomy"
-      viewBox="0 0 300 300"
+      data-bot-shape={shape}
+      viewBox={`${inset} ${inset} ${viewport} ${viewport}`}
+      style={color ? { ...style, color } : style}
       aria-hidden="true"
       focusable="false"
       className={`block shrink-0 ${className}`}
@@ -75,6 +94,14 @@ function FallbackAvatar({
   followPointer = false,
   motion: _motion,
   explicitPlayback: _explicitPlayback,
+  shape: _shape,
+  color,
+  scale = 1,
+  renderSize: _renderSize,
+  frontFacing: _frontFacing,
+  seed: _seed,
+  pokeCount: _pokeCount,
+  style,
   className = "",
   ...props
 }: BotAvatarProps) {
@@ -158,6 +185,7 @@ function FallbackAvatar({
       ref={svgRef}
       data-codex-bot={mood}
       viewBox={BOT_VIEW_BOX}
+      style={{ ...style, ...(color ? { color } : {}), ...(scale !== 1 ? { scale } : {}) }}
       aria-hidden="true"
       focusable="false"
       className={`block shrink-0 ${className}`}

@@ -45,6 +45,11 @@ import {
   type InterfaceMode,
 } from "@/lib/interfaceMode.js";
 import { logger } from "@/logger.js";
+import {
+  DEFAULT_PET_PREFERENCES,
+  normalizePetPreferences,
+  type ConversationPetPreferences,
+} from "@/brand/contract.js";
 
 export type LoginEntryPurpose = "app-login";
 
@@ -68,6 +73,17 @@ export interface LoginEntryAttempt {
 }
 
 const CONVERSATION_PET_STORAGE_KEY = "codex-web:conversation-pet";
+const CONVERSATION_PET_PREFERENCES_KEY = "codex-web:conversation-pet-preferences";
+
+function loadConversationPetPreferences(): ConversationPetPreferences {
+  const saved = readSafeLocalStorage(CONVERSATION_PET_PREFERENCES_KEY);
+  if (!saved) return DEFAULT_PET_PREFERENCES;
+  try {
+    return normalizePetPreferences(JSON.parse(saved));
+  } catch {
+    return DEFAULT_PET_PREFERENCES;
+  }
+}
 const CODE_PREVIEW_SETTINGS_KEY = "zcode-code-preview-settings";
 const FONT_SMOOTHING_STORAGE_KEY = "zcode-macos-font-smoothing";
 
@@ -139,6 +155,8 @@ export interface ZCodeState {
 
   conversationPetEnabled: boolean;
   setConversationPetEnabled: (enabled: boolean) => void;
+  conversationPetPreferences: ConversationPetPreferences;
+  setConversationPetPreferences: (settings: Partial<ConversationPetPreferences>) => void;
 
   /** 当前语言 */
   locale: string;
@@ -329,6 +347,12 @@ export function createZCodeStore(
     setConversationPetEnabled: (enabled) => {
       writeSafeLocalStorage(CONVERSATION_PET_STORAGE_KEY, String(enabled));
       set({ conversationPetEnabled: enabled });
+    },
+    conversationPetPreferences: loadConversationPetPreferences(),
+    setConversationPetPreferences: (settings) => {
+      const next = normalizePetPreferences({ ...get().conversationPetPreferences, ...settings });
+      writeSafeLocalStorage(CONVERSATION_PET_PREFERENCES_KEY, JSON.stringify(next));
+      set({ conversationPetPreferences: next });
     },
 
     locale: readSafeLocalStorage("zcode-locale") || "zh-CN",

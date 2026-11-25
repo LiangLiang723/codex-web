@@ -1,7 +1,8 @@
 import { useLayoutEffect, useRef } from "react";
 import { useBotAnatomy } from "./anatomyPlayer.js";
 import { BotAvatar } from "./BotAvatar.js";
-import type { ConversationPetProps } from "./contract.js";
+import { useBotActivity } from "./BotActivity.js";
+import { BOT_SIZES, type ConversationPetProps } from "./contract.js";
 import { usePetBehavior } from "./usePetBehavior.js";
 
 export function ConversationPet({
@@ -12,10 +13,12 @@ export function ConversationPet({
   conversationKey,
   interactionLabel,
   onComposerActivity,
+  preferences,
 }: ConversationPetProps) {
   const petRef = useRef<HTMLDivElement>(null);
   const flight = useRef<Animation | null>(null);
   const hasAnatomy = Boolean(useBotAnatomy());
+  const activityMotion = useBotActivity()?.motion;
   const { motion, interact } = usePetBehavior(
     petRef,
     hasAnatomy,
@@ -23,6 +26,7 @@ export function ConversationPet({
     completion,
     conversationKey,
     onComposerActivity,
+    preferences,
   );
 
   useLayoutEffect(() => {
@@ -133,25 +137,30 @@ export function ConversationPet({
 
   useLayoutEffect(() => () => flight.current?.cancel(), []);
 
+  // 手机建议面板会跨过宠物锚点，桌宠应处于 z-20 的输入层下方。
   return (
     <div
       ref={petRef}
       data-codex-pet=""
-      className="pointer-events-none invisible absolute z-20 aspect-square origin-top-left select-none"
+      aria-hidden={!hasAnatomy || !preferences.clickReactions || undefined}
+      className="pointer-events-none invisible absolute z-10 aspect-square origin-top-left select-none"
     >
       <button
         type="button"
         aria-label={interactionLabel}
         className="size-full rounded-full focus-visible:outline-2 focus-visible:outline-ring enabled:pointer-events-auto"
-        disabled={!hasAnatomy || activity !== "idle"}
+        disabled={!hasAnatomy || !preferences.clickReactions || activity !== "idle"}
         onClick={() => interact.current?.()}
       >
         <BotAvatar
           className="size-full"
           mood={working ? "working" : "idle"}
-          motion={motion}
+          motion={activity === "idle" ? motion : activityMotion ?? activity}
           animated
-          followPointer
+          followPointer={preferences.followPointer}
+          shape={preferences.shape}
+          color={preferences.color}
+          scale={BOT_SIZES[preferences.size]}
         />
       </button>
     </div>

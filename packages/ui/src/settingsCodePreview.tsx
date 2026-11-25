@@ -1,4 +1,3 @@
-import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import type { Theme } from "@/useTheme.js";
 import { useState } from "react";
 import { resolveTheme } from "@/useTheme.js";
@@ -21,10 +20,8 @@ import {
 import { getCodePreviewTheme } from "@/lib/codePreviewPreferences.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import type { CodePreviewSettings } from "@/store/index.js";
-import { useZCodeStore } from "@/store/StoreProvider.js";
 import { THEME_MODES } from "@/settings/settingsPageConfig.js";
 import { MAX_UI_FONT_SIZE_PX, MIN_UI_FONT_SIZE_PX } from "@/lib/uiFontSize.js";
-import { BotMotionPreview } from "@/brand/index.js";
 
 function FontSizeInput({
   value,
@@ -104,11 +101,6 @@ export function AppearanceSectionContent({
 }) {
   const { intl } = useZCodeIntl();
   const activePreviewMode = resolveTheme(theme);
-  const conversationPetEnabled = useZCodeStore((state) => state.conversationPetEnabled);
-  const setConversationPetEnabled = useZCodeStore((state) => state.setConversationPetEnabled);
-  const petLabel = intl.formatMessage({ id: "settings.conversationPet" });
-
-
   return (
     <>
       <div className="min-w-0 space-y-3">
@@ -167,27 +159,6 @@ export function AppearanceSectionContent({
                 />
               }
             />
-            {selfHostedBuild ? (
-              <SettingsRow
-                searchId="settings.conversationPet"
-                label={petLabel}
-                description={intl.formatMessage({ id: "settings.conversationPetDescription" })}
-                control={
-                  <Switch
-                    aria-label={petLabel}
-                    checked={conversationPetEnabled}
-                    onCheckedChange={setConversationPetEnabled}
-                  />
-                }
-              />
-            ) : null}
-            {selfHostedBuild ? (
-              <BotMotionPreview
-                label={intl.formatMessage({ id: "settings.conversationPetMotion" })}
-                allClipsLabel={intl.formatMessage({ id: "settings.conversationPetPlayAll" })}
-                clipsLabel={intl.formatMessage({ id: "settings.conversationPetClips" })}
-              />
-            ) : null}
             {isMacDesktop ? (
               <SettingsRow
                 searchId="settings.fontSmoothing"

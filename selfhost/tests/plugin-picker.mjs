@@ -10,7 +10,7 @@ import { revealPickerItem, revealPickerOption } from "./fixtures/composer-picker
 import {
   verifyAnatomyCatalogue,
   verifyAnatomyMotion,
-  verifyMotionPreview,
+  verifyBrandSettings,
   verifyPetPresence,
 } from "./fixtures/brand-motion.mjs";
 
@@ -365,7 +365,7 @@ async function verify(page, origin) {
   const favicon = page.locator('link[rel="icon"]');
   await page.waitForFunction(() => {
     const href = document.querySelector('link[rel="icon"]')?.getAttribute("href");
-    return href?.endsWith("codex-bot-dark.svg");
+    return href?.endsWith("codex-bot-dark.svg?v=3");
   });
   assert.equal(await canvas.evaluate((node) => getComputedStyle(node).color), "rgb(255, 255, 255)");
   if (anatomyEnabled) {
@@ -639,7 +639,15 @@ async function verify(page, origin) {
   }
   await chip("app:" + app.id).waitFor();
   await page.keyboard.insertText("$review");
-  await activate(dollar.getByTestId("prompt-suggestion-option-skill:" + repoSkill.path));
+  const reviewSkill = dollar.getByTestId("prompt-suggestion-option-skill:" + repoSkill.path);
+  if (mobile) {
+    await reviewSkill.scrollIntoViewIfNeeded();
+    assert(await reviewSkill.evaluate((option) => {
+      const { x, y, width, height } = option.getBoundingClientRect();
+      return option.contains(document.elementFromPoint(x + width / 2, y + height / 2));
+    }), "The pet must stay below the composer suggestion panel on touch screens");
+  }
+  await activate(reviewSkill);
   await chip("skill:" + repoSkill.path).waitFor();
   await page.keyboard.insertText("@plugin-23");
   await activate(at.getByTestId("prompt-suggestion-option-plugin:plugin-23@local"));
@@ -697,43 +705,7 @@ async function verify(page, origin) {
   if (mobile) await activate(page.getByTestId(`task-item-${threadId}`));
   await editor.getByText("管理页往返草稿", { exact: true }).waitFor();
   assert.equal(submissions.length, 2, "extension management must leave the draft unsent");
-  await showTaskList();
-  await activate(page.getByTestId("task-settings-button"));
-  await activate(page.getByTestId("settings-search-open"));
-  await page.getByTestId("settings-search-input").fill("桌宠");
-  await activate(page.locator('[data-settings-search-result="settings.conversationPet"]'));
-  await page.locator('[data-settings-search-id="settings.conversationPet"][data-settings-search-highlighted]').waitFor();
-  const petToggle = page.getByRole("switch", { name: "桌宠", exact: true });
-  assert.equal(await petToggle.getAttribute("aria-checked"), "true");
-  if (anatomyEnabled) {
-    await verifyMotionPreview(page, activate);
-  }
-  await activate(petToggle);
-  assert.equal(await petToggle.getAttribute("aria-checked"), "false");
-  const themeSelect = page.locator('[data-settings-search-id="settings.themeMode"]').getByRole("combobox");
-  await activate(themeSelect);
-  await activate(page.getByRole("option", { name: "浅色", exact: true }));
-  await page.waitForFunction(() =>
-    document.querySelector('link[rel="icon"]')?.getAttribute("href")?.endsWith("codex-bot-light.svg"),
-  );
-  const lightIcon = await favicon.getAttribute("href");
-  assert.match(await (await page.request.get(new URL(lightIcon, origin).href)).text(), /fill="#161616"/);
-  await page.reload({ waitUntil: "commit" });
-  await editor.waitFor();
-  assert.equal(await pet.count(), 0);
-  await showTaskList();
-  await activate(page.getByTestId("task-settings-button"));
-  await activate(page.locator('[data-settings-section-nav="appearance"]'));
-  assert.equal(await petToggle.getAttribute("aria-checked"), "false");
-  await activate(petToggle);
-  assert.equal(await petToggle.getAttribute("aria-checked"), "true");
-  await activate(page.getByTestId("settings-back-button"));
-  if (mobile) {
-    const targetTask = page.getByTestId(`task-item-${threadId}`);
-    await activate(targetTask);
-  }
-  await dockedPet.waitFor();
-  assert.equal(await canvas.evaluate((node) => getComputedStyle(node).color), "rgb(22, 22, 22)");
+  await verifyBrandSettings(page, { activate, showTaskList, origin, threadId, anatomyEnabled });
   await showTaskList();
   await activate(page.getByTestId("task-new-button"));
   await pet.and(page.locator('[data-pet-placement="draft"]')).waitFor();
@@ -742,11 +714,12 @@ async function verify(page, origin) {
   if (!mobile) {
     await activate(page.getByTestId("task-settings-button"));
     await activate(page.locator('[data-settings-section-nav="appearance"]'));
+    const themeSelect = page.locator('[data-settings-search-id="settings.themeMode"]').getByRole("combobox");
     await activate(themeSelect);
     await activate(page.getByRole("option", { name: "系统", exact: true }));
     await page.emulateMedia({ colorScheme: "dark" });
     await page.waitForFunction(() =>
-      document.querySelector('link[rel="icon"]')?.getAttribute("href")?.endsWith("codex-bot-dark.svg"),
+      document.querySelector('link[rel="icon"]')?.getAttribute("href")?.endsWith("codex-bot-dark.svg?v=3"),
     );
   }
   assert.deepEqual(detailQueries, [], "Loading references must make no per-plugin detail calls");

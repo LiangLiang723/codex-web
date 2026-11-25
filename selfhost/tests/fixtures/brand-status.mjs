@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { verifyAnatomyMotion } from "./brand-motion.mjs";
 
 export async function verifyBotStatus(page, pet, emit) {
   const activityTurnId = "bot-activity-fixture";
@@ -21,6 +22,11 @@ export async function verifyBotStatus(page, pet, emit) {
   const anatomyEnabled = (await page.locator('meta[name="codex-bot-anatomy"]').count()) === 1;
   const workingLine = page.locator("[data-chat-loading-icon]");
   await workingLine.locator('[data-codex-bot="working"]').waitFor();
+  if (anatomyEnabled) {
+    assert.equal(await workingLine.locator('[data-codex-bot="working"]').getAttribute("viewBox"), "0 0 20 20");
+    await verifyAnatomyMotion(workingLine.locator('[data-bot-motion="progress"]'));
+    await verifyAnatomyMotion(workingLine.locator('[data-bot-motion="working"]'));
+  }
   await page
     .locator('[data-zcode-chat-loading-animate="true"]')
     .getByText("工作中", { exact: true })
@@ -41,10 +47,21 @@ export async function verifyBotStatus(page, pet, emit) {
     command: "printf fixture",
     status: "inProgress",
   };
+  const computer = {
+    id: "bot-activity-computer",
+    turnId: activityTurnId,
+    type: "mcpToolCall",
+    server: "computer-use",
+    tool: "mcp__plugin_zcode-cua_computer-use__get_app_state",
+    status: "inProgress",
+  };
   if (anatomyEnabled) {
     await pet.locator('[data-bot-engine="anatomy"][data-bot-motion="thinking"]').waitFor();
+    await page.locator('[data-summary-leading-icon][data-bot-motion="curious"]').waitFor();
     emit({ type: "timeline.item.upsert", item: command });
     await pet.locator('[data-bot-engine="anatomy"][data-bot-motion="running"]').waitFor();
+    emit({ type: "timeline.item.upsert", item: computer });
+    await pet.locator('[data-bot-engine="anatomy"][data-bot-motion="controlling"]').waitFor();
   }
   await page.emulateMedia({ reducedMotion: "reduce" });
   const stayedStill = await workingPet
@@ -61,7 +78,13 @@ export async function verifyBotStatus(page, pet, emit) {
     turn: {
       id: activityTurnId,
       status: "completed",
-      items: [activityUser, reasoningItem, ...(anatomyEnabled ? [{ ...command, status: "completed" }] : [])],
+      items: [
+        activityUser,
+        reasoningItem,
+        ...(anatomyEnabled
+          ? [{ ...command, status: "completed" }, { ...computer, status: "completed" }]
+          : []),
+      ],
     },
   });
   await pet.locator('[data-codex-bot="idle"]').waitFor();
