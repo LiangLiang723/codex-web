@@ -1,0 +1,127 @@
+import { useLayoutEffect, useRef } from "react";
+import { BotAvatar } from "./BotAvatar.js";
+import type { ConversationPetProps } from "./contract.js";
+
+export function ConversationPet({ draft, working }: ConversationPetProps) {
+  const petRef = useRef<HTMLDivElement>(null);
+  const flight = useRef<Animation | null>(null);
+
+  useLayoutEffect(() => {
+    const pet = petRef.current;
+    // 子组件 layout effect 可能先于父容器的 ref 赋值。用已挂载桌宠的父节点定位。
+    const pane = pet?.parentElement;
+    if (!pane || !pet) return;
+
+    const selector = draft
+      ? '[data-codex-pet-anchor="draft"]'
+      : '[data-codex-pet-anchor]:not([data-codex-pet-anchor="draft"])';
+    let slots: HTMLElement[] = [];
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+    let statusPanel: HTMLElement | null = null;
+    const place = () => {
+      const anchor = slots.find((slot) => slot.offsetHeight > 0);
+      if (!anchor) {
+        pet.style.visibility = "hidden";
+        return;
+      }
+      const placement = anchor.dataset.codexPetAnchor;
+      const rect = anchor.getBoundingClientRect();
+      const frame = pane.getBoundingClientRect();
+      const nextStatusPanel =
+        placement === "rail"
+          ? pane.querySelector<HTMLElement>('[data-status-placement="inline"]')
+          : null;
+      if (nextStatusPanel !== statusPanel) {
+        if (statusPanel) observer.unobserve(statusPanel);
+        statusPanel = nextStatusPanel;
+        if (statusPanel) observer.observe(statusPanel);
+      }
+      const topLimit = statusPanel ? statusPanel.getBoundingClientRect().bottom + 8 : frame.top;
+      const size = Math.min(rect.width, rect.bottom - topLimit);
+      if (!placement || size < 24 || rect.top >= frame.bottom) {
+        pet.style.visibility = "hidden";
+        return;
+      }
+      const left = rect.left - frame.left + (rect.width - size) / 2;
+      const top = rect.bottom - frame.top - size;
+      const previousPlacement = pet.dataset.petPlacement;
+      const previousRect = pet.getBoundingClientRect();
+      // 使用提交后的锚点确定终点，以当前动画帧为起点，连续切换时可立即反向。
+      pet.style.left = `${left}px`;
+      pet.style.top = `${top}px`;
+      pet.style.width = `${size}px`;
+      pet.style.visibility = "visible";
+      pet.dataset.petPlacement = placement;
+
+      if (previousPlacement && previousPlacement !== placement) {
+        flight.current?.cancel();
+        if (!reducedMotion.matches && previousRect.width > 0) {
+          const x = previousRect.left - frame.left - left;
+          const y = previousRect.top - frame.top - top;
+          const scale = previousRect.width / size;
+          flight.current = pet.animate(
+            [{ transform: `translate(${x}px, ${y}px) scale(${scale})` }, { transform: "none" }],
+            { duration: 600, easing: "cubic-bezier(0.22, 0.78, 0.28, 1)" },
+          );
+        }
+      }
+    };
+
+    const cancelFlightForReducedMotion = () => {
+      if (reducedMotion.matches) flight.current?.cancel();
+    };
+    const observer = new ResizeObserver(place);
+    const observeAnchors = () => {
+      const next = [...pane.querySelectorAll<HTMLElement>(selector)];
+      if (next.length === slots.length && next.every((slot, index) => slot === slots[index])) {
+        return;
+      }
+      observer.disconnect();
+      observer.observe(pane);
+      slots = next;
+      for (const slot of slots) {
+        observer.observe(slot);
+        if (slot.parentElement) observer.observe(slot.parentElement);
+      }
+      if (statusPanel) observer.observe(statusPanel);
+      place();
+    };
+    // 手机切换时 composer 的元素可能被替换，定位必须随实际锚点更新。
+    const anchorChanges = new MutationObserver((records) => {
+      if (
+        records.some(({ addedNodes, removedNodes }) =>
+          [...addedNodes, ...removedNodes].some(
+            (node) =>
+              node instanceof HTMLElement &&
+              (node.matches(selector) || node.querySelector(selector)),
+          ),
+        )
+      )
+        observeAnchors();
+    });
+    anchorChanges.observe(pane, { subtree: true, childList: true });
+    pane.addEventListener("scroll", place, true);
+    reducedMotion.addEventListener("change", cancelFlightForReducedMotion);
+    observeAnchors();
+    return () => {
+      anchorChanges.disconnect();
+      observer.disconnect();
+      pane.removeEventListener("scroll", place, true);
+      reducedMotion.removeEventListener("change", cancelFlightForReducedMotion);
+    };
+  }, [draft]);
+
+  useLayoutEffect(() => () => flight.current?.cancel(), []);
+
+  return (
+    <div
+      ref={petRef}
+      data-codex-pet=""
+      aria-hidden="true"
+      className="pointer-events-none invisible absolute z-20 aspect-square origin-top-left select-none"
+    >
+      <BotAvatar className="size-full" mood={working ? "working" : "idle"} animated followPointer />
+    </div>
+  );
+}

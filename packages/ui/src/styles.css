@@ -12,6 +12,14 @@
 @plugin "@tailwindcss/typography";
 @plugin "../lucide-colors.mjs";
 
+[data-codex-bot] {
+  color: #161616;
+}
+
+.dark [data-codex-bot] {
+  color: #fff;
+}
+
 /* Hero 可为任意图片/视频/iframe，不能用 App 主题推断关闭图标对比度。 */
 .cloud-content-dialog {
   --media-close-surface: rgb(0 0 0 / 50%);

@@ -3984,6 +3984,8 @@ const enUS: Record<string, string> = {
   "chat.contextOptimization.interrupted": "Conversation optimization stopped",
   "chat.contextOptimization.failed": "Conversation optimization failed",
   "chat.contextOptimization.completed": "Conversation optimized",
+  "settings.conversationPet": "Conversation pet",
+  "settings.conversationPetDescription": "Show the Bot in conversations.",
   "settings.themeMode": "App theme",
   "settings.themeModeDescription": "Choose light, dark, or follow the system theme.",
   "settings.themeMode.light": "Light",
@@ -6682,8 +6684,8 @@ const enUS: Record<string, string> = {
   "chat.emptyResult.description":
     "This task finished without any chat content. It may have been stopped before the model produced a response.",
   "chat.placeholder.newTask":
-    "Ask ZCode anything, @ to add context, / for commands or capabilities",
-  "chat.placeholder.newTaskMobile": "Ask ZCode anything…",
+    "Ask Codex Web anything, @ to add context, / for commands or capabilities",
+  "chat.placeholder.newTaskMobile": "Ask Codex Web anything…",
   "chat.placeholder.followUpAsk": "Ask for follow-up changes",
   "chat.placeholder.followUpQueue": "Keep typing to queue follow-up changes",
   "chat.placeholder.loading": "Initializing task...",

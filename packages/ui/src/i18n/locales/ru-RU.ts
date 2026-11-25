@@ -3561,6 +3561,8 @@ const ruRU: Record<string, string> = {
   "chat.contextOptimization.interrupted": "Оптимизация диалога остановлена",
   "chat.contextOptimization.failed": "Ошибка оптимизации диалога",
   "chat.contextOptimization.completed": "Диалог оптимизирован",
+  "settings.conversationPet": "Питомец в чате",
+  "settings.conversationPetDescription": "Показывать бота в диалогах.",
   "settings.themeMode": "Тема приложения",
   "settings.themeModeDescription": "Выберите светлую, тёмную или системную тему.",
   "settings.themeMode.light": "Светлая",
@@ -6302,8 +6304,8 @@ const ruRU: Record<string, string> = {
   "chat.emptyResult.description":
     "Задача завершилась без содержимого в чате. Возможно, она была остановлена до того, как модель дала ответ.",
   "chat.placeholder.newTask":
-    "Спросите ZCode о чём угодно, @ — добавить контекст, / — команды и возможности",
-  "chat.placeholder.newTaskMobile": "Спросите ZCode о чём угодно…",
+    "Спросите Codex Web о чём угодно, @ — добавить контекст, / — команды и возможности",
+  "chat.placeholder.newTaskMobile": "Спросите Codex Web о чём угодно…",
   "chat.placeholder.followUpAsk": "Попросите внести дополнительные изменения",
   "chat.placeholder.followUpQueue": "Продолжайте печатать, чтобы поставить изменения в очередь",
   "chat.placeholder.loading": "Инициализация задачи...",

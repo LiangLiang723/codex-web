@@ -3500,6 +3500,8 @@ const koKR: Record<string, string> = {
   "chat.contextOptimization.interrupted": "대화 최적화가 중지되었습니다",
   "chat.contextOptimization.failed": "대화 최적화 실패",
   "chat.contextOptimization.completed": "대화가 최적화되었습니다",
+  "settings.conversationPet": "대화 펫",
+  "settings.conversationPetDescription": "대화에 봇을 표시합니다.",
   "settings.themeMode": "앱 테마",
   "settings.themeModeDescription": "라이트, 다크 또는 시스템 테마 따르기를 선택하세요.",
   "settings.themeMode.light": "라이트",
@@ -6180,8 +6182,8 @@ const koKR: Record<string, string> = {
   "chat.emptyResult.description":
     "이 작업은 채팅 내용 없이 종료되었습니다. 모델이 응답을 생성하기 전에 중지되었을 수 있습니다.",
   "chat.placeholder.newTask":
-    "ZCode에게 무엇이든 물어보세요. @로 컨텍스트 추가, /로 명령 또는 기능 사용",
-  "chat.placeholder.newTaskMobile": "ZCode에게 무엇이든 물어보세요…",
+    "Codex Web에 무엇이든 물어보세요. @로 컨텍스트 추가, /로 명령 또는 기능 사용",
+  "chat.placeholder.newTaskMobile": "Codex Web에 무엇이든 물어보세요…",
   "chat.placeholder.followUpAsk": "후속 변경 요청",
   "chat.placeholder.followUpQueue": "계속 입력하여 후속 변경을 대기열에 추가",
   "chat.placeholder.loading": "작업 초기화 중...",

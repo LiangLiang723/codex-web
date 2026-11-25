@@ -67,6 +67,7 @@ export interface LoginEntryAttempt {
   status: LoginEntryAttemptStatus;
 }
 
+const CONVERSATION_PET_STORAGE_KEY = "codex-web:conversation-pet";
 const CODE_PREVIEW_SETTINGS_KEY = "zcode-code-preview-settings";
 const FONT_SMOOTHING_STORAGE_KEY = "zcode-macos-font-smoothing";
 
@@ -135,6 +136,9 @@ export interface ZCodeState {
   /** 当前主题 */
   theme: Theme;
   setTheme: (theme: Theme) => void;
+
+  conversationPetEnabled: boolean;
+  setConversationPetEnabled: (enabled: boolean) => void;
 
   /** 当前语言 */
   locale: string;
@@ -319,6 +323,12 @@ export function createZCodeStore(
       applyTheme(normalizedTheme);
 
       set({ theme: normalizedTheme });
+    },
+
+    conversationPetEnabled: readSafeLocalStorage(CONVERSATION_PET_STORAGE_KEY) !== "false",
+    setConversationPetEnabled: (enabled) => {
+      writeSafeLocalStorage(CONVERSATION_PET_STORAGE_KEY, String(enabled));
+      set({ conversationPetEnabled: enabled });
     },
 
     locale: readSafeLocalStorage("zcode-locale") || "zh-CN",

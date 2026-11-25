@@ -3591,6 +3591,8 @@ const jaJP: Record<string, string> = {
   "chat.contextOptimization.interrupted": "会話の最適化を停止しました",
   "chat.contextOptimization.failed": "会話の最適化に失敗しました",
   "chat.contextOptimization.completed": "会話を最適化しました",
+  "settings.conversationPet": "会話ペット",
+  "settings.conversationPetDescription": "会話にボットを表示します。",
   "settings.themeMode": "アプリのテーマ",
   "settings.themeModeDescription": "ライト、ダーク、またはシステムのテーマに従うかを選択します。",
   "settings.themeMode.light": "ライト",
@@ -6330,8 +6332,8 @@ const jaJP: Record<string, string> = {
   "chat.emptyResult.description":
     "このタスクはチャット内容なしで終了しました。モデルが応答を生成する前に停止された可能性があります。",
   "chat.placeholder.newTask":
-    "ZCode に何でも質問できます。@ でコンテキストを追加、/ でコマンドや機能を呼び出せます",
-  "chat.placeholder.newTaskMobile": "ZCode に何でも質問…",
+    "Codex Web に何でも質問できます。@ でコンテキストを追加、/ でコマンドや機能を呼び出せます",
+  "chat.placeholder.newTaskMobile": "Codex Web に何でも質問…",
   "chat.placeholder.followUpAsk": "追加の変更を依頼",
   "chat.placeholder.followUpQueue": "入力を続けると、追加の変更をキューに入れられます",
   "chat.placeholder.loading": "タスクを初期化中...",

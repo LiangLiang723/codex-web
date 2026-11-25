@@ -1,3 +1,4 @@
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { useSetInterfaceModeWithTelemetry } from "@/lib/appTelemetry.js";
 import { DataSyncSection } from "@/data-sync/index.js";
 import { getWorkspaceSourceServerId } from "@/conversation-workspace-target/sourceIdentity.js";
@@ -1610,6 +1611,7 @@ export function SettingsPage({
                   sections={settingsSections}
                   availability={{
                     desktop: Boolean(isDesktop),
+                    selfHosted: selfHostedBuild,
                     windowsHost: hostPlatform === "win32",
                     tray: Boolean(isWindowsDesktop || isLinuxDesktop),
                     notWindows: !isWindowsDesktop,

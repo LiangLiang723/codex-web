@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright-core";
 import { build, preview } from "vite";
+import { repositorySummary } from "./fixtures/workspace-git.mjs";
 import { nativeUserInputItems } from "../../packages/web/src/selfhost/nativeTurnInput.ts";
 import { revealPickerItem, revealPickerOption } from "./fixtures/composer-picker.mjs";
 
@@ -97,7 +98,15 @@ const legacyMention = "旧消息 [@Legacy](plugin://legacy@local)";
 async function verify(page, origin) {
   let failSkills = true;
   let appDirectory = "unloaded";
-  const mobile = page.viewportSize().width === 390;
+  const { width } = page.viewportSize();
+  const mobile = width === 390;
+  const petPlacement = mobile ? "composer" : "rail";
+  const screenshots = process.env.SELFHOST_BRAND_SCREENSHOTS;
+  const snapshot = async (name) => {
+    if (!screenshots) return;
+    await mkdir(screenshots, { recursive: true });
+    await page.screenshot({ path: join(screenshots, `${name}-${width}.png`) });
+  };
   const activate = (locator) => (mobile ? locator.tap() : locator.click());
   const showTaskList = async () => {
     if (mobile) await activate(page.getByRole("button", { name: "返回任务首页", exact: true }));
@@ -107,7 +116,7 @@ async function verify(page, origin) {
   const pageErrors = [];
   const submissions = [];
   const creations = [];
-  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("pageerror", (error) => pageErrors.push(error.stack ?? error.message));
   await page.addInitScript(() => {
     localStorage.setItem("selfhost.auth", "picker-test-fixture");
     localStorage.setItem("zcode-locale-preference", "zh-CN");
@@ -165,6 +174,34 @@ async function verify(page, origin) {
         }));
         return route.fulfill({ json: { value: { data: [{ cwd, skills, errors: [] }] } } });
       }
+    }
+    if (request?.channel === "git" && request.method === "refresh") {
+      return route.fulfill({
+        json: {
+          value: {
+            summary: repositorySummary(cwd, "main"),
+            stagedChanges: [],
+            unstagedChanges: [],
+          },
+        },
+      });
+    }
+    if (request?.channel === "git" && request.method === "getLocalBranches") {
+      return route.fulfill({
+        json: {
+          value: {
+            headRefType: "branch",
+            currentBranchName: "main",
+            branches: [{
+              name: "main",
+              isCurrent: true,
+              upstreamName: null,
+              commitHash: null,
+              commitTimestampMs: null,
+            }],
+          },
+        },
+      });
     }
     const values = {
       "/api/hosts": [
@@ -297,6 +334,20 @@ async function verify(page, origin) {
   url.search = new URLSearchParams({ host: String(hostId), cwd, thread: threadId });
   await page.goto(url.href, { waitUntil: "commit" });
   await page.getByText("验收引用目录", { exact: true }).waitFor({ timeout: 45000 });
+  assert.equal(await page.title(), "Codex Web");
+  const pet = page.locator("[data-codex-pet]");
+  const waitForPetAtRest = () => pet.evaluate(async (node) => {
+    await Promise.allSettled(node.getAnimations().map((animation) => animation.finished));
+  });
+  const dockedPet = pet.and(page.locator(`[data-pet-placement="${petPlacement}"]`));
+  await dockedPet.waitFor();
+  const canvas = pet.locator("svg");
+  const favicon = page.locator('link[rel="icon"]');
+  await page.waitForFunction(() => {
+    const href = document.querySelector('link[rel="icon"]')?.getAttribute("href");
+    return href?.endsWith("codex-bot-dark.svg");
+  });
+  assert.equal(await canvas.evaluate((node) => getComputedStyle(node).color), "rgb(255, 255, 255)");
   await page.locator('[data-plugin-mention-id="legacy@local"]').waitFor();
   const attachmentMenu = page.getByRole("menu");
   const at = page.getByTestId("prompt-suggestion-panel").and(page.locator('[data-trigger="@"]'));
@@ -436,6 +487,14 @@ async function verify(page, origin) {
   await activate(page.getByTestId("task-new-button"));
   await page.waitForURL((windowUrl) => !windowUrl.searchParams.has("thread"));
   await editor.waitFor();
+  await pet.and(page.locator('[data-pet-placement="draft"]')).waitFor();
+  await waitForPetAtRest();
+  const draftPet = await pet.elementHandle();
+  const greeting = page.locator("[data-v4-draft-greeting]");
+  await greeting.waitFor();
+  assert((await pet.boundingBox()).y < (await greeting.boundingBox()).y);
+  assert.equal(await page.locator("[data-v4-draft-logo]").count(), 0);
+  await snapshot("bot-draft-dark");
   await editor.focus();
   await page.keyboard.insertText("保留正文 /plan");
   await activate(slash.getByRole("option", { name: /^\/plan(?:\s|$)/u }));
@@ -468,6 +527,24 @@ async function verify(page, origin) {
   await activate(at.getByTestId("prompt-suggestion-option-plugin:plugin-23@local"));
   await activate(send);
   await page.waitForURL((windowUrl) => windowUrl.searchParams.get("thread") === draftThreadId);
+  await dockedPet.waitFor();
+  assert.equal(
+    await pet.evaluate((node, fromDraft) => node === fromDraft, draftPet),
+    true,
+    "The draft Bot and docked Bot share one mounted element",
+  );
+  await waitForPetAtRest();
+  const dock = page.locator("[data-v4-composer-dock-content]");
+  const [petRect, dockRect] = await Promise.all([pet.boundingBox(), dock.boundingBox()]);
+  if (mobile) {
+    assert(petRect.x + petRect.width <= dockRect.x + dockRect.width);
+    assert(petRect.y + petRect.height < (await editor.boundingBox()).y);
+  } else {
+    assert(petRect.x >= dockRect.x + dockRect.width);
+    const panel = await page.getByTestId("selfhost-status-panel").boundingBox();
+    assert(petRect.y > panel.y + panel.height);
+  }
+  await snapshot("bot-docked-dark");
   assert.equal(creations.length, 1);
   assert.equal(submissions.length, 2);
   assert.equal(submissions[1].command.threadId, draftThreadId);
@@ -502,6 +579,55 @@ async function verify(page, origin) {
   if (mobile) await activate(page.getByTestId(`task-item-${threadId}`));
   await editor.getByText("管理页往返草稿", { exact: true }).waitFor();
   assert.equal(submissions.length, 2, "extension management must leave the draft unsent");
+  await showTaskList();
+  await activate(page.getByTestId("task-settings-button"));
+  await activate(page.getByTestId("settings-search-open"));
+  await page.getByTestId("settings-search-input").fill("桌宠");
+  await activate(page.locator('[data-settings-search-result="settings.conversationPet"]'));
+  await page.locator('[data-settings-search-id="settings.conversationPet"][data-settings-search-highlighted]').waitFor();
+  const petToggle = page.getByRole("switch", { name: "桌宠", exact: true });
+  assert.equal(await petToggle.getAttribute("aria-checked"), "true");
+  await activate(petToggle);
+  assert.equal(await petToggle.getAttribute("aria-checked"), "false");
+  const themeSelect = page.locator('[data-settings-search-id="settings.themeMode"]').getByRole("combobox");
+  await activate(themeSelect);
+  await activate(page.getByRole("option", { name: "浅色", exact: true }));
+  await page.waitForFunction(() =>
+    document.querySelector('link[rel="icon"]')?.getAttribute("href")?.endsWith("codex-bot-light.svg"),
+  );
+  const lightIcon = await favicon.getAttribute("href");
+  assert.match(await (await page.request.get(new URL(lightIcon, origin).href)).text(), /fill="#161616"/);
+  await page.reload();
+  await editor.waitFor();
+  assert.equal(await pet.count(), 0);
+  await showTaskList();
+  await activate(page.getByTestId("task-settings-button"));
+  await activate(page.locator('[data-settings-section-nav="appearance"]'));
+  assert.equal(await petToggle.getAttribute("aria-checked"), "false");
+  await activate(petToggle);
+  assert.equal(await petToggle.getAttribute("aria-checked"), "true");
+  await activate(page.getByTestId("settings-back-button"));
+  if (mobile) {
+    const targetTask = page.getByTestId(`task-item-${threadId}`);
+    await activate(targetTask);
+  }
+  await dockedPet.waitFor();
+  assert.equal(await canvas.evaluate((node) => getComputedStyle(node).color), "rgb(22, 22, 22)");
+  await showTaskList();
+  await activate(page.getByTestId("task-new-button"));
+  await pet.and(page.locator('[data-pet-placement="draft"]')).waitFor();
+  await waitForPetAtRest();
+  await snapshot("bot-draft-light");
+  if (!mobile) {
+    await activate(page.getByTestId("task-settings-button"));
+    await activate(page.locator('[data-settings-section-nav="appearance"]'));
+    await activate(themeSelect);
+    await activate(page.getByRole("option", { name: "系统", exact: true }));
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.waitForFunction(() =>
+      document.querySelector('link[rel="icon"]')?.getAttribute("href")?.endsWith("codex-bot-dark.svg"),
+    );
+  }
   assert.deepEqual(detailQueries, [], "Loading references must make no per-plugin detail calls");
   assert.deepEqual(pageErrors, []);
 }
@@ -542,6 +668,16 @@ try {
       } catch (error) {
         console.error(
           `Composer browser acceptance failed at ${width}px.`,
+          await page.locator("[data-codex-pet], [data-codex-pet-anchor]").evaluateAll((nodes) =>
+            nodes.map((node) => ({
+              anchor: node.dataset.codexPetAnchor,
+              placement: node.dataset.petPlacement,
+              display: getComputedStyle(node).display,
+              visibility: getComputedStyle(node).visibility,
+              top: node.getBoundingClientRect().top,
+              height: node.getBoundingClientRect().height,
+            })),
+          ),
           await page
             .locator("body")
             .innerText({ timeout: 3000 })

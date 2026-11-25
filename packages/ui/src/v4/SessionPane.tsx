@@ -1,4 +1,5 @@
 import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
+import { ConversationPet } from "@/brand/index.js";
 import { GitBranchActionsHost } from "@/GitBranchSwitcher.js";
 import { completeNewModelSelection } from "@zcode/provider";
 import { useSubagents } from "@/hooks/useSubagents.js";
@@ -5609,6 +5610,7 @@ export function SessionPane({
   // 提交时先 stop barrier 再 rewind/rerun；UI 不应再用 completed gate 把入口整轮隐藏。
   const editActionsEnabled = runtimeReady && !readOnly && !selectionSideChat && Boolean(sessionId);
   const isDraft = sessionId === null;
+  const petEnabled = useZCodeStoreWithDefault((store) => store.conversationPetEnabled, true);
   // 滚动恢复必须使用与 sessionId 匹配的 lease projection。切换 session 的 render 与
   // passive effect 不在同一时刻，旧 lease 的 rows 若提前交给 timeline，会让新记忆按旧
   // 内容高度 clamp，后续目标 rows 到达时也无法区分这次临时落点。
@@ -6794,10 +6796,28 @@ export function SessionPane({
     [attachmentPut, effectiveSessionId],
   );
   // 分享浮窗不再替换输入区，保持 Composer 与对话滚动位置稳定。
+  const showConversationPet =
+    selfHostedBuild &&
+    paneId === "workspace-main" &&
+    petEnabled &&
+    remoteAvailable &&
+    !readOnly &&
+    !errored &&
+    !isFloatingPresentation &&
+    !shareSelectionPanelVisible;
   const conversationBottomDock = conversationBottomDockContent ? (
-    <ConversationBottomDockTransition mode="chat">
-      {conversationBottomDockContent}
-    </ConversationBottomDockTransition>
+    <>
+      {showConversationPet && !isDraft ? (
+        <div
+          aria-hidden="true"
+          data-codex-pet-anchor="composer"
+          className="pointer-events-none mr-3 ml-auto h-[var(--codex-pet-compact-size,2.25rem)] w-9"
+        />
+      ) : null}
+      <ConversationBottomDockTransition mode="chat">
+        {conversationBottomDockContent}
+      </ConversationBottomDockTransition>
+    </>
   ) : null;
 
   const { agents: presentationAgents } = useSubagents(
@@ -7035,6 +7055,7 @@ export function SessionPane({
                         <div data-testid={TID_CHAT_EMPTY} className="w-full">
                           <ConversationDraftEmptyState
                             compactForRemoteControl={compactForRemoteControl}
+                            showPet={showConversationPet}
                           />
                         </div>
                       ) : null
@@ -7095,6 +7116,18 @@ export function SessionPane({
               </BotGroupDeliveryProvider>
             </SessionPluginReferenceIconBoundary>
           )}
+          {showConversationPet ? (
+            <>
+              {!isDraft ? (
+                <div
+                  aria-hidden="true"
+                  data-codex-pet-anchor="rail"
+                  className="pointer-events-none absolute right-[calc(11rem-clamp(1.75rem,7dvh,4.25rem))] bottom-4 hidden aspect-square w-[clamp(3.5rem,14dvh,8.5rem)] peer-data-[status-placement=inline]/session-status:block"
+                />
+              ) : null}
+              <ConversationPet draft={isDraft} working={snapshot?.control.phase === "running"} />
+            </>
+          ) : null}
         </div>
       </div>
     </PluginUiSessionProvider>
