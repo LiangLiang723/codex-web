@@ -90,7 +90,7 @@ const systemSkill = {
   path: "/fixtures/codex/internal-review/SKILL.md",
   scope: "system",
 };
-const pickerButton = (page) => page.getByRole("button", { name: "添加照片和文件", exact: true });
+const pickerButton = (page) => page.getByTestId("chat-attachment-button");
 const noApps = "可在「扩展 → 应用」中连接或启用应用";
 const unloadedApps = "Fixture thread is not loaded";
 const legacyMention = "旧消息 [@Legacy](plugin://legacy@local)";
@@ -143,6 +143,20 @@ async function verify(page, origin) {
           runtimeKnown: true,
           directoryIssue: null,
           runtimeIssue: null,
+        },
+      });
+    }
+    if (url.pathname === "/api/selfhost/workspace" && request?.method === "searchWorkspaceFiles") {
+      return route.fulfill({
+        json: {
+          value: [
+            {
+              name: "fixture.md",
+              path: cwd + "/fixture.md",
+              relativePath: "fixture.md",
+              type: "file",
+            },
+          ],
         },
       });
     }
@@ -349,7 +363,16 @@ async function verify(page, origin) {
   });
   assert.equal(await canvas.evaluate((node) => getComputedStyle(node).color), "rgb(255, 255, 255)");
   await page.locator('[data-plugin-mention-id="legacy@local"]').waitFor();
-  const attachmentMenu = page.getByRole("menu");
+  const add = page.getByTestId("prompt-suggestion-panel").and(page.locator('[data-trigger="+"]'));
+  const assertComposerWidth = async (panel) => {
+    const [composer, popup] = await Promise.all([
+      page.locator("form [data-composer-layout]").boundingBox(),
+      panel.boundingBox(),
+    ]);
+    assert(composer && popup);
+    assert(Math.abs(composer.x - popup.x) < 1 && Math.abs(composer.width - popup.width) < 1);
+    assert(popup.y + popup.height <= composer.y);
+  };
   const at = page.getByTestId("prompt-suggestion-panel").and(page.locator('[data-trigger="@"]'));
   const slash = page.getByTestId("prompt-suggestion-panel").and(page.locator('[data-trigger="/"]'));
   const dollar = page
@@ -359,18 +382,32 @@ async function verify(page, origin) {
   const send = page.getByTestId("v4-composer-send");
   await editor.focus();
   await page.keyboard.insertText("保留附件草稿");
-  const previousQueries = appQueries.length;
   await activate(pickerButton(page));
-  await attachmentMenu.waitFor();
-  assert.deepEqual(await attachmentMenu.getByRole("menuitem").allTextContents(), [
-    "添加照片和文件",
-  ]);
+  await add.waitFor();
+  await assertComposerWidth(add);
+  const checkContextMenu = async (panel) => {
+    await panel.getByTestId("prompt-suggestion-section-add").waitFor();
+    await panel.getByTestId("prompt-suggestion-option-add-attachment").waitFor();
+    await panel.getByTestId("prompt-suggestion-option-add-plan").waitFor();
+    await revealPickerOption(panel, "plugin:review@local");
+  };
+  await checkContextMenu(add);
+  const remoteFile = add.getByTestId("prompt-suggestion-option-file:" + cwd + "/fixture.md");
+  await activate(await revealPickerOption(add, "add-files"));
+  await remoteFile.and(page.locator('[aria-selected="true"]')).waitFor();
+  await activate(remoteFile);
+  await add.waitFor({ state: "detached" });
+  assert((await editor.innerText()).includes("保留附件草稿"));
+  await editor.locator('[data-mention-id="file:' + cwd + '/fixture.md"]').waitFor();
+  await editor.press("ControlOrMeta+a");
+  await editor.press("Backspace");
+  await page.keyboard.insertText("保留附件草稿");
+  await activate(pickerButton(page));
   const fileChooser = page.waitForEvent("filechooser");
-  await activate(attachmentMenu.getByRole("menuitem", { name: "添加照片和文件" }));
+  await activate(await revealPickerOption(add, "add-attachment"));
   await (await fileChooser).setFiles([]);
-  await attachmentMenu.waitFor({ state: "detached" });
+  await add.waitFor({ state: "detached" });
   assert.equal(await editor.innerText(), "保留附件草稿");
-  assert.equal(appQueries.length, previousQueries, "Attachments must not read the app catalog");
   await editor.press("ControlOrMeta+a");
   await editor.press("Backspace");
 
@@ -400,6 +437,8 @@ async function verify(page, origin) {
   };
 
   await open();
+  await assertComposerWidth(at);
+  await checkContextMenu(at);
   const appStatus = await revealPickerItem(at, "prompt-suggestion-status-apps");
   await appStatus.and(page.locator('[data-status="error"]')).waitFor();
   assert.equal(await appStatus.textContent(), unloadedApps);
@@ -496,8 +535,33 @@ async function verify(page, origin) {
   assert.equal(await page.locator("[data-v4-draft-logo]").count(), 0);
   await snapshot("bot-draft-dark");
   await editor.focus();
+  await activate(pickerButton(page));
+  await activate(await revealPickerOption(add, "add-project"));
+  await page.getByTestId("composer-project-menu").waitFor();
+  await page.keyboard.press("Escape");
+  await page.getByTestId("composer-project-menu").waitFor({ state: "detached" });
+  await editor.focus();
+  await page.keyboard.insertText("/review");
+  await activate(await revealPickerOption(slash, "draft-slash:review"));
+  assert.match(await editor.innerText(), /审查当前工作区中未提交的更改/u);
+  assert.equal(submissions.length, 1, "Review only fills the draft");
+  await editor.press("ControlOrMeta+a");
+  await editor.press("Backspace");
+
+  await activate(pickerButton(page));
+  await add.waitFor();
+  await page.keyboard.insertText("/model");
+  await add.waitFor({ state: "detached" });
+  await activate(await revealPickerOption(slash, "app-slash:model"));
+  const modelPicker = page.getByTestId("composer-model-panel");
+  await modelPicker.waitFor();
+  await page.keyboard.press("Escape");
+  await modelPicker.waitFor({ state: "detached" });
+
+  await editor.focus();
   await page.keyboard.insertText("保留正文 /plan");
-  await activate(slash.getByRole("option", { name: /^\/plan(?:\s|$)/u }));
+  await assertComposerWidth(slash);
+  await activate(await revealPickerOption(slash, "app-slash:plan"));
   const planMarker = page.getByTestId("v4-composer-plan-marker");
   await planMarker.waitFor();
   assert.equal((await editor.innerText()).trim(), "保留正文");

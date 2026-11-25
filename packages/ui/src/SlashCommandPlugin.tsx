@@ -150,6 +150,17 @@ function useSlashTriggerListener(
   }, [activeTokenRef, disabled, dismissedSignatureRef, editor, setActiveTrigger]);
 }
 
+const SELFHOST_DRAFT_COMMANDS = {
+  review: "selfhost.composer.review.prompt",
+  init: "selfhost.composer.init.prompt",
+} as const;
+
+const SELFHOST_COMMAND_ORDER = new Map(
+  ["mcp", "review", "init", "project", "reasoning", "model"].map(
+    (name, index) => [name, index] as const,
+  ),
+);
+
 export function SlashCommandPlugin({
   workspacePath,
   workspaceIdentity,
@@ -157,6 +168,7 @@ export function SlashCommandPlugin({
   provider,
   container,
   disabled = false,
+  suppressPanel = false,
   excludedCommandNames,
   appCommands,
 }: SlashCommandPluginProps & { provider: ZCodeProvider }) {
@@ -195,8 +207,16 @@ export function SlashCommandPlugin({
     );
     const nativeSuggestions = selfHostedBuild
       ? buildSlashSuggestions([
-          { name: "goal", description: intl.formatMessage({ id: "selfhost.composer.goal" }) },
-          { name: "compact", description: intl.formatMessage({ id: "selfhost.composer.compact" }) },
+          {
+            name: "goal",
+            inputHint: intl.formatMessage({ id: "chat.goalBanner.label" }),
+            description: intl.formatMessage({ id: "selfhost.composer.goal" }),
+          },
+          {
+            name: "compact",
+            inputHint: intl.formatMessage({ id: "selfhost.composer.compact.label" }),
+            description: intl.formatMessage({ id: "selfhost.composer.compact" }),
+          },
         ]).filter(
           (item) =>
             !excluded.has(item.value) &&
@@ -208,7 +228,22 @@ export function SlashCommandPlugin({
     const appSuggestions = buildAppSlashCommandSuggestions(appCommands ?? []).filter(
       (item) => !cliValues.has(item.value) && !excluded.has(item.value),
     );
-    return [...cliSuggestions, ...appSuggestions, ...nativeSuggestions];
+    const suggestions = [...cliSuggestions, ...appSuggestions, ...nativeSuggestions];
+    if (!selfHostedBuild) return suggestions;
+
+    for (const name of Object.keys(SELFHOST_DRAFT_COMMANDS)) {
+      if (!excluded.has(name) && !suggestions.some(({ value }) => value === name)) {
+        suggestions.push({
+          id: `draft-slash:${name}`,
+          trigger: "/",
+          value: name,
+          label: intl.formatMessage({ id: `selfhost.composer.${name}.label` }),
+          description: intl.formatMessage({ id: `selfhost.composer.${name}.description` }),
+        });
+      }
+    }
+    const order = (name: string) => SELFHOST_COMMAND_ORDER.get(name) ?? SELFHOST_COMMAND_ORDER.size;
+    return suggestions.sort((a, b) => order(a.value) - order(b.value));
   }, [appCommands, commands, excludedCommandNames, intl]);
   const subagentSuggestions = useMemo(() => buildSubagentSuggestions(agents), [agents]);
   const skillSuggestions = useMemo(
@@ -243,7 +278,7 @@ export function SlashCommandPlugin({
     () => getPromptInputTriggerSignature(activeTrigger),
     [activeTrigger],
   );
-  const isOpen = !disabled && activeTrigger !== null;
+  const isOpen = !disabled && !suppressPanel && activeTrigger !== null;
 
   useEffect(() => {
     activeSignatureRef.current = activeSignature;
@@ -328,6 +363,13 @@ export function SlashCommandPlugin({
           return;
         }
 
+        if (suggestion.id.startsWith("draft-slash:")) {
+          const messageId =
+            SELFHOST_DRAFT_COMMANDS[suggestion.value as keyof typeof SELFHOST_DRAFT_COMMANDS];
+          selectionState.selection.insertText(`${intl.formatMessage({ id: messageId })} `);
+          return;
+        }
+
         const mentionNode = $createPromptMentionNode(buildSlashApplyMentionPayload(suggestion));
         const trailingWhitespace = $createTextNode(" ");
         selectionState.selection.insertNodes([mentionNode, trailingWhitespace]);
@@ -350,7 +392,7 @@ export function SlashCommandPlugin({
         editor.focus();
       });
     },
-    [appCommands, editor],
+    [appCommands, editor, intl],
   );
 
   const selectSuggestion = useCallback(

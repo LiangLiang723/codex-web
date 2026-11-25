@@ -314,7 +314,7 @@ export function MentionPanel({
     <div
       className={cn(
         "mb-1 overflow-hidden border border-border bg-menu shadow-xs",
-        compact ? "w-full max-w-lg rounded-lg" : "rounded-2xl",
+        compact ? "w-full rounded-lg" : "rounded-2xl",
       )}
       data-testid={TID_PROMPT_SUGGESTION_PANEL}
       data-trigger={trigger}
@@ -322,7 +322,10 @@ export function MentionPanel({
       {virtualRows.length > 0 ? (
         <div
           ref={scrollContainerRef}
-          className="max-h-56 overflow-y-auto px-1 py-0.75 [overflow-anchor:none]"
+          className={cn(
+            "overflow-y-auto overscroll-contain px-1 py-0.75 [overflow-anchor:none]",
+            compact ? "max-h-[min(20rem,45dvh)]" : "max-h-56",
+          )}
           role="listbox"
           aria-label={title}
           onMouseLeave={() => setHoveredOptionIndex(null)}

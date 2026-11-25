@@ -4,3 +4,9 @@ import { createContext } from "react";
 export const ComposerSubmissionPendingContext = createContext<((pending: boolean) => void) | null>(
   null,
 );
+
+/** 将菜单的按钮和输入框快捷操作接到同一个开关。 */
+export const ComposerProjectPickerContext = createContext<{
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+} | null>(null);
