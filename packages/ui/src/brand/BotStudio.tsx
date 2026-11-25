@@ -3,7 +3,7 @@ import { useBotAnatomy } from "./anatomyPlayer.js";
 import { BotAvatar } from "./BotAvatar.js";
 import { BotStateGallery } from "./BotStateGallery.js";
 import { chineseShapeNames } from "./botStateGuide.js";
-import { BOT_SIZES, DEFAULT_PET_PREFERENCES, type BotShape, type BotStudioProps } from "./contract.js";
+import { BOT_PERSONALITIES, BOT_SIZES, DEFAULT_PET_PREFERENCES, type BotShape, type BotStudioProps } from "./contract.js";
 
 const swatches = [
   ["white", "#ffffff"], ["neutral", "#161616"], ["brown", "#9c6b45"],
@@ -150,6 +150,23 @@ export function BotStudio({ preferences, onChange, locale, format }: BotStudioPr
                     onClick={() => onChange({ size })}
                   >
                     {format(`size.${size}`)}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+            <fieldset>
+              <legend className="mb-2 text-ui-sm font-medium">{format("personality")}</legend>
+              <div className="flex flex-wrap gap-2">
+                {BOT_PERSONALITIES.map((personality) => (
+                  <button
+                    key={personality}
+                    type="button"
+                    data-pet-personality-option={personality}
+                    aria-pressed={personality === preferences.personality}
+                    onClick={() => onChange({ personality })}
+                    className={`${option} px-3 py-1.5`}
+                  >
+                    {format(`personality.${personality}`)}
                   </button>
                 ))}
               </div>

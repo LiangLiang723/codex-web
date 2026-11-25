@@ -84,6 +84,7 @@ packages/desktop/build/generated/
 /ssh-keys/
 /.env
 /.selfhost/
+/selfhost/.anatomy-reference.tgz
 /dist/
 /.e2e-runtime/
 

@@ -39,7 +39,9 @@ export async function verifyMotionPreview(page, activate) {
   assert.equal(await preview.locator("[data-codex-bot]").evaluate((node) => getComputedStyle(node).color), "rgb(199, 78, 243)");
   await activate(studio.locator('[data-pet-color-option="#3289ff"]'));
   await activate(studio.locator('[data-pet-size-option="large"]'));
+  await activate(studio.locator('[data-pet-personality-option="playful"]'));
   await activate(page.getByTestId("bot-studio-followPointer"));
+  await activate(page.getByTestId("bot-studio-spontaneous"));
   await preview.locator('[data-bot-shape="cloud"]').waitFor();
   assert.equal(await preview.locator("[data-codex-bot]").evaluate((node) => getComputedStyle(node).color), "rgb(50, 137, 255)");
   const screenshots = process.env.SELFHOST_BRAND_SCREENSHOTS;
@@ -68,24 +70,27 @@ export async function verifySavedAppearance(page) {
   await studio.locator('[data-pet-shape-option="cloud"][aria-pressed="true"]').waitFor();
   await studio.locator('[data-pet-color-option="#3289ff"][aria-pressed="true"]').waitFor();
   await studio.locator('[data-pet-size-option="large"][aria-pressed="true"]').waitFor();
+  await studio.locator('[data-pet-personality-option="playful"][aria-pressed="true"]').waitFor();
   assert.equal(await page.getByTestId("bot-studio-followPointer").getAttribute("aria-checked"), "false");
+  assert.equal(await page.getByTestId("bot-studio-spontaneous").getAttribute("aria-checked"), "false");
 }
 
 export async function verifyPetPresence(page, pet, editor, activate) {
   const pose = (motion) => pet.locator(`[data-bot-engine="anatomy"][data-bot-motion="${motion}"]`);
   if (process.env.SELFHOST_ANATOMY_CLOCK_TEST && page.viewportSize().width > 600) {
-    await page.clock.fastForward(12_300);
-    await pose("showcase").waitFor();
-    await page.clock.fastForward(56_300);
+    await page.clock.fastForward(18_000);
+    await pet.and(page.locator('[data-pet-reaction="spontaneous"]')).waitFor();
+    await page.clock.fastForward(85_000);
     await pose("sleeping").waitFor();
     await pet.getByRole("button").hover();
     await pose("waking").waitFor();
     await page.clock.fastForward(1_800);
   }
+  const clickReaction = pet.and(page.locator('[data-pet-reaction="touch"]')).locator('[data-bot-motion]');
   await activate(pet.getByRole("button"));
-  await pose("curious").waitFor();
+  const firstReaction = await clickReaction.getAttribute("data-bot-motion");
   await activate(pet.getByRole("button"));
-  await pose("playful").waitFor();
+  assert.notEqual(await clickReaction.getAttribute("data-bot-motion"), firstReaction);
   await editor.focus();
   await Promise.all([pose("listening").waitFor(), page.keyboard.insertText("桌宠倾听")]);
   await editor.press("ControlOrMeta+a");
@@ -202,7 +207,7 @@ export async function verifyBrandSettings(page, { activate, showTaskList, origin
   await activate(themeSelect);
   await activate(page.getByRole("option", { name: "浅色", exact: true }));
   await page.waitForFunction(() =>
-    document.querySelector('link[rel="icon"]')?.getAttribute("href")?.endsWith("codex-bot-light.svg?v=3"),
+    document.querySelector('link[rel="icon"]')?.getAttribute("href")?.endsWith("codex-bot-light.svg?v=4"),
   );
   const lightIcon = await favicon.getAttribute("href");
   const lightSvg = await (await page.request.get(new URL(lightIcon, origin).href)).text();

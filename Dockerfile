@@ -9,6 +9,20 @@ COPY . .
 RUN pnpm config set --location=project --json supportedArchitectures '{"os":["current"],"cpu":["current"],"libc":["current"]}' && \
     pnpm --filter . --filter @zcode/web... install --frozen-lockfile --ignore-scripts --child-concurrency=1
 RUN pnpm --filter @zcode/web exec vite build --mode selfhost && node selfhost/worker/build.mjs /release/workspace.cjs
+ARG CODEX_WEB_BOT_ANATOMY=0
+RUN set -eu; if [ "$CODEX_WEB_BOT_ANATOMY" = 1 ]; then \
+      reference=$(mktemp -d); \
+      if [ -f selfhost/.anatomy-reference.tgz ]; then \
+        tar --no-same-owner -xzf selfhost/.anatomy-reference.tgz -C "$reference"; \
+      else \
+        revision=$(node selfhost/prepare-bot-anatomy.mjs --print-revision); \
+        git -C "$reference" init --quiet; \
+        git -C "$reference" fetch --quiet --depth 1 https://github.com/ArvinYin1/grokbot-animation-anatomy.git "$revision"; \
+        git -C "$reference" checkout --quiet --detach FETCH_HEAD; \
+      fi; \
+      node selfhost/prepare-bot-anatomy.mjs "$reference" packages/web/dist; \
+      rm -r "$reference"; \
+    fi
 RUN python3 selfhost/gateway/materialize.py /gateway && mkdir -p /gateway/public && cp -a packages/web/dist/. /gateway/public/
 RUN find /gateway/public -name '*.map' -delete
 

@@ -365,7 +365,7 @@ async function verify(page, origin) {
   const favicon = page.locator('link[rel="icon"]');
   await page.waitForFunction(() => {
     const href = document.querySelector('link[rel="icon"]')?.getAttribute("href");
-    return href?.endsWith("codex-bot-dark.svg?v=3");
+    return href?.endsWith("codex-bot-dark.svg?v=4");
   });
   assert.equal(await canvas.evaluate((node) => getComputedStyle(node).color), "rgb(255, 255, 255)");
   if (anatomyEnabled) {
@@ -719,7 +719,7 @@ async function verify(page, origin) {
     await activate(page.getByRole("option", { name: "系统", exact: true }));
     await page.emulateMedia({ colorScheme: "dark" });
     await page.waitForFunction(() =>
-      document.querySelector('link[rel="icon"]')?.getAttribute("href")?.endsWith("codex-bot-dark.svg?v=3"),
+      document.querySelector('link[rel="icon"]')?.getAttribute("href")?.endsWith("codex-bot-dark.svg?v=4"),
     );
   }
   assert.deepEqual(detailQueries, [], "Loading references must make no per-plugin detail calls");

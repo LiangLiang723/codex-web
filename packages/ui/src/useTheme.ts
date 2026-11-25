@@ -51,7 +51,7 @@ function syncBrowserThemeSurface(resolved: ResolvedTheme) {
 
   const icon = document.querySelector<HTMLLinkElement>("link[data-codex-bot-favicon]");
   if (icon) {
-    const href = new URL(`codex-bot-${resolved}.svg?v=3`, icon.href).href;
+    const href = new URL(`codex-bot-${resolved}.svg?v=4`, icon.href).href;
     if (icon.href !== href) icon.href = href;
   }
 

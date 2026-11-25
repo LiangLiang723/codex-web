@@ -8,6 +8,8 @@ export const BOT_SHAPE_NAMES = [
 ] as const;
 export type BotShape = (typeof BOT_SHAPE_NAMES)[number];
 export const BOT_SIZES = { small: 0.8, regular: 1, large: 1.22 } as const;
+export const BOT_PERSONALITIES = ["curious", "playful", "calm"] as const;
+export type BotPersonality = (typeof BOT_PERSONALITIES)[number];
 
 export interface ConversationPetPreferences {
   shape: BotShape;
@@ -16,6 +18,8 @@ export interface ConversationPetPreferences {
   followPointer: boolean;
   idleMotion: boolean;
   clickReactions: boolean;
+  personality: BotPersonality;
+  spontaneous: boolean;
 }
 
 export const DEFAULT_PET_PREFERENCES: ConversationPetPreferences = {
@@ -25,6 +29,8 @@ export const DEFAULT_PET_PREFERENCES: ConversationPetPreferences = {
   followPointer: true,
   idleMotion: true,
   clickReactions: true,
+  personality: "curious",
+  spontaneous: true,
 };
 
 export function normalizePetPreferences(value: unknown): ConversationPetPreferences {
@@ -40,6 +46,10 @@ export function normalizePetPreferences(value: unknown): ConversationPetPreferen
     followPointer: saved.followPointer !== false,
     idleMotion: saved.idleMotion !== false,
     clickReactions: saved.clickReactions !== false,
+    personality: saved.personality && BOT_PERSONALITIES.includes(saved.personality)
+      ? saved.personality
+      : DEFAULT_PET_PREFERENCES.personality,
+    spontaneous: saved.spontaneous !== false,
   };
 }
 

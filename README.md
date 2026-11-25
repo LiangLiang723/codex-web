@@ -46,6 +46,8 @@ sh selfhost/update.sh --no-build
 
 需要在清理前验收服务时，使用 `sh selfhost/update.sh --stage` 切换到已构建的镜像。更新前的健康镜像按精确 ID 保存在部署目录的记录中，并受标签保护。验证登录、SSH 和桌面及手机会话后，运行 `sh selfhost/update.sh --cleanup`。若验收失败，将 `.env` 的 `CODEX_WEB_IMAGE` 指回原版本，运行 `docker compose up -d --no-build --wait codex-web`。共用 Docker daemon 的独立实例可将 `CODEX_WEB_RELEASE_REPOSITORY` 导出到脚本环境，各自使用独立的镜像仓库。
 
+用 `CODEX_WEB_BOT_ANATOMY=1 docker compose build` 构建带参考动画的桌宠镜像。离线构建可将固定版参考仓库检出内容打包为 `selfhost/.anatomy-reference.tgz`。详情见 [桌宠构建规格](specs/selfhost-codex/brand-and-conversation-pet.md)。
+
 ## 连接和切换主机
 
 在「SSH 工作区」选择「添加主机」，填写 SSH 地址和登录方式。地址支持普通主机名、Tailscale 地址，以及 `user@host`、`ssh://user@host:port` 和 `ssh -p 2222 user@host`。可在保存前按「测试连接」验证认证。指纹、密钥类型和 SOCKS5 代理在「高级选项」。「外观」支持搜索 Font Awesome 图标、设置图标颜色和上传图片。

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { verifyAnatomyMotion } from "./brand-motion.mjs";
 
 export async function verifyBotStatus(page, pet, emit) {
+  if (process.env.SELFHOST_ANATOMY_CLOCK_TEST) await page.clock.install();
   const activityTurnId = "bot-activity-fixture";
   const activityUser = {
     id: "bot-activity-user",
@@ -26,6 +27,11 @@ export async function verifyBotStatus(page, pet, emit) {
     assert.equal(await workingLine.locator('[data-codex-bot="working"]').getAttribute("viewBox"), "0 0 20 20");
     await verifyAnatomyMotion(workingLine.locator('[data-bot-motion="progress"]'));
     await verifyAnatomyMotion(workingLine.locator('[data-bot-motion="working"]'));
+    if (process.env.SELFHOST_ANATOMY_CLOCK_TEST) {
+      await page.clock.fastForward(27_000);
+      await pet.and(page.locator('[data-pet-reaction="spontaneous"]')).waitFor();
+      await workingLine.locator('[data-bot-motion="working"]').waitFor();
+    }
   }
   await page
     .locator('[data-zcode-chat-loading-animate="true"]')
@@ -57,13 +63,19 @@ export async function verifyBotStatus(page, pet, emit) {
   };
   if (anatomyEnabled) {
     await pet.locator('[data-bot-engine="anatomy"][data-bot-motion="thinking"]').waitFor();
+    assert.equal(await pet.and(page.locator('[data-pet-reaction="spontaneous"]')).count(), 0);
     await page.locator('[data-summary-leading-icon][data-bot-motion="curious"]').waitFor();
     emit({ type: "timeline.item.upsert", item: command });
     await pet.locator('[data-bot-engine="anatomy"][data-bot-motion="running"]').waitFor();
     emit({ type: "timeline.item.upsert", item: computer });
     await pet.locator('[data-bot-engine="anatomy"][data-bot-motion="controlling"]').waitFor();
   }
+  const animatedDrawing = anatomyEnabled ? await workingPet.locator("svg").elementHandle() : null;
   await page.emulateMedia({ reducedMotion: "reduce" });
+  if (animatedDrawing) {
+    // 媒体偏好切换后，先等旧播放器卸载，再采样静态绘制。
+    await page.waitForFunction((node) => !node.isConnected, animatedDrawing);
+  }
   const stayedStill = await workingPet
     .locator('path[fill="currentColor"][fill-rule="evenodd"]')
     .evaluate(async (path) => {

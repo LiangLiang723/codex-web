@@ -9,6 +9,10 @@ import { build } from "esbuild";
 
 const revision = "debd41625da89b4c4fde43b3b1f0add6dc113c02";
 const [referenceArg, outputArg] = process.argv.slice(2);
+if (referenceArg === "--print-revision" && !outputArg) {
+  console.log(revision);
+  process.exit(0);
+}
 assert(referenceArg && outputArg, "Expected the Anatomy checkout and built Web directory.");
 
 const reference = resolve(referenceArg);
@@ -234,12 +238,13 @@ createStateMachine(config, runtime, "idle", { isResting: true });
 for (let frame = 0; frame < 60; frame++) runtime.advance(0.1);
 const size = 64;
 const model = buildModel(
-  { ...runtime.frame(), quat: [1, 0, 0, 0] },
+  runtime.frame(),
   { cutout: true, ink: [0, 0, 0], spot: [0, 0, 0] }, size, config,
   makeMorphGenerators(config), makeTrail(config), () => {},
 );
 assert.equal(model.mode, "sphere");
-assert.equal(model.bodyD.split("M").length - 1, 3, "The favicon must show the body and two eyes.");
+// 保留原版静帧的朝向和眼睛形状，标签图标只调整视口留白。
+assert(model.bodyD && !model.eyesD);
 const favicon = (color) =>
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 10 44 44"><path fill="${color}" fill-rule="evenodd" d="${model.bodyD}"/></svg>\n`;
 

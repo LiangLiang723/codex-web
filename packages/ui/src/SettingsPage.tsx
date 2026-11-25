@@ -96,7 +96,6 @@ import { SegmentPill } from "@/settings/PluginStoreListView.js";
 import { CodexAppsSection, CodexHostSettings } from "@/settings/codex-apps/index.js";
 import { PluginsSection } from "@/settings/PluginsSection.js";
 import { HooksSection } from "@/settings/HooksSection.js";
-import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { WorkspaceFileSearchSection } from "@/settings/WorkspaceFileSearchSection.js";
 import { MemorySettingsPage } from "@/settings/MemorySettingsSection.js";
 import { PersonalizationSection } from "@/settings/PersonalizationSection.js";
@@ -2107,7 +2106,7 @@ export function SettingsPage({
                                     />
                                   }
                                 />
-                                {(["followPointer", "idleMotion", "clickReactions"] as const).map((key) => {
+                                {(["followPointer", "idleMotion", "spontaneous", "clickReactions"] as const).map((key) => {
                                   const label = intl.formatMessage({ id: `settings.botStudio.${key}` });
                                   return (
                                     <SettingsRow

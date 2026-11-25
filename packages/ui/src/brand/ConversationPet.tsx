@@ -19,7 +19,7 @@ export function ConversationPet({
   const flight = useRef<Animation | null>(null);
   const hasAnatomy = Boolean(useBotAnatomy());
   const activityMotion = useBotActivity()?.motion;
-  const { motion, interact } = usePetBehavior(
+  const { cue, interact } = usePetBehavior(
     petRef,
     hasAnatomy,
     activity,
@@ -142,6 +142,7 @@ export function ConversationPet({
     <div
       ref={petRef}
       data-codex-pet=""
+      data-pet-reaction={cue?.reaction}
       aria-hidden={!hasAnatomy || !preferences.clickReactions || undefined}
       className="pointer-events-none invisible absolute z-10 aspect-square origin-top-left select-none"
     >
@@ -155,7 +156,7 @@ export function ConversationPet({
         <BotAvatar
           className="size-full"
           mood={working ? "working" : "idle"}
-          motion={activity === "idle" ? motion : activityMotion ?? activity}
+          motion={cue?.motion ?? activityMotion ?? activity}
           animated
           followPointer={preferences.followPointer}
           shape={preferences.shape}
