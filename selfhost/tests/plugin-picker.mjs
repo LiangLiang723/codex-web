@@ -7,6 +7,12 @@ import { build, preview } from "vite";
 import { repositorySummary } from "./fixtures/workspace-git.mjs";
 import { nativeUserInputItems } from "../../packages/web/src/selfhost/nativeTurnInput.ts";
 import { revealPickerItem, revealPickerOption } from "./fixtures/composer-picker.mjs";
+import {
+  verifyAnatomyCatalogue,
+  verifyAnatomyMotion,
+  verifyMotionPreview,
+  verifyPetPresence,
+} from "./fixtures/brand-motion.mjs";
 
 const web = resolve(import.meta.dirname, "../../packages/web");
 const hostId = 2;
@@ -354,13 +360,18 @@ async function verify(page, origin) {
   });
   const dockedPet = pet.and(page.locator(`[data-pet-placement="${petPlacement}"]`));
   await dockedPet.waitFor();
-  const canvas = pet.locator("svg");
+  const canvas = pet.locator("[data-codex-bot]");
+  const anatomyEnabled = (await page.locator('meta[name="codex-bot-anatomy"]').count()) === 1;
   const favicon = page.locator('link[rel="icon"]');
   await page.waitForFunction(() => {
     const href = document.querySelector('link[rel="icon"]')?.getAttribute("href");
     return href?.endsWith("codex-bot-dark.svg");
   });
   assert.equal(await canvas.evaluate((node) => getComputedStyle(node).color), "rgb(255, 255, 255)");
+  if (anatomyEnabled) {
+    await verifyAnatomyMotion(canvas);
+    if (!mobile) await verifyAnatomyCatalogue(page);
+  }
   await page.locator('[data-plugin-mention-id="legacy@local"]').waitFor();
   const add = page.getByTestId("prompt-suggestion-panel").and(page.locator('[data-trigger="+"]'));
   const assertComposerWidth = async (panel) => {
@@ -575,6 +586,7 @@ async function verify(page, origin) {
   await greeting.waitFor();
   assert((await pet.boundingBox()).y < (await greeting.boundingBox()).y);
   assert.equal(await page.locator("[data-v4-draft-logo]").count(), 0);
+  if (anatomyEnabled) await verifyPetPresence(page, pet, editor, activate);
   await snapshot("bot-draft-dark");
   await editor.focus();
   await activate(pickerButton(page));
@@ -693,6 +705,9 @@ async function verify(page, origin) {
   await page.locator('[data-settings-search-id="settings.conversationPet"][data-settings-search-highlighted]').waitFor();
   const petToggle = page.getByRole("switch", { name: "桌宠", exact: true });
   assert.equal(await petToggle.getAttribute("aria-checked"), "true");
+  if (anatomyEnabled) {
+    await verifyMotionPreview(page, activate);
+  }
   await activate(petToggle);
   assert.equal(await petToggle.getAttribute("aria-checked"), "false");
   const themeSelect = page.locator('[data-settings-search-id="settings.themeMode"]').getByRole("combobox");
@@ -703,7 +718,7 @@ async function verify(page, origin) {
   );
   const lightIcon = await favicon.getAttribute("href");
   assert.match(await (await page.request.get(new URL(lightIcon, origin).href)).text(), /fill="#161616"/);
-  await page.reload();
+  await page.reload({ waitUntil: "commit" });
   await editor.waitFor();
   assert.equal(await pet.count(), 0);
   await showTaskList();
@@ -763,6 +778,7 @@ try {
         isMobile: width === 390,
         hasTouch: width === 390,
       });
+      if (process.env.SELFHOST_ANATOMY_CLOCK_TEST && width > 600) await page.clock.install();
       page.setDefaultTimeout(10000);
       try {
         await verify(page, origin);

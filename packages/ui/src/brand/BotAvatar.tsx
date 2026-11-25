@@ -1,11 +1,80 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
+import { useBotAnatomy } from "./anatomyPlayer.js";
 import type { BotAvatarProps } from "./contract.js";
 import { BOT_VIEW_BOX, createBotDrawing, staticBotPaths } from "./botDrawing.js";
 
-export function BotAvatar({
+export function BotAvatar(props: BotAvatarProps) {
+  const profile = useBotAnatomy();
+  if (profile) return <AnatomyAvatar {...props} profile={profile} />;
+  return <FallbackAvatar {...props} />;
+}
+
+function AnatomyAvatar({
+  profile,
   mood = "idle",
   animated = false,
   followPointer = false,
+  motion = mood,
+  explicitPlayback = false,
+  className = "",
+  ...props
+}: BotAvatarProps & { profile: NonNullable<ReturnType<typeof useBotAnatomy>> }) {
+  const host = useRef<SVGGElement>(null);
+  const player = useRef<ReturnType<typeof profile.createBot> | null>(null);
+  const startingMotion = useEffectEvent(() => motion);
+
+  useEffect(() => {
+    const element = host.current;
+    if (!element) return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const mountPlayer = () => {
+      player.current?.destroy();
+      player.current = profile.createBot(element, {
+        size: 300,
+        state: startingMotion(),
+        compact: !followPointer && !explicitPlayback,
+        seed: "hero",
+        follow: followPointer,
+        staticMode: !animated,
+        reducedMotion: reduced.matches && !explicitPlayback,
+        theme: { inkPaint: "currentColor", spotPaint: "currentColor", cutout: true },
+      });
+    };
+    mountPlayer();
+    reduced.addEventListener("change", mountPlayer);
+    return () => {
+      reduced.removeEventListener("change", mountPlayer);
+      player.current?.destroy();
+      player.current = null;
+    };
+  }, [animated, explicitPlayback, followPointer, profile]);
+
+  useEffect(() => {
+    player.current?.setState(motion);
+  }, [motion]);
+
+  return (
+    <svg
+      {...props}
+      data-codex-bot={mood}
+      data-bot-motion={motion}
+      data-bot-engine="anatomy"
+      viewBox="0 0 300 300"
+      aria-hidden="true"
+      focusable="false"
+      className={`block shrink-0 ${className}`}
+    >
+      <g ref={host} />
+    </svg>
+  );
+}
+
+function FallbackAvatar({
+  mood = "idle",
+  animated = false,
+  followPointer = false,
+  motion: _motion,
+  explicitPlayback: _explicitPlayback,
   className = "",
   ...props
 }: BotAvatarProps) {

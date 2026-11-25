@@ -24,6 +24,7 @@ import type { CodePreviewSettings } from "@/store/index.js";
 import { useZCodeStore } from "@/store/StoreProvider.js";
 import { THEME_MODES } from "@/settings/settingsPageConfig.js";
 import { MAX_UI_FONT_SIZE_PX, MIN_UI_FONT_SIZE_PX } from "@/lib/uiFontSize.js";
+import { BotMotionPreview } from "@/brand/index.js";
 
 function FontSizeInput({
   value,
@@ -178,6 +179,13 @@ export function AppearanceSectionContent({
                     onCheckedChange={setConversationPetEnabled}
                   />
                 }
+              />
+            ) : null}
+            {selfHostedBuild ? (
+              <BotMotionPreview
+                label={intl.formatMessage({ id: "settings.conversationPetMotion" })}
+                allClipsLabel={intl.formatMessage({ id: "settings.conversationPetPlayAll" })}
+                clipsLabel={intl.formatMessage({ id: "settings.conversationPetClips" })}
               />
             ) : null}
             {isMacDesktop ? (

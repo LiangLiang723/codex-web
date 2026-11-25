@@ -1,10 +1,29 @@
 import { useLayoutEffect, useRef } from "react";
+import { useBotAnatomy } from "./anatomyPlayer.js";
 import { BotAvatar } from "./BotAvatar.js";
 import type { ConversationPetProps } from "./contract.js";
+import { usePetBehavior } from "./usePetBehavior.js";
 
-export function ConversationPet({ draft, working }: ConversationPetProps) {
+export function ConversationPet({
+  draft,
+  working,
+  activity,
+  completion,
+  conversationKey,
+  interactionLabel,
+  onComposerActivity,
+}: ConversationPetProps) {
   const petRef = useRef<HTMLDivElement>(null);
   const flight = useRef<Animation | null>(null);
+  const hasAnatomy = Boolean(useBotAnatomy());
+  const { motion, interact } = usePetBehavior(
+    petRef,
+    hasAnatomy,
+    activity,
+    completion,
+    conversationKey,
+    onComposerActivity,
+  );
 
   useLayoutEffect(() => {
     const pet = petRef.current;
@@ -118,10 +137,23 @@ export function ConversationPet({ draft, working }: ConversationPetProps) {
     <div
       ref={petRef}
       data-codex-pet=""
-      aria-hidden="true"
       className="pointer-events-none invisible absolute z-20 aspect-square origin-top-left select-none"
     >
-      <BotAvatar className="size-full" mood={working ? "working" : "idle"} animated followPointer />
+      <button
+        type="button"
+        aria-label={interactionLabel}
+        className="size-full rounded-full focus-visible:outline-2 focus-visible:outline-ring enabled:pointer-events-auto"
+        disabled={!hasAnatomy || activity !== "idle"}
+        onClick={() => interact.current?.()}
+      >
+        <BotAvatar
+          className="size-full"
+          mood={working ? "working" : "idle"}
+          motion={motion}
+          animated
+          followPointer
+        />
+      </button>
     </div>
   );
 }
