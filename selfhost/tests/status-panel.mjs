@@ -1,9 +1,11 @@
+import { verifyBotStatus } from "./fixtures/brand-status.mjs";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright-core";
 import { build, preview } from "vite";
+import { repositorySummary } from "./fixtures/workspace-git.mjs";
 import { verifyChildDetails, verifySubagentDirectory } from "./fixtures/subagent-details.mjs";
 
 const web = resolve(import.meta.dirname, "../../packages/web");
@@ -124,20 +126,7 @@ const threadItems = [
   ...sourceItems,
   { id: "table-response", type: "agentMessage", text: wideTable },
 ];
-const git = {
-  workspacePath: cwd,
-  repoRoot: cwd,
-  workspaceInRepoPath: ".",
-  autoRefreshWatchPaths: [],
-  branchName: "feature/status",
-  trackingBranchName: null,
-  headRefType: "branch",
-  ahead: 0,
-  behind: 0,
-  isDirty: true,
-  isGitAvailable: true,
-  isRepository: true,
-};
+const git = repositorySummary(cwd, "feature/status", true);
 const change = {
   path: cwd + "/example.txt",
   repoRelativePath: "example.txt",
@@ -199,7 +188,7 @@ async function installFixture(page, origin) {
   const olderHistory = Promise.withResolvers();
   let archivePageDelivered = false;
   const errors = [];
-  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("pageerror", (error) => errors.push(error.stack ?? error.message));
   page.on("console", (message) => {
     const text = message.text();
     if (text.includes("当前远程服务不支持 subagents.list") || text.includes("same key"))
@@ -368,10 +357,10 @@ async function installFixture(page, origin) {
   });
   const url = new URL("/", origin);
   url.search = new URLSearchParams({ host: String(hostId), cwd, thread: threadId });
-  await page.goto(url.href);
+  await page.goto(url.href, { waitUntil: "commit" });
   await page
     .getByText(/请检查工作区状态/)
-    .waitFor({ timeout: 25000 })
+    .waitFor({ timeout: 45000 })
     .catch(async (error) => {
       throw new Error(
         `${error.message}\n${(await page.locator("body").innerText()).slice(0, 800)}\n${errors.join("\n")}`,
@@ -571,6 +560,12 @@ async function verifyDesktop(page, origin, width, screenshots) {
   const geometry = await verifyMainTrack(page, { status, label: `${width}px inline` });
   const panelBox = await status.boundingBox();
   assert(geometry.composerRight <= panelBox.x, "The panel must have its own right-side space");
+  const pet = page.locator('[data-codex-pet]');
+  const railPet = pet.and(page.locator('[data-pet-placement="rail"]'));
+  await railPet.waitFor();
+  const petBox = await railPet.boundingBox();
+  assert(Math.abs(petBox.x + petBox.width / 2 - (panelBox.x + panelBox.width / 2)) < 2);
+  assert(petBox.y >= panelBox.y + panelBox.height);
   if (screenshots)
     await page.screenshot({
       path: join(screenshots, `status-${width}.png`),
@@ -710,6 +705,7 @@ async function verifyDesktop(page, origin, width, screenshots) {
     },
     screenshotPath: screenshots ? join(screenshots, `subagent-${width}.png`) : undefined,
   });
+  await verifyBotStatus(page, pet, fixture.emit);
   const otherTask = sidebar.getByText("第二个任务", { exact: true });
   await otherTask.click();
   await page.getByText("另一会话内容", { exact: true }).waitFor();
@@ -727,6 +723,7 @@ async function verifyMobile(page, origin, screenshots) {
   await editor.waitFor();
   await panel(page).waitFor({ state: "hidden" });
   await verifyMainTrack(page, { label: "390px mobile" });
+  await page.locator('[data-codex-pet][data-pet-placement="composer"]').waitFor();
   if (screenshots)
     await page.screenshot({
       path: join(screenshots, "status-390-closed.png"),

@@ -624,12 +624,25 @@ modules:
       - app
       - adapters
       - ui
+  - id: codex-brand
+    roots:
+      - packages/ui/src/brand
+    managed: true
+    requires: []
+    publicEntrypoints:
+      - packages/ui/src/brand/index.ts
+      - packages/ui/src/brand/contract.ts
+    layers:
+      ui: .
+    owner: selfhost
+
   # mobile-ui：由 architecture:adopt 登记
   - id: mobile-ui
     roots:
       - packages/ui/src/components/mobile-ui
     managed: true
     requires:
+      - codex-brand
       - ui
     publicEntrypoints:
       - packages/ui/src/components/mobile-ui/index.ts

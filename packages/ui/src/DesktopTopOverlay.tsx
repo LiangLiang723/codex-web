@@ -38,7 +38,6 @@ interface DesktopTopOverlayProps {
   canGoBack: boolean;
   canGoForward: boolean;
   showNewTaskButton?: boolean;
-  appLogoUrl: string;
   platform: IPlatformService;
   onToggleSidebar: () => void;
   onCreateTask: () => void;
@@ -68,7 +67,6 @@ export function DesktopTopOverlay({
   canGoBack: _canGoBack,
   canGoForward: _canGoForward,
   showNewTaskButton,
-  appLogoUrl: _appLogoUrl,
   platform,
   onToggleSidebar,
   onCreateTask,

@@ -5713,6 +5713,26 @@ nodes:
       - symbol: "SessionPane"
         file: "packages/ui/src/v4/SessionPane.tsx"
 
+  - id: "capability.selfhost-brand-pet"
+    kind: "capability"
+    label: "Codex Web marks, theme and conversation pet"
+    aliases: ["品牌", "浏览器图标", "桌宠", "Bot", "favicon"]
+    docs: ["specs/selfhost-codex/brand-and-conversation-pet.md"]
+    codeSeeds:
+      - symbol: "BotAvatar"
+        file: "packages/ui/src/brand/BotAvatar.tsx"
+      - symbol: "ConversationPet"
+        file: "packages/ui/src/brand/ConversationPet.tsx"
+      - symbol: "createZCodeStore"
+        file: "packages/ui/src/store/index.ts"
+      - symbol: "applyTheme"
+        file: "packages/ui/src/useTheme.ts"
+      - symbol: "AppearanceSectionContent"
+        file: "packages/ui/src/settingsCodePreview.tsx"
+    invariants:
+      - "The renderer preference owns visibility. Thread binding and phase determine placement and animation."
+      - "The resolved root theme controls the monochrome Bot mark and favicon."
+
   - id: "capability.selfhost-codex-extensions"
     kind: "capability"
     label: "Manage native Codex apps, plugins and skills on the selected SSH host"
@@ -5756,6 +5776,10 @@ nodes:
       - "The active native request supplies the displayed approval decisions and the exact prefix tokens returned to Codex."
 
 edges:
+  - from: "capability.selfhost-brand-pet"
+    to: "surface.selfhost-codex-conversation"
+    type: "renders-in"
+    rank: "must-inspect"
   - from: "capability.selfhost-codex-extensions"
     to: "capability.plugin-market-ui"
     type: "renders-in"

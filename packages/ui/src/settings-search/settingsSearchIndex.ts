@@ -2,6 +2,7 @@ import type { SettingsSectionId } from "@/lib/settingsNavigation.js";
 
 export interface SettingsSearchAvailability {
   desktop: boolean;
+  selfHosted: boolean;
   macDesktop: boolean;
   windowsHost: boolean;
   tray: boolean;
@@ -198,6 +199,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     section: "appearance",
     description: "settings.themeModeDescription",
     visibility: "all",
+  },
+  {
+    id: "settings.conversationPet",
+    section: "conversationPet",
+    description: "settings.conversationPetDescription",
+    visibility: "selfHosted",
   },
   {
     id: "settings.fontSmoothing",

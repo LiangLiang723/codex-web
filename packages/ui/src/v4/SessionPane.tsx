@@ -1,4 +1,6 @@
 import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
+import { BotActivityProvider, ConversationPet } from "@/brand/index.js";
+import { DEFAULT_PET_PREFERENCES, type ConversationPetActivity } from "@/brand/contract.js";
 import { GitBranchActionsHost } from "@/GitBranchSwitcher.js";
 import { completeNewModelSelection } from "@zcode/provider";
 import { useSubagents } from "@/hooks/useSubagents.js";
@@ -7,6 +9,7 @@ import { ToolPresentationCapabilitiesProvider } from "@/ToolCallBlocks/presentat
 import { V4_PRIMARY_PANE_ID } from "@/v4/paneLayoutStore.js";
 import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
 import { useSessionRuntimeRestart } from "@/app-shell/useWorkspaceSessionReload.js";
+import { isZCodeCuaToolName } from "@/lib/cuaPermissionAction.js";
 import { isRequestVerificationConfigNetworkError } from "@/request-security-edition/errors.js";
 import { useShallow } from "zustand/react/shallow";
 import { remoteHostIdFromWorkspaceIdentity } from "@zcode/shared";
@@ -1396,6 +1399,7 @@ export function SessionPane({
   const composerDraftStateRef = useRef({ hasContent: false, busy: false });
   // composer 编辑态下用于判断「是否已改动」：只在切换编辑目标时读取。
   const composerTextRef = useRef("");
+  const notifyPetComposerActivity = useRef<(() => void) | null>(null);
   const composerEditWorkspaceModeRef = useRef<"preserve" | "rewind">("preserve");
   const [composerEditSubmitRequest, setComposerEditSubmitRequest] = useState(0);
   const timelineScrollToBottomRef = useRef<(() => void) | null>(null);
@@ -4469,6 +4473,8 @@ export function SessionPane({
     [],
   );
   const handleComposerTextChange = useCallback((text: string) => {
+    // 草稿的编辑器布局和对话底栏不同。沿用输入变化回调，桌宠只收到活动信号。
+    if (text.length > 0 && text !== composerTextRef.current) notifyPetComposerActivity.current?.();
     composerTextRef.current = text;
   }, []);
   const handleHighspeedActivationApplied = useCallback((cardId: string) => {
@@ -5624,6 +5630,11 @@ export function SessionPane({
   // 提交时先 stop barrier 再 rewind/rerun；UI 不应再用 completed gate 把入口整轮隐藏。
   const editActionsEnabled = runtimeReady && !readOnly && !selectionSideChat && Boolean(sessionId);
   const isDraft = sessionId === null;
+  const petEnabled = useZCodeStoreWithDefault((store) => store.conversationPetEnabled, true);
+  const petPreferences = useZCodeStoreWithDefault(
+    (store) => store.conversationPetPreferences,
+    DEFAULT_PET_PREFERENCES,
+  );
   // 滚动恢复必须使用与 sessionId 匹配的 lease projection。切换 session 的 render 与
   // passive effect 不在同一时刻，旧 lease 的 rows 若提前交给 timeline，会让新记忆按旧
   // 内容高度 clamp，后续目标 rows 到达时也无法区分这次临时落点。
@@ -6468,6 +6479,9 @@ export function SessionPane({
   const pendingGuideProjection = snapshot ? projectPendingGuideQueue(snapshot.queue) : null;
   // 子组件返回 null 不会让 React 元素变成假值；用同一可见队列控制内容和阻塞态外层留白。
   const visibleQueue = pendingGuideProjection?.visibleQueue ?? snapshot?.queue;
+  const composerInputPending = state.optimisticCommands.some((command) =>
+    requiresAcceptedInputProjection(command.type),
+  );
   const queueNode =
     sessionId && visibleQueue && visibleQueue.items.length > 0 ? (
       <ConversationQueuePanel
@@ -6497,9 +6511,7 @@ export function SessionPane({
       key="conversation-composer"
       // Snapshot 仍服务用量、路由与运行态；工具栏的 mode/model 只读下方 Composer Draft。
       snapshot={snapshot}
-      inputPending={state.optimisticCommands.some((command) =>
-        requiresAcceptedInputProjection(command.type),
-      )}
+      inputPending={composerInputPending}
       lifecycle={state.lifecycle}
       sessionId={sessionId}
       selectionCommentEnabled={selectionCommentSupported}
@@ -6809,10 +6821,72 @@ export function SessionPane({
     [attachmentPut, effectiveSessionId],
   );
   // 分享浮窗不再替换输入区，保持 Composer 与对话滚动位置稳定。
+  const showConversationPet =
+    selfHostedBuild &&
+    paneId === "workspace-main" &&
+    petEnabled &&
+    remoteAvailable &&
+    !readOnly &&
+    !errored &&
+    !isFloatingPresentation &&
+    !shareSelectionPanelVisible;
+  const petPhase = !isDraft ? snapshot?.control.phase : undefined;
+  const currentPetRow =
+    petPhase === "running"
+      ? snapshot?.rows.window.findLast((row) =>
+          row.kind === "reasoning" || row.kind === "assistantText"
+            ? row.state === "streaming"
+            : (row.kind === "toolCall" || row.kind === "subagent") &&
+              row.status === "running" &&
+              !row.backgrounded,
+        )
+      : undefined;
+  let petActivity: ConversationPetActivity = "idle";
+  if (!isDraft && blockingInteractionId) petActivity = "blocked";
+  else if (petPhase === "running") {
+    if (currentPetRow?.kind === "reasoning") petActivity = "thinking";
+    else if (currentPetRow?.kind === "assistantText") petActivity = "streaming";
+    else if (currentPetRow?.kind === "subagent") petActivity = "spawning";
+    else if (currentPetRow?.kind === "toolCall") {
+      const name = currentPetRow.toolName.toLowerCase().replace(/[-_]/gu, "");
+      if (/^(websearch|searchweb|grep|glob|rg)$/u.test(name)) petActivity = "searching";
+      else if (/^(bash|shell|terminal|execcommand|commandexecution)$/u.test(name)) {
+        petActivity = "running";
+      } else if (
+        currentPetRow.cuaApp ||
+        isZCodeCuaToolName(currentPetRow.toolName) ||
+        name === "cua" ||
+        name.includes("browseruse")
+      ) {
+        petActivity = "controlling";
+      } else if (/^(noderepl|calculator|calculate)$/u.test(name)) {
+        petActivity = "computing";
+      } else if (/^(filechange|applypatch|edit)$/u.test(name)) {
+        petActivity = "coding";
+      } else if (/^(write|writefile)$/u.test(name)) {
+        petActivity = "writing";
+      } else if (/^(read|readfile|listdirectory)$/u.test(name)) {
+        petActivity = "reading";
+      } else if (/^(agent|task|spawnagent|collabagenttoolcall)$/u.test(name)) {
+        petActivity = "spawning";
+      } else petActivity = "working";
+    } else petActivity = "working";
+  } else if (petPhase === "prewarming" || composerInputPending) petActivity = "sending";
+  else if (showConversationPet && (draftRuntimeRebuilding || modelSelectionPending)) petActivity = "loading";
+  else if (showConversationPet && visibleQueue?.items.length) petActivity = "waiting";
   const conversationBottomDock = conversationBottomDockContent ? (
-    <ConversationBottomDockTransition mode="chat">
-      {conversationBottomDockContent}
-    </ConversationBottomDockTransition>
+    <>
+      {showConversationPet && !isDraft ? (
+        <div
+          aria-hidden="true"
+          data-codex-pet-anchor="composer"
+          className="pointer-events-none mr-3 ml-auto h-[var(--codex-pet-compact-size,2.25rem)] w-9"
+        />
+      ) : null}
+      <ConversationBottomDockTransition mode="chat">
+        {conversationBottomDockContent}
+      </ConversationBottomDockTransition>
+    </>
   ) : null;
 
   const { agents: presentationAgents } = useSubagents(
@@ -7050,6 +7124,7 @@ export function SessionPane({
                         <div data-testid={TID_CHAT_EMPTY} className="w-full">
                           <ConversationDraftEmptyState
                             compactForRemoteControl={compactForRemoteControl}
+                            showPet={showConversationPet}
                           />
                         </div>
                       ) : null
@@ -7110,6 +7185,33 @@ export function SessionPane({
               </BotGroupDeliveryProvider>
             </SessionPluginReferenceIconBoundary>
           )}
+          {showConversationPet ? (
+            <>
+              {!isDraft ? (
+                <div
+                  aria-hidden="true"
+                  data-codex-pet-anchor="rail"
+                  className="pointer-events-none absolute right-[calc(11rem-clamp(1.75rem,7dvh,4.25rem))] bottom-4 hidden aspect-square w-[clamp(3.5rem,14dvh,8.5rem)] peer-data-[status-placement=inline]/session-status:block"
+                />
+              ) : null}
+              <ConversationPet
+                draft={isDraft}
+                working={petPhase === "running"}
+                activity={petActivity}
+                completion={
+                  petPhase === "completedSuccess"
+                    ? "finished"
+                    : petPhase === "error"
+                      ? "failed"
+                      : undefined
+                }
+                conversationKey={isDraft ? null : `${workspaceKey}\u0000${sessionId}`}
+                interactionLabel={intl.formatMessage({ id: "settings.conversationPet" })}
+                onComposerActivity={notifyPetComposerActivity}
+                preferences={petPreferences}
+              />
+            </>
+          ) : null}
         </div>
       </div>
     </PluginUiSessionProvider>
@@ -7123,7 +7225,9 @@ export function SessionPane({
         dirtyFileCount={gitDirtyFileCount ?? 0}
         onRefreshGit={onRefreshGit}
       >
-        {paneContent}
+        <BotActivityProvider enabled={selfHostedBuild} scope={`${workspaceKey}\u0000${sessionId}`} activity={petActivity}>
+          {paneContent}
+        </BotActivityProvider>
       </GitBranchActionsHost>
     </ToolPresentationCapabilitiesProvider>
   );

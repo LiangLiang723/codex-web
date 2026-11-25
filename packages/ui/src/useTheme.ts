@@ -49,6 +49,12 @@ function syncBrowserThemeSurface(resolved: ResolvedTheme) {
   root.style.colorScheme = resolved;
   setThemeMetaContent("color-scheme", resolved);
 
+  const icon = document.querySelector<HTMLLinkElement>("link[data-codex-bot-favicon]");
+  if (icon) {
+    const href = new URL(`codex-bot-${resolved}.svg?v=3`, icon.href).href;
+    if (icon.href !== href) icon.href = href;
+  }
+
   const background = getComputedStyle(root).getPropertyValue("--color-background").trim();
   if (background) {
     setThemeMetaContent("theme-color", background);

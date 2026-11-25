@@ -6,6 +6,7 @@ export type SettingsSectionId =
   | "general"
   | "agentBehavior"
   | "appearance"
+  | "conversationPet"
   | "migration"
   | "browser"
   | "modelProvider"
@@ -78,6 +79,7 @@ function isSettingsSectionId(value: string): value is SettingsSectionId {
     value === "general" ||
     value === "agentBehavior" ||
     value === "appearance" ||
+    value === "conversationPet" ||
     value === "migration" ||
     value === "browser" ||
     value === "modelProvider" ||
@@ -105,7 +107,10 @@ function isSettingsSectionId(value: string): value is SettingsSectionId {
 }
 
 export function isSettingsSectionEnabled(section: SettingsSectionId): boolean {
-  return (section !== "codexApps" || selfHostedBuild) && !HIDDEN_SETTINGS_SECTIONS.has(section);
+  return (
+    ((section !== "codexApps" && section !== "conversationPet") || selfHostedBuild) &&
+    !HIDDEN_SETTINGS_SECTIONS.has(section)
+  );
 }
 
 export function resolveSettingsSection(

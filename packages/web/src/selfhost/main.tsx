@@ -653,7 +653,6 @@ function App() {
     />
   );
 }
-document.title = "ZCode · Codex";
 createRoot(document.getElementById("root")!).render(
   <ZCodeIntlProvider>
     <AppErrorBoundary>

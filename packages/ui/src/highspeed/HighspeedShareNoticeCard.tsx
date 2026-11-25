@@ -1,3 +1,4 @@
+import { BotAvatar } from "@/brand/index.js";
 import { useEffect, useState, type CSSProperties } from "react";
 import { CopyIcon, EyeIcon, XIcon, ZapIcon } from "lucide-react";
 import { animate, motion, useReducedMotion } from "motion/react";
@@ -7,7 +8,6 @@ import shareDialogNoiseUrl from "@/assets/highspeed/share-dialog-noise.png";
 import shareDialogNoiseLightUrl from "@/assets/highspeed/share-dialog-noise-light.png";
 import zaiLogoUrl from "@/assets/highspeed/zai-logo.png";
 import { Button } from "@/components/ui/button.js";
-import { ZCodeWordmarkLogo } from "@/components/ui/ZCodeAboutLogo.js";
 import {
   Dialog,
   DialogClose,
@@ -74,8 +74,9 @@ export function HighspeedShareNoticeCard({
             data-highspeed-card-background="dark"
           />
           <div className="highspeed-sidebar-share-card__content">
-            <div className="highspeed-sidebar-share-card__title" role="img" aria-label="ZCode">
-              <ZCodeWordmarkLogo className="highspeed-sidebar-share-card__wordmark" />
+            <div className="highspeed-sidebar-share-card__title flex items-center gap-1 text-ui-xs font-medium">
+              <BotAvatar className="size-4" />
+              <span>Codex Web</span>
             </div>
             <Button
               type="button"

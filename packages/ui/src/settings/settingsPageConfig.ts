@@ -76,6 +76,12 @@ const BASE_SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
     groupId: "basics",
   },
   {
+    id: "conversationPet",
+    icon: Bot,
+    titleId: "settings.conversationPet",
+    groupId: "basics",
+  },
+  {
     id: "modelProvider",
     icon: Package,
     titleId: "settings.modelProviderTitle",

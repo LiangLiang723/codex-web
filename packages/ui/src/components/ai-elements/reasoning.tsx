@@ -12,7 +12,8 @@ import { useControllableState } from "@radix-ui/react-use-controllable-state";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible.js";
 import { cn } from "../lib/utils.js";
 import { TID_CHAT_REASONING_CONTENT, TID_CHAT_REASONING_TRIGGER } from "@zcode/shared/test-ids";
-import { BrainIcon, ChevronRightIcon } from "lucide-react";
+import { ChevronRightIcon } from "lucide-react";
+import { BotAvatar, useBotActivity } from "@/brand/index.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { QueuedSummaryContent } from "@/ToolCallBlocks/QueuedSummaryContent.js";
 import type { ComponentProps, CSSProperties, ReactNode } from "react";
@@ -278,6 +279,7 @@ export const ReasoningTrigger = memo(
     const preview = useContext(SummaryPreviewContext);
     const { isStreaming, isOpen, duration } = useReasoning();
     const { intl } = useZCodeIntl();
+    const botActivity = useBotActivity();
     const streamingSummary =
       isStreaming && !isOpen ? resolveReasoningStreamingSummary(streamingText) : null;
     const streamingSummaryRef = useRef<HTMLSpanElement | null>(null);
@@ -357,11 +359,13 @@ export const ReasoningTrigger = memo(
       <>
         {children ?? (
           <>
-            {/* thinking 会在长流式回复里持续存在，旋转 loader 会长期占用渲染资源；
-            运行态保留文案扫光，图标固定为静态思考语义。 */}
-            <BrainIcon
+            <BotAvatar
               data-summary-leading-icon
-              className="size-4 shrink-0 text-foreground-subtle group-hover/reasoning:text-foreground"
+              className="size-5"
+              mood="thinking"
+              renderSize={20}
+              animated={Boolean(isStreaming && botActivity)}
+              motion={isStreaming && botActivity?.activity === "thinking" ? botActivity.motion : "thinking"}
             />
             {/* 右侧流式摘要是可伸缩内容；如果左侧标签也参与 flex shrink，
                 长摘要会把思考状态标签挤成多行。固定语义标签宽度，只让摘要占剩余空间。 */}

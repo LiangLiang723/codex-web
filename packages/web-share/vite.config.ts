@@ -70,6 +70,10 @@ export default defineConfig(({ mode }) => {
           find: "@zcode/shared/test-ids",
           replacement: resolve(REPO_ROOT, "packages/shared/src/test-ids.ts"),
         },
+        {
+          find: "@zcode/ui/bot-brand",
+          replacement: resolve(REPO_ROOT, "packages/ui/src/brand/index.ts"),
+        },
         // 分享管理页复用的基础控件；只依赖 radix-ui / cva / lucide，均在 share-ui 依赖闭包内。
         {
           find: "@zcode/ui/button",

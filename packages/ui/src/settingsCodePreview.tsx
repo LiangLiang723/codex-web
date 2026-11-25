@@ -101,7 +101,6 @@ export function AppearanceSectionContent({
 }) {
   const { intl } = useZCodeIntl();
   const activePreviewMode = resolveTheme(theme);
-
   return (
     <>
       <div className="min-w-0 space-y-3">
