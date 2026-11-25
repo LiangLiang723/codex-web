@@ -3,10 +3,21 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import type { ZCodeProvider } from "@zcode/shared";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { createPortal } from "react-dom";
-import { PaletteIcon } from "lucide-react";
+import {
+  FileSearch,
+  FolderOpen,
+  GoalIcon,
+  Lightbulb,
+  PaletteIcon,
+  PaperclipIcon,
+} from "lucide-react";
+import type { AppSlashCommand } from "@/slashCommandHelpers.js";
 import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import {
   $createTextNode,
+  $getRoot,
+  $getSelection,
+  $isRangeSelection,
   BLUR_COMMAND,
   COMMAND_PRIORITY_CRITICAL,
   COMMAND_PRIORITY_LOW,
@@ -30,6 +41,7 @@ import {
 import { PluginMentionOptionContent } from "@/mentions/components/PluginMentionOptionContent.js";
 import {
   MentionPanel,
+  visibleMentionPanelOptions,
   type MentionPanelOption,
   type MentionPanelSection,
 } from "./components/MentionPanel.js";
@@ -67,6 +79,12 @@ import {
 import { getCurrentTextNodeSelection } from "./mentionHelpers.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 
+export interface ComposerAdditionMenu {
+  open: boolean;
+  onClose: () => void;
+  attachmentAction?: { onSelect: () => void };
+}
+
 interface MentionPluginProps {
   container?: HTMLElement | null;
   workspacePath: string;
@@ -76,6 +94,9 @@ interface MentionPluginProps {
   /** 自托管 Codex 的实际 Thread，草稿预热目录不传此值。 */
   nativeThreadId?: string | null;
   disabled?: boolean;
+  additionMenu?: ComposerAdditionMenu;
+  appCommands?: readonly AppSlashCommand[];
+  allowGoal?: boolean;
   onWhiteboardMentionSelected?: (boardId: string) => void | Promise<void>;
 }
 
@@ -148,6 +169,25 @@ export function shouldFreezeMentionRecalcWhileComposing(
   return isComposing && !/Android/i.test(userAgent);
 }
 
+function $selectMentionToken(token: ActivePromptInputTokenSnapshot | null, candidates: string[]) {
+  const selectionState = getCurrentTextNodeSelection();
+  if (!selectionState) return null;
+
+  const range = getActivePromptInputTokenReplacementRange(token, selectionState);
+  const trigger = range ? token : extractActivePromptInputTrigger(selectionState.textBeforeCursor);
+  if (!trigger || (trigger.trigger !== "@" && trigger.trigger !== "$" && trigger.trigger !== "#")) {
+    return null;
+  }
+
+  const start = range?.start ?? selectionState.cursorOffset - trigger.query.length - 1;
+  const end =
+    range?.end ??
+    selectionState.cursorOffset +
+      getActivePromptInputTokenTailLength(trigger, selectionState.textAfterCursor, candidates);
+  selectionState.selection.setTextNodeRange(selectionState.node, start, selectionState.node, end);
+  return selectionState.selection;
+}
+
 export function MentionPlugin({
   workspacePath,
   workspaceIdentity,
@@ -156,6 +196,9 @@ export function MentionPlugin({
   provider,
   container,
   disabled = false,
+  additionMenu,
+  appCommands,
+  allowGoal,
   onWhiteboardMentionSelected,
 }: MentionPluginProps & { provider: ZCodeProvider }) {
   const [editor] = useLexicalComposerContext();
@@ -166,26 +209,24 @@ export function MentionPlugin({
   const [activeTrigger, setActiveTrigger] = useState<ActivePromptInputTrigger | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const dismissedSignatureRef = useRef<string | null>(null);
-  const activeSignatureRef = useRef<string | null>(null);
   const activeTokenRef = useRef<ActivePromptInputTokenSnapshot | null>(null);
-  const activeQuery = activeTrigger?.query ?? "";
+  const additionOpen = additionMenu?.open === true;
+  const closeAdditionMenu = additionMenu?.onClose;
+  const trigger = additionOpen ? "@" : activeTrigger?.trigger;
+  const activeQuery = additionOpen ? "" : (activeTrigger?.query ?? "");
   // 候选过滤会在渲染线程扫描大型 workspace；输入框与搜索共用同一个 query
   // 时，快速输入/删除会让每次按键都同步承担搜索成本。deferred query 只延后候选派生，
   // 不延后编辑器 token、触发器和最终插入，因此输入始终跟手，结果最终收敛到最新 query。
   const deferredActiveQuery = useDeferredValue(activeQuery);
   const hasActiveQuery = hasMentionQuery(activeQuery);
   const activeSignature = useMemo(
-    () => getPromptInputTriggerSignature(activeTrigger),
-    [activeTrigger],
+    () => (additionOpen ? "+" : getPromptInputTriggerSignature(activeTrigger)),
+    [activeTrigger, additionOpen],
   );
-  const isOpen =
-    !disabled &&
-    (activeTrigger?.trigger === "@" ||
-      activeTrigger?.trigger === "$" ||
-      activeTrigger?.trigger === "#");
-  const isContextTrigger = activeTrigger?.trigger === "@";
-  const isSessionTrigger = activeTrigger?.trigger === "#";
-  const isSkillTrigger = activeTrigger?.trigger === "$";
+  const isOpen = !disabled && (trigger === "@" || trigger === "$" || trigger === "#");
+  const isContextTrigger = trigger === "@";
+  const isSessionTrigger = trigger === "#";
+  const isSkillTrigger = trigger === "$";
   const showNativeReferences = selfHostedBuild && isContextTrigger;
   const appsResult = useCodexAppsMentionProvider(
     workspacePath,
@@ -235,7 +276,7 @@ export function MentionPlugin({
     workspaceIdentity,
     deferredActiveQuery,
     isOpen && (isContextTrigger || isSessionTrigger),
-    getSessionMentionWorkspaceScope(activeTrigger?.trigger),
+    getSessionMentionWorkspaceScope(trigger),
     intl.formatMessage({ id: "chat.mention.sessions.empty" }),
     intl.formatMessage({ id: "chat.mention.sessions.title" }),
     intl.formatMessage({ id: "project.tasks" }),
@@ -265,7 +306,7 @@ export function MentionPlugin({
   });
 
   const panelGroups = useMemo<MentionResultGroup<MentionItem>[]>(() => {
-    if (activeTrigger?.trigger === "#" && sessionsResult.groups?.length) {
+    if (trigger === "#" && sessionsResult.groups?.length) {
       return buildVisibleMentionGroups(
         sessionsResult.groups.map((group) => ({
           ...group,
@@ -327,25 +368,32 @@ export function MentionPlugin({
         errorText: appsResult.error?.message ?? null,
         emptyText: appsResult.emptyText,
       };
-      if (activeTrigger?.trigger === "$") return [groupsById.skills, apps];
-      if (activeTrigger?.trigger === "@") {
+      if (trigger === "$") return [groupsById.skills, apps];
+      if (trigger === "@") {
         const groups = [
+          groupsById.plugins,
+          apps,
+          groupsById.skills,
           groupsById.files,
           groupsById.sessions,
-          groupsById.plugins,
-          groupsById.skills,
         ];
-        if (hasActiveQuery) return buildVisibleMentionGroups([...groups, apps]);
-        // 空查询预览各类内容，远端目录较大时也能看到后面的分组。
-        return [...buildVisibleMentionGroups(groups), apps].map((group) => ({
-          ...group,
-          items: group.items.slice(0, MENTION_DEFAULT_GROUP_PREVIEW_LIMIT),
-        }));
+        if (hasActiveQuery) return buildVisibleMentionGroups(groups);
+        return groups
+          .filter((group) => group.id === "apps" || buildVisibleMentionGroups([group]).length > 0)
+          .map((group) => ({
+            ...group,
+            items: group.items.slice(
+              0,
+              group.id === "files"
+                ? MENTION_FILES_ONLY_DEFAULT_PREVIEW_LIMIT
+                : MENTION_DEFAULT_GROUP_PREVIEW_LIMIT,
+            ),
+          }));
       }
     }
     return buildVisibleMentionGroups([
-      ...getMentionPanelGroupOrder(activeTrigger?.trigger).map((groupId) => groupsById[groupId]),
-      ...(activeTrigger?.trigger === "@" ? extensionGroups : []),
+      ...getMentionPanelGroupOrder(trigger).map((groupId) => groupsById[groupId]),
+      ...(trigger === "@" ? extensionGroups : []),
     ]);
   }, [
     extensionGroups,
@@ -354,7 +402,7 @@ export function MentionPlugin({
     fileResult.items,
     fileResult.loading,
     fileResult.title,
-    activeTrigger?.trigger,
+    trigger,
     hasActiveQuery,
     appsResult.emptyText,
     appsResult.error,
@@ -384,14 +432,96 @@ export function MentionPlugin({
     skillsResult.title,
   ]);
 
-  const flatItems = useMemo(() => panelGroups.flatMap((group) => group.items), [panelGroups]);
+  const firstFileId = panelGroups.find(
+    (group) => group.id === "files" && !group.loading && !group.errorText,
+  )?.items[0]?.id;
+  const attachmentAction = additionMenu?.attachmentAction;
+  const showAddActions = selfHostedBuild && isOpen && isContextTrigger && !hasActiveQuery;
+  const showGoal =
+    showAddActions &&
+    allowGoal &&
+    !nativeThreadId &&
+    Boolean(attachmentAction) &&
+    editor
+      .getEditorState()
+      .read(() => $getRoot().getTextContent().trim() === (additionOpen ? "" : "@"));
+  const addActions = useMemo(() => {
+    if (!showAddActions) return [];
+    const project = appCommands?.find((command) => command.value === "project");
+    const plan = appCommands?.find((command) => command.value === "plan");
+    return [
+      ...(attachmentAction
+        ? [
+            {
+              id: "add-attachment",
+              label: intl.formatMessage({ id: "selfhost.composer.add" }),
+              description: "",
+              Icon: PaperclipIcon,
+              run: attachmentAction.onSelect,
+            },
+          ]
+        : []),
+      ...(project
+        ? [{ ...project, id: "add-project", label: project.label ?? "/project", Icon: FolderOpen }]
+        : []),
+      ...(showGoal
+        ? [
+            {
+              id: "add-goal",
+              label: intl.formatMessage({ id: "chat.goalBanner.label" }),
+              description: intl.formatMessage({ id: "selfhost.composer.goal" }),
+              Icon: GoalIcon,
+            },
+          ]
+        : []),
+      ...(plan ? [{ ...plan, id: "add-plan", label: plan.label ?? "/plan", Icon: Lightbulb }] : []),
+      ...(firstFileId
+        ? [
+            {
+              id: "add-files",
+              label: intl.formatMessage({ id: "selfhost.composer.files" }),
+              description: "",
+              Icon: FileSearch,
+            },
+          ]
+        : []),
+    ];
+  }, [appCommands, attachmentAction, firstFileId, intl, showAddActions, showGoal]);
 
   const panelSections = useMemo<MentionPanelSection[]>(
-    () =>
-      panelGroups.map((group) => ({
+    () => [
+      ...(addActions.length
+        ? [
+            {
+              id: "add",
+              title: intl.formatMessage({ id: "chat.composer.addSection" }),
+              emptyText: "",
+              showHeader: true,
+              options: addActions.map(({ id, label, description, Icon }) => ({
+                id,
+                label,
+                description,
+                content: (
+                  <span className="flex min-w-0 flex-1 items-center gap-2">
+                    <Icon className="size-4 shrink-0 text-foreground-subtle" aria-hidden="true" />
+                    <span className="shrink-0 text-ui-base font-medium text-foreground">
+                      {label}
+                    </span>
+                    {description ? (
+                      <span className="min-w-0 truncate text-ui-sm text-foreground-subtle">
+                        {description}
+                      </span>
+                    ) : null}
+                  </span>
+                ),
+              })),
+            },
+          ]
+        : []),
+      ...panelGroups.map((group) => ({
         id: group.id,
         title: group.title,
-        showHeader: selfHostedBuild || activeTrigger?.trigger === "#" || group.showHeader === true,
+        showHeader: selfHostedBuild || trigger === "#" || group.showHeader === true,
         options: group.items.map<MentionPanelOption>((item) => ({
           id: item.id,
           label: item.displayLabel ?? item.label,
@@ -435,12 +565,13 @@ export function MentionPlugin({
         noticeText: group.noticeText ?? null,
         emptyText: group.emptyText,
       })),
-    [intl, panelGroups, workspacePath, activeTrigger?.trigger],
+    ],
+    [addActions, intl, panelGroups, workspacePath, trigger],
   );
-
-  useEffect(() => {
-    activeSignatureRef.current = activeSignature;
-  }, [activeSignature]);
+  const flatItems = useMemo(
+    () => panelSections.flatMap(visibleMentionPanelOptions),
+    [panelSections],
+  );
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -455,219 +586,136 @@ export function MentionPlugin({
       return;
     }
 
+    closeAdditionMenu?.();
     setActiveTrigger(null);
     setSelectedIndex(0);
     activeTokenRef.current = null;
-  }, [disabled]);
+  }, [closeAdditionMenu, disabled]);
 
   useEffect(() => {
-    return editor.registerUpdateListener(({ dirtyElements, dirtyLeaves, editorState }) => {
-      if (
-        shouldFreezeMentionRecalcWhileComposing(
-          editor.isComposing(),
-          typeof navigator === "undefined" ? "" : navigator.userAgent,
-        )
-      ) {
-        return;
-      }
-      editorState.read(() => {
-        if (disabled) {
-          activeTokenRef.current = null;
-          setActiveTrigger(null);
-          return;
-        }
-
-        const selectionState = getCurrentTextNodeSelection();
-        if (!selectionState) {
-          activeTokenRef.current = null;
-          dismissedSignatureRef.current = null;
-          setActiveTrigger(null);
-          return;
-        }
-
-        const nextActiveToken = reconcileActivePromptInputTokenSnapshot(
-          activeTokenRef.current,
-          selectionState,
-          dirtyElements.size === 0 && dirtyLeaves.size === 0,
-        );
+    return editor.registerUpdateListener(
+      ({ dirtyElements, dirtyLeaves, editorState, prevEditorState }) => {
+        if (disabled) return;
+        const selectionOnly = dirtyElements.size === 0 && dirtyLeaves.size === 0;
+        // 加号打开时光标仍属于 Lexical。正文发生编辑后关闭加号，让新输入的触发符接管面板。
         if (
-          !nextActiveToken ||
-          (nextActiveToken.trigger !== "@" &&
-            nextActiveToken.trigger !== "$" &&
-            nextActiveToken.trigger !== "#")
+          additionOpen &&
+          !selectionOnly &&
+          editorState.read(() => $getRoot().getTextContent()) !==
+            prevEditorState.read(() => $getRoot().getTextContent())
         ) {
-          activeTokenRef.current = null;
-          dismissedSignatureRef.current = null;
-          setActiveTrigger(null);
-          return;
+          closeAdditionMenu?.();
         }
-        activeTokenRef.current = nextActiveToken;
-
-        const nextSignature = getPromptInputTriggerSignature(nextActiveToken);
         if (
-          dismissedSignatureRef.current !== null &&
-          dismissedSignatureRef.current !== nextSignature
+          shouldFreezeMentionRecalcWhileComposing(
+            editor.isComposing(),
+            typeof navigator === "undefined" ? "" : navigator.userAgent,
+          )
         ) {
-          dismissedSignatureRef.current = null;
-        }
-
-        if (dismissedSignatureRef.current === nextSignature) {
-          setActiveTrigger(null);
           return;
         }
-
-        setActiveTrigger((current) => {
-          if (
-            current?.trigger === nextActiveToken.trigger &&
-            current.query === nextActiveToken.query
-          ) {
-            return current;
-          }
-
-          return {
-            query: nextActiveToken.query,
-            trigger: nextActiveToken.trigger,
-          };
-        });
-      });
-    });
-  }, [disabled, editor]);
-
-  const insertMentionItem = useCallback(
-    (item: MentionItem) => {
-      if (item.category === "whiteboards" && onWhiteboardMentionSelected) {
-        editor.update(() => {
+        editorState.read(() => {
           const selectionState = getCurrentTextNodeSelection();
-          if (!selectionState) {
+          const token = selectionState
+            ? reconcileActivePromptInputTokenSnapshot(
+                activeTokenRef.current,
+                selectionState,
+                selectionOnly,
+              )
+            : null;
+          if (!token || (token.trigger !== "@" && token.trigger !== "$" && token.trigger !== "#")) {
+            activeTokenRef.current = null;
+            dismissedSignatureRef.current = null;
+            setActiveTrigger(null);
             return;
           }
+          activeTokenRef.current = token;
+          if (dismissedSignatureRef.current === getPromptInputTriggerSignature(token)) return;
+          dismissedSignatureRef.current = null;
 
-          const snapshotRange = getActivePromptInputTokenReplacementRange(
-            activeTokenRef.current,
-            selectionState,
+          setActiveTrigger((current) =>
+            current?.trigger === token.trigger && current.query === token.query
+              ? current
+              : { query: token.query, trigger: token.trigger },
           );
-          const activeMentionTrigger = snapshotRange
-            ? activeTokenRef.current
-            : extractActivePromptInputTrigger(selectionState.textBeforeCursor);
-          if (
-            !activeMentionTrigger ||
-            (activeMentionTrigger.trigger !== "@" && activeMentionTrigger.trigger !== "$")
-          ) {
-            return;
-          }
-
-          const tokenStart =
-            snapshotRange?.start ??
-            selectionState.cursorOffset - activeMentionTrigger.query.length - 1;
-          const tokenEnd =
-            snapshotRange?.end ??
-            selectionState.cursorOffset +
-              getActivePromptInputTokenTailLength(
-                activeMentionTrigger,
-                selectionState.textAfterCursor,
-                [item.label, item.value, item.markdown],
-              );
-          selectionState.selection.setTextNodeRange(
-            selectionState.node,
-            tokenStart,
-            selectionState.node,
-            tokenEnd,
-          );
-          selectionState.selection.insertText("");
         });
+      },
+    );
+  }, [additionOpen, closeAdditionMenu, disabled, editor]);
 
-        dismissedSignatureRef.current = null;
-        activeTokenRef.current = null;
-        setActiveTrigger(null);
-        setSelectedIndex(0);
-        void onWhiteboardMentionSelected(item.value);
-        requestAnimationFrame(() => {
-          editor.focus();
-        });
-        return;
-      }
-
-      editor.update(() => {
-        const selectionState = getCurrentTextNodeSelection();
-        if (!selectionState) {
-          return;
-        }
-
-        const snapshotRange = getActivePromptInputTokenReplacementRange(
-          activeTokenRef.current,
-          selectionState,
-        );
-        const activeMentionTrigger = snapshotRange
-          ? activeTokenRef.current
-          : extractActivePromptInputTrigger(selectionState.textBeforeCursor);
-        if (
-          !activeMentionTrigger ||
-          (activeMentionTrigger.trigger !== "@" &&
-            activeMentionTrigger.trigger !== "$" &&
-            activeMentionTrigger.trigger !== "#")
-        ) {
-          return;
-        }
-
-        const tokenStart =
-          snapshotRange?.start ??
-          selectionState.cursorOffset - activeMentionTrigger.query.length - 1;
-        const tokenEnd =
-          snapshotRange?.end ??
-          selectionState.cursorOffset +
-            getActivePromptInputTokenTailLength(
-              activeMentionTrigger,
-              selectionState.textAfterCursor,
-              [item.label, item.value, item.markdown],
-            );
-        selectionState.selection.setTextNodeRange(
-          selectionState.node,
-          tokenStart,
-          selectionState.node,
-          tokenEnd,
-        );
-        const trailingWhitespace = $createTextNode(" ");
-        selectionState.selection.insertNodes([
-          $createPromptMentionNode({
-            id: item.id,
-            category: item.category,
-            label: item.label,
-            value: item.value,
-            markdown: item.markdown,
-            description: item.description,
-            data: item.data,
-          }),
-          trailingWhitespace,
-        ]);
-        trailingWhitespace.selectEnd();
-      });
-
-      dismissedSignatureRef.current = null;
-      activeTokenRef.current = null;
-      setActiveTrigger(null);
-      setSelectedIndex(0);
-      requestAnimationFrame(() => {
-        editor.focus();
-      });
-    },
-    [editor, onWhiteboardMentionSelected],
-  );
+  const dismissPanel = useCallback(() => {
+    dismissedSignatureRef.current = getPromptInputTriggerSignature(activeTokenRef.current);
+    activeTokenRef.current = null;
+    closeAdditionMenu?.();
+    setActiveTrigger(null);
+    setSelectedIndex(0);
+  }, [closeAdditionMenu]);
 
   const selectOption = useCallback(
     (index: number) => {
-      const nextItem = flatItems[index];
-      if (!nextItem) {
-        return false;
-      }
-      // 禁选项（同名冲突 Plugin）不可插入：键盘 Enter/Tab 与鼠标点击都走这里统一拒绝。
-      if (nextItem.disabled) {
-        return false;
+      const option = flatItems[index];
+      if (!option || option.disabled) return false;
+      if (option.id === "add-files") {
+        const firstFileIndex = flatItems.findIndex(({ id }) => id === firstFileId);
+        if (firstFileIndex < 0) return false;
+        setSelectedIndex(firstFileIndex);
+        return true;
       }
 
-      insertMentionItem(nextItem);
+      const action = addActions.find(({ id }) => id === option.id);
+      const item: MentionItem | undefined =
+        option.id === "add-goal"
+          ? {
+              id: "slash:goal",
+              category: "commands",
+              label: "goal",
+              value: "goal",
+              markdown: "/goal",
+              description: option.description,
+            }
+          : panelGroups.flatMap(({ items }) => items).find(({ id }) => id === option.id);
+      const whiteboardId =
+        item?.category === "whiteboards" && onWhiteboardMentionSelected ? item.value : null;
+      const token = activeTokenRef.current;
+      editor.update(() => {
+        if (action?.run || whiteboardId) {
+          if (!additionOpen) $selectMentionToken(token, [])?.removeText();
+          return;
+        }
+        if (!item) return;
+        const selection = additionOpen
+          ? ($getSelection() ?? $getRoot().selectEnd())
+          : $selectMentionToken(token, [item.label, item.value, item.markdown]);
+        if (!$isRangeSelection(selection)) return;
+
+        const trailingWhitespace = $createTextNode(" ");
+        selection.insertNodes([$createPromptMentionNode(item), trailingWhitespace]);
+        trailingWhitespace.selectEnd();
+      });
+
+      dismissPanel();
+      // 焦点在回调前恢复。项目和设置等回调会自行接管焦点。
+      if (action?.run) {
+        editor.focus();
+        void action.run();
+      } else if (whiteboardId) {
+        void onWhiteboardMentionSelected?.(whiteboardId);
+        requestAnimationFrame(() => editor.focus());
+      } else {
+        requestAnimationFrame(() => editor.focus());
+      }
       return true;
     },
-    [flatItems, insertMentionItem],
+    [
+      addActions,
+      additionOpen,
+      dismissPanel,
+      editor,
+      firstFileId,
+      flatItems,
+      onWhiteboardMentionSelected,
+      panelGroups,
+    ],
   );
 
   useEffect(() => {
@@ -739,23 +787,17 @@ export function MentionPlugin({
         event?.preventDefault();
         event?.stopPropagation();
 
-        dismissedSignatureRef.current = activeSignatureRef.current;
-        setActiveTrigger(null);
-        setSelectedIndex(0);
+        dismissPanel();
         return true;
       },
       COMMAND_PRIORITY_CRITICAL,
     );
 
-    // 调试说明：先注释掉 blur 自动关闭逻辑，方便观察 panel 在焦点切换时的实际行为。
-    // 当前只移除“失焦即消失”这一路径，Esc / 选中项 / trigger 失效等关闭逻辑仍然保留。
     const unregisterBlur = editor.registerCommand(
       BLUR_COMMAND,
       () => {
+        dismissPanel();
         dismissedSignatureRef.current = null;
-        activeTokenRef.current = null;
-        setActiveTrigger(null);
-        setSelectedIndex(0);
         return false;
       },
       COMMAND_PRIORITY_LOW,
@@ -769,15 +811,17 @@ export function MentionPlugin({
       unregisterEscape();
       unregisterBlur();
     };
-  }, [editor, flatItems, isOpen, selectOption, selectedIndex]);
+  }, [dismissPanel, editor, flatItems, isOpen, selectOption, selectedIndex]);
 
-  const panelTitle = intl.formatMessage({ id: "chat.mention.title" });
+  const panelTitle = intl.formatMessage({
+    id: showAddActions ? "chat.composer.addSection" : "chat.mention.title",
+  });
   const panelDescription =
     selfHostedBuild || hasActiveQuery
       ? ""
-      : activeTrigger?.trigger === "#"
+      : trigger === "#"
         ? intl.formatMessage({ id: "chat.mention.sessions.searchHint" })
-        : activeTrigger?.trigger === "$"
+        : trigger === "$"
           ? intl.formatMessage({ id: "chat.mention.skills.searchHint" })
           : intl.formatMessage({ id: "chat.mention.searchHint" });
   const panelEmptyText = hasActiveQuery
@@ -792,8 +836,15 @@ export function MentionPlugin({
     <MentionPanel
       title={panelTitle}
       description={panelDescription}
+      footer={
+        showAddActions ? (
+          <p className="border-t border-border px-3 py-1.5 text-ui-xs text-foreground-subtle">
+            {intl.formatMessage({ id: "selfhost.composer.searchHint" })}
+          </p>
+        ) : undefined
+      }
       compact={selfHostedBuild}
-      trigger={activeTrigger?.trigger ?? "@"}
+      trigger={additionOpen ? "+" : (trigger ?? "@")}
       sections={panelSections}
       emptyText={panelEmptyText}
       selectedIndex={selectedIndex}

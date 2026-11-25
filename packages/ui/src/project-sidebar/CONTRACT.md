@@ -108,7 +108,7 @@ Root 的原项目完成 guard 从成员目录异步复验 entryId、membershipId
 
 项目菜单与所有项目行共用只读项目详情浮层；名称只在标题出现一次，本地正文仅按 roots 顺序列出完整目录，零目录显示「—」。远程项目追加设备、连接类型、地址及状态；只读既有项目与 Host 投影，hover 不发起查询或连接。远程浮层状态与项目行状态文字共用展示模型短状态。仅项目行在桌面端传入设备设置入口：`pending` 时浮层底部显示操作名入口，点击定位“设置 › 远程设备”对应设备卡，浮层不直接执行连接动作；紧凑单行保留在线/离线设备名。侧栏会话行（项目内、置顶区、最近更新）hover/focus 显示任务卡（任务 cwd、最近活动、分支、变更统计；远程任务仅设备徽标），不显示项目身份详情中的地址、连接类型、状态详情或设置入口；原有会话操作保留。鼠标移出行与浮层、键盘移出或 Escape 自动关闭，无关闭叉与点击锁定。文字可选择和复制，选区不改变关闭规则；触发区与详情区跨区移动沿用关闭缓冲，显示状态仅归身份浮层组件。
 
-聊天的连接后目录流程由 ProjectComposerMenu 持有一次发起意图。ComposerSubmissionPendingContext 仅向当前输入框投影提交阻塞；连接后台化、取消或草稿 owner 失效解除该投影。目录确认后读取目标 Host 的项目；唯一匹配沿实际项目 ID 登记入口，Root 准备与导航完成才释放门禁。异步期间绑定原 Host membership，attachment 提交导航前再次检查 membership、项目 ID 和固定 root。详见 docs/issues/remote-connection-ux/21-chat-settings-round-trip.md。
+聊天的连接后目录流程由 ProjectComposerMenu 持有一次发起意图。ComposerProjectPickerContext 投影当前草稿的菜单开关，项目按钮和输入框的项目快捷项都复用它。ComposerSubmissionPendingContext 仅向当前输入框投影提交阻塞；连接后台化、取消或草稿 owner 失效解除该投影。目录确认后读取目标 Host 的项目；唯一匹配沿实际项目 ID 登记入口，Root 准备与导航完成才释放门禁。异步期间绑定原 Host membership，attachment 提交导航前再次检查 membership、项目 ID 和固定 root。详见 docs/issues/remote-connection-ux/21-chat-settings-round-trip.md。
 
 聊天连接后台收起只保留既有返回 owner，解除原草稿提交门禁；显式继续由连接 owner 校验 Source，由聊天 owner 复验发起时已有成员的 membership，Root 同步标记校验中并在异步校验后重验原意图和 tab，交付后才消费，再进入共同目录流程。目录流程继承该成员资格，迟到结果不能重建已移除成员。首次无成员仍在明确选择后登记；Web 不新增连接 owner。
 

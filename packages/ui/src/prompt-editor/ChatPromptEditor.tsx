@@ -8,6 +8,7 @@ import type {
   ReactNode,
 } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { TID_CHAT_SEND_BUTTON } from "@zcode/shared/test-ids";
 import { ArrowUpIcon, Hand, XIcon } from "lucide-react";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
@@ -179,6 +180,12 @@ export function ChatPromptEditor({
   const [internalTriggerPanelContainer, setInternalTriggerPanelContainer] =
     useState<HTMLDivElement | null>(null);
   const resolvedTriggerPanelContainer = triggerPanelContainer ?? internalTriggerPanelContainer;
+  const [additionMenuOpen, setAdditionMenuOpen] = useState(false);
+  const closeAdditionMenu = useCallback(() => setAdditionMenuOpen(false), []);
+  const toggleAdditionMenu = useCallback(() => {
+    setAdditionMenuOpen((open) => !open);
+    resolvedInputApiRef.current?.focus();
+  }, [resolvedInputApiRef]);
   const latestTextRef = useRef(initialValue ?? "");
   const hasSyncedInitialValueRef = useRef(false);
   const {
@@ -386,6 +393,15 @@ export function ChatPromptEditor({
         excludedSlashCommandNames={excludedSlashCommandNames}
         appSlashCommands={appSlashCommands}
         enableMentionPanel={enableMentionPanel}
+        additionMenu={
+          selfHostedBuild
+            ? {
+                open: additionMenuOpen,
+                onClose: closeAdditionMenu,
+                attachmentAction,
+              }
+            : undefined
+        }
       />
     </div>
   );
@@ -403,6 +419,8 @@ export function ChatPromptEditor({
         sessionId={taskId}
         container={resolvedTriggerPanelContainer}
         showPlugins={enableMentionPanel !== false}
+        additionMenuOpen={additionMenuOpen}
+        onToggleAdditionMenu={toggleAdditionMenu}
       />
     </span>
   ) : null;

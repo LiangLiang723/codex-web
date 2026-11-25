@@ -6,7 +6,10 @@ import {
 } from "@/v4/WorkspaceHookPendingBanner.js";
 import { StoreContext } from "@/store/StoreProvider.js";
 import { toTelemetryUiMode } from "@/lib/appTelemetry.js";
-import { ComposerSubmissionPendingContext } from "@/project-sidebar/index.js";
+import {
+  ComposerProjectPickerContext,
+  ComposerSubmissionPendingContext,
+} from "@/project-sidebar/index.js";
 /* oxlint-disable eslint(max-lines) -- composer 集中收口输入区 wiring（附件/草稿/历史/mention），拆分会打散收口粒度。 */
 import { useRemoteProjectReconnect } from "@/hooks/RemoteProjectPresentationContext.js";
 import { useOptionalRemoteWorkspaceController } from "@/remote/useRemoteWorkspaceController.js";
@@ -755,6 +758,13 @@ function ConversationComposerImpl({
       });
     },
     [configPickerScopeKey],
+  );
+  const projectPicker = useMemo(
+    () => ({
+      open: activeConfigPicker === "project",
+      onOpenChange: (open: boolean) => handleConfigPickerOpenChange("project", open),
+    }),
+    [activeConfigPicker, handleConfigPickerOpenChange],
   );
   const [heldQueueConfirmation, setHeldQueueConfirmation] = useState<{
     queueItemIds: readonly string[];
@@ -2661,6 +2671,51 @@ function ConversationComposerImpl({
   // useMemo：composer 随流式 snapshot 高频重渲染，控制簇只在语义依赖变化时重建，
   // 避免每个 token 批次都重建 Tooltip/Select 子树。
   const composerUsage = snapshot?.usage ?? null;
+  const canOpenProjectPicker = !sessionId && Boolean(contextHeader);
+  const canOpenModelPicker =
+    remoteAvailable &&
+    highspeedCard === null &&
+    !modelSelectionPending &&
+    modelSelectionState.status === "ready";
+  const composerSlashCommands = useMemo(() => {
+    const commands = (appSlashCommands ?? []).filter((command) =>
+      command.recovery ? recoveryAvailable : !runtimeBlocked,
+    );
+    if (!selfHostedBuild || runtimeBlocked) return commands;
+
+    if (canOpenProjectPicker)
+      commands.push({
+        value: "project",
+        label: intl.formatMessage({ id: "chat.empty.selectProject" }),
+        description: intl.formatMessage({ id: "selfhost.composer.project.description" }),
+        run: () => projectPicker.onOpenChange(true),
+      });
+    if (canOpenModelPicker)
+      commands.push(
+        {
+          value: "model",
+          label: intl.formatMessage({ id: "chat.toolbar.model.label" }),
+          description: intl.formatMessage({ id: "selfhost.composer.model.description" }),
+          run: () => handleConfigPickerOpenChange("model", true),
+        },
+        {
+          value: "reasoning",
+          label: intl.formatMessage({ id: "chat.toolbar.thoughtLevel.label" }),
+          description: intl.formatMessage({ id: "selfhost.composer.reasoning.description" }),
+          run: () => handleConfigPickerOpenChange("model", true),
+        },
+      );
+    return commands;
+  }, [
+    appSlashCommands,
+    canOpenModelPicker,
+    canOpenProjectPicker,
+    handleConfigPickerOpenChange,
+    intl,
+    projectPicker,
+    recoveryAvailable,
+    runtimeBlocked,
+  ]);
   const composerPhase = snapshot?.control.phase ?? null;
   const handleSelectModelTrace = useCallback(
     (
@@ -3034,7 +3089,9 @@ function ConversationComposerImpl({
           // 旧 ChatViewComposer contextHeaderContent 同款包装（workspace 菜单 + Git 分支）。
           <div className="relative z-10 p-1.5 flex min-w-0 flex-wrap items-center gap-0">
             <ComposerSubmissionPendingContext.Provider value={updateTargetSelectionPending}>
-              {contextHeader}
+              <ComposerProjectPickerContext.Provider value={selfHostedBuild ? projectPicker : null}>
+                {contextHeader}
+              </ComposerProjectPickerContext.Provider>
             </ComposerSubmissionPendingContext.Provider>
           </div>
         ) : null}
@@ -3081,8 +3138,7 @@ function ConversationComposerImpl({
           onModifiedSubmit={modifiedEnterSubmits ? handleModifiedEditorSubmit : undefined}
           submitLabel={sendTooltipTitle}
           showSlashButton
-          // @ 是 Plugin / 文件 / 对话 / 画板主入口；# 会话与 $ / ¥ / ￥ Skills
-          // 仍由 MentionPlugin 保留兼容触发，但不在 + 菜单重复展示。
+          // 自托管 Web 的加号和空 @ 复用同一候选目录。
           showMentionButton
           topContent={topContentNode}
           attachmentAction={runtimeBlocked ? undefined : attachmentAction}
@@ -3092,9 +3148,7 @@ function ConversationComposerImpl({
           avoidIosInputFocusZoom={avoidIosInputFocusZoom}
           compactPlaceholder={compactMobilePlaceholder}
           excludedSlashCommandNames={excludedSlashCommandNames}
-          appSlashCommands={appSlashCommands?.filter((command) =>
-            command.recovery ? recoveryAvailable : !runtimeBlocked,
-          )}
+          appSlashCommands={composerSlashCommands}
           enableMentionPanel
           leadingActions={leadingActionsNode}
           submitControl={submitControlNode}

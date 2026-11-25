@@ -13,12 +13,6 @@ import type { EditorState } from "lexical";
 import { GoalIcon, Info, PaperclipIcon, PlusIcon, Workflow } from "lucide-react";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { Button } from "@/components/ui/button.js";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu.js";
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover.js";
 import { buildSlashApplyMentionPayload } from "@/lib/slashApplyMentionPayload.js";
 import { useSlashCommands } from "@/hooks/useSlashCommands.js";
@@ -59,6 +53,8 @@ interface ChatPromptActionMenuProps {
   sessionId: string | null;
   container: HTMLElement | null;
   showPlugins: boolean;
+  additionMenuOpen?: boolean;
+  onToggleAdditionMenu?: () => void;
   excludedSlashCommandNames?: readonly string[];
 }
 
@@ -68,6 +64,8 @@ export function ChatPromptActionMenu(props: ChatPromptActionMenuProps) {
       attachmentAction={props.attachmentAction}
       disabled={props.disabled}
       disabledReason={props.disabledReason}
+      additionMenuOpen={props.additionMenuOpen}
+      onToggleAdditionMenu={props.onToggleAdditionMenu}
     />
   ) : (
     <ChatPromptContextMenu {...props} />
@@ -78,38 +76,34 @@ function SelfhostAttachmentMenu({
   attachmentAction,
   disabled,
   disabledReason,
-}: Pick<ChatPromptActionMenuProps, "attachmentAction" | "disabled" | "disabledReason">) {
+  additionMenuOpen,
+  onToggleAdditionMenu,
+}: Pick<
+  ChatPromptActionMenuProps,
+  "attachmentAction" | "disabled" | "disabledReason" | "additionMenuOpen" | "onToggleAdditionMenu"
+>) {
   const { intl } = useZCodeIntl();
   if (!attachmentAction) return null;
 
-  const label = intl.formatMessage({ id: "selfhost.composer.add" });
+  const label = intl.formatMessage({ id: "chat.composer.actionMenu" });
   return (
-    <DropdownMenu modal={false}>
-      <ControlHintTooltip title={disabledReason ?? label}>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-md"
-            className="rounded-lg"
-            aria-label={label}
-            data-testid={attachmentAction.testId}
-            disabled={disabled}
-          >
-            <PlusIcon className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
-      </ControlHintTooltip>
-      <DropdownMenuContent side="top" sideOffset={6}>
-        <DropdownMenuItem
-          data-testid={attachmentAction.menuItemTestId}
-          onSelect={attachmentAction.onSelect}
-        >
-          <PaperclipIcon />
-          {label}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <ControlHintTooltip title={disabledReason ?? label}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-md"
+        className="rounded-lg"
+        aria-label={label}
+        aria-haspopup="listbox"
+        aria-expanded={additionMenuOpen}
+        data-testid={attachmentAction.testId}
+        disabled={disabled}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={onToggleAdditionMenu}
+      >
+        <PlusIcon className="size-4" />
+      </Button>
+    </ControlHintTooltip>
   );
 }
 

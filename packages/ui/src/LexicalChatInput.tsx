@@ -57,7 +57,7 @@ import {
 } from "lexical";
 import { SlashCommandPlugin } from "./SlashCommandPlugin.js";
 import type { AppSlashCommand } from "./slashCommandHelpers.js";
-import { MentionPlugin } from "./mentions/MentionPlugin.js";
+import { MentionPlugin, type ComposerAdditionMenu } from "./mentions/MentionPlugin.js";
 import { useChatViewActiveTaskProvider } from "@/v4/activeTaskProvider.js";
 import {
   $createPromptMentionNode,
@@ -1692,6 +1692,7 @@ interface LexicalChatInputProps {
   excludedSlashCommandNames?: readonly string[];
   /** App 层本地斜杠命令（如 `/side`），选中即执行 UI 行为，不发送。 */
   appSlashCommands?: readonly AppSlashCommand[];
+  additionMenu?: ComposerAdditionMenu;
   /** mention（@/#）面板开关。v4 数据面未就绪时显式关闭，入口保留。 */
   enableMentionPanel?: boolean;
   /** 调用方额外挂在同一个 LexicalComposer 里的插件（如设计模式元素 token 同步） */
@@ -1729,6 +1730,7 @@ export function LexicalChatInput({
   onPaste,
   excludedSlashCommandNames,
   appSlashCommands,
+  additionMenu,
   extraPlugins,
   enableMentionPanel = true,
 }: LexicalChatInputProps) {
@@ -1886,6 +1888,7 @@ export function LexicalChatInput({
           disabled={disabled}
           excludedCommandNames={excludedSlashCommandNames}
           appCommands={appSlashCommands}
+          suppressPanel={additionMenu?.open}
         />
         {enableMentionPanel ? (
           <MentionPlugin
@@ -1897,6 +1900,9 @@ export function LexicalChatInput({
             container={triggerPanelContainer}
             disabled={disabled}
             onWhiteboardMentionSelected={onWhiteboardMentionSelected}
+            additionMenu={additionMenu}
+            appCommands={appSlashCommands}
+            allowGoal={!excludedSlashCommandNames?.includes("goal")}
           />
         ) : null}
         {extraPlugins}

@@ -1,4 +1,7 @@
-import { ComposerSubmissionPendingContext } from "@/project-sidebar/ComposerSubmissionPendingContext.js";
+import {
+  ComposerProjectPickerContext,
+  ComposerSubmissionPendingContext,
+} from "@/project-sidebar/ComposerSubmissionPendingContext.js";
 import { ChatRemoteFolderSelection } from "@/project-sidebar/ChatRemoteFolderSelection.js";
 import { ProjectIdentityHoverCard } from "@/project-sidebar/ProjectIdentityHoverCard.js";
 import { remoteHostLabel } from "@/project-sidebar/RemoteHostSection.js";
@@ -138,6 +141,7 @@ export function ProjectComposerMenu({
     isCurrent(): boolean;
   } | null>(null);
   const setSubmissionPending = useContext(ComposerSubmissionPendingContext);
+  const composerPicker = useContext(ComposerProjectPickerContext);
   const [pending, setPending] = useState(false);
   const [restoredChat, setRestoredChat] = useState<typeof chat | null>(null);
   useEffect(() => {
@@ -297,7 +301,7 @@ export function ProjectComposerMenu({
   );
 
   const menu = (
-    <DropdownMenu>
+    <DropdownMenu open={composerPicker?.open} onOpenChange={composerPicker?.onOpenChange}>
       <div
         className={cn(
           "group/workspace-chip relative flex min-w-0 items-center rounded-full hover:bg-surface-hover focus-within:bg-surface-hover",

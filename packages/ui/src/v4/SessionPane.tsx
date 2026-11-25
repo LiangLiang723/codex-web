@@ -3115,6 +3115,19 @@ export function SessionPane({
           },
         ]
       : [];
+    const mcpActions: AppSlashCommand[] = selfHostedBuild
+      ? [
+          {
+            value: "mcp",
+            label: intl.formatMessage({ id: "settings.mcpTitle" }),
+            description: intl.formatMessage({ id: "selfhost.composer.mcp.description" }),
+            run: () => {
+              setPendingSettingsSectionIntent("mcp");
+              openSettingsTab();
+            },
+          },
+        ]
+      : [];
     const planAction: AppSlashCommand = {
       value: "plan",
       label: intl.formatMessage({ id: "chat.slash.app.plan.label" }),
@@ -3132,7 +3145,7 @@ export function SessionPane({
         isMobileViewport: isMobileTextInputViewport,
       })
     ) {
-      return [...reloadActions, planAction];
+      return [...mcpActions, ...reloadActions, planAction];
     }
     const openNewSelectionSideChat = () => {
       void handleOpenSelectionSideConversation(undefined, true);
@@ -3142,6 +3155,7 @@ export function SessionPane({
     const sharedKeywords = ["side", "btw", "side chat", "auxiliary", "辅助对话", "辅助", "侧边"];
     const description = intl.formatMessage({ id: "chat.slash.app.side.description" });
     return [
+      ...mcpActions,
       ...reloadActions,
       planAction,
       ...[
@@ -3157,6 +3171,7 @@ export function SessionPane({
     intl,
     isMobileTextInputViewport,
     onOpenSelectionSideChat,
+    openSettingsTab,
     readOnly,
     selectionSideChat,
     sessionId,

@@ -430,4 +430,7 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
   );
 });
 
-export { ComposerSubmissionPendingContext } from "@/project-sidebar/ComposerSubmissionPendingContext.js";
+export {
+  ComposerProjectPickerContext,
+  ComposerSubmissionPendingContext,
+} from "@/project-sidebar/ComposerSubmissionPendingContext.js";

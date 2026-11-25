@@ -4130,7 +4130,7 @@ nodes:
       - symbol: "ChatPromptActionMenu"
         file: "packages/ui/src/prompt-editor/ChatPromptActionMenu.tsx"
     invariants:
-      - "Self-hosted Web uses + to open the attachment picker. @ searches workspace references, / lists available commands and skills, and $ searches apps and skills. Selection reuses the native UserInput translation."
+      - "Self-hosted Web shares the add and workspace context picker for + and bare @. @ with a query searches references, / lists available commands and skills, and $ searches apps and skills. The primary panels align with the composer. Selection reuses native UserInput translation."
 
   - id: "capability.plan-slash-shortcut"
     kind: "capability"
