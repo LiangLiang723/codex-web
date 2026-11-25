@@ -1,9 +1,5 @@
 import assert from "node:assert/strict";
 
-export function composerPicker(page) {
-  return page.getByTestId("prompt-suggestion-panel").and(page.locator('[data-trigger="+"]'));
-}
-
 /** The options outside the list's rendered window only mount after scrolling. */
 export async function revealPickerOption(picker, optionId) {
   return revealPickerItem(picker, "prompt-suggestion-option-" + optionId);

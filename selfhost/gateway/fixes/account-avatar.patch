@@ -1,0 +1,13 @@
+diff --git a/server/utils/gateway/storage/database.ts b/server/utils/gateway/storage/database.ts
+--- a/server/utils/gateway/storage/database.ts
++++ b/server/utils/gateway/storage/database.ts
+@@ -162,6 +162,9 @@ function migrate(db: DatabaseSync) {
+       ON tmux_monitors(user_id, host_id, session_name, window_index, pane_index)
+       WHERE status = 'active';
+   `);
++  if (!db.prepare("PRAGMA table_info(users)").all().some((column) => column.name === "avatar")) {
++    db.exec("ALTER TABLE users ADD COLUMN avatar TEXT");
++  }
+   // The directory catalog is no longer durable Gateway state. Existing monitors keep their
+   // host/thread binding; only the obsolete local project reference is removed on startup.
+   const monitorColumns = db.prepare("PRAGMA table_info(tmux_monitors)").all();

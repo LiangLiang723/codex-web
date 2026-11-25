@@ -39,6 +39,11 @@ export const modelSchema = z.object({
 });
 export type Host = z.infer<typeof hostSchema>;
 export type Project = z.infer<typeof projectSchema>;
+export const accountAvatarSchema = z.object({
+  avatar: z.string().startsWith("data:image/png;base64,").max(100000).nullable(),
+});
+export const accountProfileSchema = accountAvatarSchema.extend({ username: z.string() });
+export type AccountProfile = z.infer<typeof accountProfileSchema>;
 export type RemoteModel = z.infer<typeof modelSchema>;
 export type Message = Record<string, unknown>;
 export function object(value: unknown): Message {

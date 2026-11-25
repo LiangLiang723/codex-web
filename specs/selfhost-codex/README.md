@@ -73,7 +73,7 @@ sequenceDiagram
 | SH-SEND | 创建成功或首轮接纳后丢回执、忙时带图引导、顺序完成 65 个上传 | 先绑定真实 Thread ID，再发送首轮。已发但未确认时按原生用户行的 clientId 查账，缺乏正向证据保留待确认输入。输入引用一致进入 start 或 steer。上传完成释放活跃配额，同一上传 ID 的完成回执可重读。 |
 | SH-INTERACTIONS | 同命令多个审批、两端同时决定、同题面不同题目 ID、无轮次的 MCP 表单 | 原生请求 ID 独立清场。显示真实命令、主机、范围和期限。问题按 ID 回答，支持跳过、部分答案和掩码输入。拒绝或失败保留真实结果，无轮次请求不产生可控制的活动轮次。 |
 | SH-LIST-SHARE | 同时查询两个目录、按创建时间排序、归档后恢复、在 600 条 Thread 中查询已知 ID 与目录预览、分享跨页选择 | 原生项目及归档状态和账号置顶各有单一所有者。已知 ID 定点或批量读取，目录预览仅读首个原生页，同范围并发查询复用。需要精确总数时完成分页。分享预检与发布使用同一组所选原生轮次，缺少一轮即报告。 |
-| SH-CATALOG | 旧 Thread 使用另一提供商、模型目录失败、加号中选择同名 Skill 或插件、MCP 发现失败或要求重新认证 | 目录按主机、目录及 Thread 提供商选择。目录故障独立于历史和文件。选中的原生 skill/mention 随最终输入发送。MCP 设置及工作流文件管理复用已注册服务。两条 MCP 状态查询共用 Codex 运行状态、认证及工具发现结果。旧响应仍能凭已初始化服务或工具返回连接状态。 |
+| SH-CATALOG | 旧 Thread 使用另一提供商、模型目录失败、引用同名 Skill 或插件、MCP 发现失败或要求重新认证 | 目录按主机、目录及 Thread 提供商选择。目录故障独立于历史和文件。选中的原生 skill/mention 随最终输入发送。MCP 设置及工作流文件管理复用已注册服务。两条 MCP 状态查询共用 Codex 运行状态、认证及工具发现结果。旧响应仍能凭已初始化服务或工具返回连接状态。 |
 | SH-REMOTE-IO | 已展开目录的 SSH 通道中断、网页断线期间 PTY 退出 | 以 SSH 世代重新建立所需文件监听并补读。WebSocket 恢复时核对该账号已知 PTY，保留仍活跃的会话并报告已退出的终端。 |
 | SH-NATIVE-CONTROLS | 运行时排队、刷新后取消、从选中已完成轮创建分支、触发压缩 | 原生队列持有接受顺序，Web 回读并按队列 ID 取消。从已完成轮指定边界创建子 Thread。上下文用量及压缩进度来自原生事件；主机能力决定入口。 |
 | SH-STATUS | 官网示例宽度下有 Git、Goal、计划、子智能体和来源，切换会话及屏幕宽度 | 自托管桌面在空间足够时默认展开可折叠的右上面板，窄屏用右上按钮，手机用抽屉。各节使用当前工作树或 Thread 的真实数据。 |
@@ -100,9 +100,11 @@ sequenceDiagram
 
 ## 输入框应用、插件和技能
 
-桌面和手机 Web 都从输入框的加号选择应用、插件和技能。输入 `$` 可搜索应用和技能，输入 `@` 可搜索插件及原有的文件与会话引用。点击候选或用键盘确认后，在同一草稿的光标位置插入标签。加号中三个分组末尾分别提供管理入口，打开当前 SSH 工作区内对应的扩展页面。用户可返回原草稿继续编辑。选择可重复撤销，只有发送动作才提交给 Codex。
+桌面和手机 Web 共用三个主要入口。`+` 在按钮上方打开一行「添加照片和文件」，调用现有设备文件选择器。插件、应用和技能的管理从工作区侧栏进入。`@` 直接搜索文件、当前项目会话、插件、技能和应用，空查询显示各类候选的预览。`/` 按「命令」「技能」分组，命令行显示实际的斜杠命令名称。`$` 仍可直接搜索技能和应用。两个补全列表以输入区为锚点，使用紧凑的单行候选；筛选后省略没有候选的分组，保留真实的加载和失败状态。选择只替换光标处的触发词，保留同一草稿的其他内容。
 
-应用目录来自当前 SSH 主机。已有会话按 Codex Thread 查询其可用应用，新任务按当前主机查询。当前版本提供运行时快照时，候选是可调用的已启用应用。只支持 `app/list` 的版本以目录中同时可访问且启用的条目为准。已有 Thread 未加载时显示原生读取失败，不切换到主机全局结果。应用目录为空时，`+` 和 `$` 指向「扩展 → 应用」。插件读取已安装摘要，技能从当前 SSH 工作目录的 `skills/list` 获取。三组各自显示加载和读取失败。候选采用原生展示名称，同名插件附市场，同名技能附来源和路径。
+`/plan` 通过现有模式操作改变 Composer，下一轮将计划模式交给 `turn/start.collaborationMode`。`/goal` 预填可编辑的目标命令，发送时通过现有会话目标流程调用 `thread/goal/set`。已有允许压缩的会话提供 `/compact`，提交后使用 `thread/compact/start`。命令是否可执行由当前会话状态决定。`/` 内的技能与 `$`、`@` 复用远端 `skills/list` 的名称和路径，已有保存草稿仍用原来的标签格式。
+
+应用目录来自当前 SSH 主机。已有会话按 Codex Thread 查询其可用应用，新任务按当前主机查询。当前版本提供运行时快照时，候选是可调用的已启用应用。只支持 `app/list` 的版本以目录中同时可访问且启用的条目为准。已有 Thread 未加载时显示原生读取失败，不切换到主机全局结果。空应用目录指向「扩展 → 应用」。插件读取已安装摘要，技能从当前 SSH 工作目录的 `skills/list` 获取。三组各自显示加载和读取失败。候选采用原生展示名称，同名插件附市场，同名技能附来源和路径。项目文件沿用远端工作区的文件搜索与选区插入，会话由同项目的会话索引提供。
 
 草稿继续使用可复制、可恢复的引用文本，已有编辑器草稿快照在刷新后恢复可编辑的标签。提交路径复用同一个原生 UserInput 构造器，将引用转为文本标记及结构项。App 发送按 Codex 的名称规则生成的 `$slug` 与 `mention`（`app://<id>`）。插件发送 `@name` 与 `mention`（`plugin://<name>@<marketplace>`）。技能发送 `$name` 与 `skill`（原生名称和绝对 `SKILL.md` 路径）。同一引用多次出现在正文时保留各位置，结构引用按目标去重。原生文本的 `text_elements` 携带 UTF-8 字节范围和草稿引用，历史与队列使用原生响应中可核对的范围还原标签。已有包含引用链接的历史仍可读。
 
@@ -110,12 +112,12 @@ sequenceDiagram
 
 | 验收 | 场景 | 通过条件 |
 | --- | --- | --- |
-| SH-COMPOSER-EXTENSIONS | 桌面与手机，从加号、`$` 和 `@` 选择；目录独立失败和重新打开；同名、路径带空格或括号；加号内管理任一分类 | 只有可选项能插入。应用、插件与技能的当前身份可辨。已有会话请求携带真实 Thread ID，新任务目录请求使用主机范围。管理动作切换到对应分类，返回后原草稿可编辑。 |
+| SH-COMPOSER-EXTENSIONS | 桌面与手机，通过 `+` 打开附件菜单，在草稿中直接输入 `@`、`/` 和 `$`，从侧栏打开扩展中心 | 加号只显示添加照片和文件，打开或取消均不读取候选目录或改变草稿。引用按种类展示，命令和技能按名称筛选；选择保留前后正文。已有会话的应用请求携带真实 Thread ID，新任务使用主机范围。 |
 | SH-COMPOSER-EXTENSIONS-DELIVERY | 新任务首轮、已有会话续轮、运行中的引导与排队、发送前刷新草稿、发送后重开会话 | 草稿恢复各项选择。远端收到匹配的原生文本和 `skill` 或 `mention`，正文、附件、原生投递方式及命令身份一致。已接受的历史恢复标签和正文。 |
 
 ```mermaid
 sequenceDiagram
-    participant W as 加号选择器
+    participant W as 聊天输入框
     participant G as SSH Gateway
     participant C as Codex App Server
     par 应用目录
@@ -137,7 +139,7 @@ sequenceDiagram
     C-->>W: 经 Gateway 返回已接受的输入及历史
 ```
 
-验收入口为 `node selfhost/tests/plugin-picker.mjs`、`node selfhost/tests/native-input.mjs` 和 `SELFHOST_COMPOSER_CODEX_BIN=/path/to/codex node selfhost/tests/native-extension-composer.mjs`。原生验收在临时 Codex 配置和本机模型服务中核对插件安装身份、两种同名技能的实际内容注入，以及 App、插件和 Skill 的冷启动历史。交互沿用 ZCode v4 的 [加号菜单](https://github.com/zai-org/ZCode/blob/a4b4445141eb7d3b3e99eada9292775383bfc44e/packages/ui/src/prompt-editor/ChatPromptActionMenu.tsx) 和输入内引用。原生转译参见 [App Server 文档](https://learn.chatgpt.com/docs/app-server)、[Codex 0.170 协议](https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/app-server-protocol/schema/typescript/v2/UserInput.ts) 和 [Codex 0.172 选择器](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/tui/src/bottom_pane/chat_composer.rs)。
+验收入口为 `node selfhost/tests/plugin-picker.mjs`、`node selfhost/tests/native-input.mjs` 和 `SELFHOST_COMPOSER_CODEX_BIN=/path/to/codex node selfhost/tests/native-extension-composer.mjs`。原生验收在临时 Codex 配置和本机模型服务中核对插件安装身份、两种同名技能的实际内容注入，以及 App、插件和 Skill 的冷启动历史。交互参考 [Codex 桌面附件入口记录](https://github.com/openai/codex/issues/34052)、[斜杠命令与技能](https://learn.chatgpt.com/docs/app/slash-commands)和[插件引用](https://learn.chatgpt.com/docs/plugins)。附件沿用 `turn/start` 和 `turn/steer` 的 UserInput，并使用 `localImage` 传递已上传到所选 SSH 主机的图片路径。原生转译参见 [App Server 文档](https://learn.chatgpt.com/docs/app-server)和 [Codex 0.170 UserInput](https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/app-server-protocol/schema/typescript/v2/UserInput.ts)。
 
 ### SSH 主机上的插件与技能设置
 
@@ -387,7 +389,9 @@ SSH 多因素认证沿用 [Gateway 原认证命令](https://github.com/yunhaoli2
 
 桌面 Web 的侧栏顶栏左侧显示当前 SSH 主机，右侧依次显示对话历史的后退、前进。窄侧栏截断长主机名，悬停或聚焦切换按钮可读全名。手机 Web 从任务首页顶部切换主机。点击当前主机打开「SSH 工作区」弹窗，关闭后回到当前对话或任务首页。首次登录与 `?manage=1` 直接显示同一份主机目录。主机名、头像、修改连接和打开远程目录由主机目录管理，登录账号可从侧栏底部管理。连接后优先打开该主机的上次有效项目，其次打开已有项目或远程家目录。
 
-添加或编辑主机时，地址可接受主机名、`user@host`、`ssh://user@host:port` 或带可选 `-p` 的简单 SSH 命令。粘贴时将用户与端口填入各自的字段。空端口沿用中心服务器 SSH 配置或默认 22。空显示名称使用地址。认证表单按 SSH Agent、私钥或密码展开。常用设置可直接填写，主机指纹、代理和头像位于高级选项。主机验证使用现有指纹与可信 `known_hosts`，编辑时由服务端继续解析此前保存的认证资料。
+添加或编辑主机时先填连接地址、SSH 用户名、端口和登录方式。地址可接受主机名、`user@host`、`ssh://user@host:port` 或带可选 `-p` 的简单 SSH 命令。粘贴时将用户与端口填入各自的字段。空端口沿用网页服务的 SSH 配置或默认 22。空显示名称使用地址。新建默认选 SSH 密钥，另可用远程机器的 SSH 密码或网页服务已加载的密钥。选中后显示对应凭据及说明，服务文件路径明确指网页服务运行环境。主机指纹与 SOCKS5 代理归入高级选项。试连遇到主机身份验证失败时展开指纹区，继续以已核实的指纹或可信 `known_hosts` 校验。编辑保留已保存的认证方式和服务端凭据规则。
+
+「外观」使用与 Tabby 同版本的 Font Awesome Free 6.7.2 实心、常规和品牌图标。常用连接图标优先显示，整个目录可按名称、关键字或 `fab fa-docker` 这样的类别与类名组合搜索。结果分批展示，搜索得到唯一匹配项时可按 Enter 选择。自选色应用到图标前景。主机列表、桌面侧栏和手机设备栏显示同一图标与颜色。选择器将类名和可选前景色合存到现有头像字段，例如 `fab fa-docker:#2496ed`。已有图标名解析为对应的 Font Awesome 图标，已有 PNG 头像沿用原格式。图片使用统一的 128px 正方形缩略图。只有保存才提交外观，账号头像和主机标识各自持久化，外观编辑复用现有配置事件。
 
 「测试连接」使用当前草稿，由 Gateway 创建一次独立的 SSH 认证连接。测试通过即表示 SSH 认证成功。需要交互验证时显示对应结果，由用户保存后在进入工作区时继续验证。连接失败显示所在阶段及原因，测试可以取消。HTTP 请求关闭时销毁试连连接。试连只执行 SSH 握手和认证，配置及 Codex 运行时由各自原入口管理。
 
@@ -413,7 +417,27 @@ sequenceDiagram
     end
 ```
 
-主机目录及连接后的选目录流程参考 [Zed Remote Projects](https://zed.dev/docs/remote-development)。表单的独立 SSH 验证参考 [DBeaver SSH configuration](https://dbeaver.com/docs/dbeaver/SSH-Configuration/)。连接和表单控件沿用本仓库的 Web 界面。
+主机目录与连接后选目录参考 [Zed Remote Projects](https://zed.dev/docs/remote-development)和 [Codex 的 SSH 项目连接](https://learn.chatgpt.com/docs/remote-connections)。图标搜索和选色参考 [Tabby 连接配置](https://github.com/Eugeny/tabby/blob/master/tabby-settings/src/components/editProfileModal.component.pug)及[图标前景色的实现](https://github.com/Eugeny/tabby/blob/master/tabby-core/src/components/profileIcon.component.pug)。表单与样式沿用本仓库的 Web 界面。
+
+### 账号头像
+
+左下角显示网页登录账号的用户名和头像。用户打开账号设置选择图片或恢复默认头像，再单独保存。现有 PNG、JPEG、WebP 图片处理统一裁剪为 128px 缩略图，输入限 4 MB。没有头像时用账号首字作为回退。头像通过认证的 `PATCH /api/selfhost/account/avatar` 按登录账号 ID 保存，`GET /api/auth/me` 返回当前账号头像。当前标签立即更新，其他浏览器在重新打开或刷新后读取。用户名和密码修改沿用现有重新验证与会话撤销流程。
+
+```mermaid
+sequenceDiagram
+    participant U as 账号设置
+    participant G as 网页服务
+    participant D as 账号记录
+    U->>U: 选图并预览缩略图
+    U->>G: 保存当前账号头像
+    G->>D: 校验当前会话并写入账号 ID
+    G-->>U: 返回已保存的头像
+    U->>U: 更新侧栏与设置预览
+```
+
+### 右上角计划
+
+右上角状态面板从当前 Thread 最新已生成的完整计划展示标题。首个 Markdown 一级标题优先，缺失时取首个有内容的行。用户点击标题打开现有计划详情。进度列表仍由 `turn/plan/updated` 的步骤渲染，完整正文来自原生 `plan` 条目。桌面侧栏、窄屏浮层和手机抽屉对标题及点击采用同一规则。计划和步骤跟随当前 Thread 的实时投影及恢复快照。
 
 ## Codex 子智能体名称与详情
 
@@ -437,6 +461,9 @@ flowchart LR
 | 验收 | 设置与操作 | 证据 |
 | --- | --- | --- |
 | SH-SSH-CONFIG | 1480px 与 390px 粘贴 SSH 地址，在添加和编辑中测试正确凭据、失败、MFA 和取消，再改字段重试 | 自动填写用户和端口，显示当前结果。取消关闭试连连接，编辑和测试沿用同一份凭据规则，主机配置仅在保存后变化。 |
+| SH-SSH-APPEARANCE | 旧主机、选择登录方式，输入 `fab fa-docker` 选图标，再设置自选色、保存后重开和取消修改 | 旧主机可读，登录方式说明对应凭据来源。浅色与深色主题中的预览、导航与主机卡片显示 Font Awesome 品牌图标的实际字形和保存的前景色。取消保留此前配置。 |
+| SH-ACCOUNT-AVATAR | 选图保存、刷新、新浏览器登录及移除头像 | 仅当前账号更新，左下角即时显示，其他账号及已登录会话保持各自状态。 |
+| SH-PLAN-TITLE | 在 1480px、窄桌面和 390px 查看完整计划与实时进度，点击标题 | 面板先显示正文的实际标题。标题点击打开同一条计划，步骤更新仍跟随当前会话。 |
 | SH-SSH-HEADER | 桌面侧栏缩至最小，用长主机名打开主机目录，并在两个对话间后退、前进；手机返回任务首页再打开目录 | 桌面切换入口与两个箭头在同一顶栏，主机名可读全称，两个箭头按历史回放。手机任务首页有一个切换入口。 |
 | SH-SSH-OPEN | 从项目侧栏当前主机打开目录，再取消遇到停滞或验证的主机。重试后进入项目，另在深链接查看连接失败后重试 | 旧对话在目录弹窗关闭后仍可读，错误及取消可见，晚到的完成和其他主机事件无法触发导航。仅完成有效连接后进入项目。 |
 | SH-CODEX-CHILD | 从状态栏及目录打开有层级路径的运行中和已卸载子智能体，切换、重开并回看历史 | 两种宽度显示短名称和完整历史。运行中的现有订阅继续接收原生更新。Cold child 用同一远端 Thread 的只读历史，父对话与项目归属保持一致。 |

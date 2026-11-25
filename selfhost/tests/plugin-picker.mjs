@@ -5,11 +5,7 @@ import { join, resolve } from "node:path";
 import { chromium } from "playwright-core";
 import { build, preview } from "vite";
 import { nativeUserInputItems } from "../../packages/web/src/selfhost/nativeTurnInput.ts";
-import {
-  composerPicker,
-  revealPickerItem,
-  revealPickerOption,
-} from "./fixtures/composer-picker.mjs";
+import { revealPickerItem, revealPickerOption } from "./fixtures/composer-picker.mjs";
 
 const web = resolve(import.meta.dirname, "../../packages/web");
 const hostId = 2;
@@ -93,7 +89,7 @@ const systemSkill = {
   path: "/fixtures/codex/internal-review/SKILL.md",
   scope: "system",
 };
-const pickerButton = (page) => page.getByRole("button", { name: "添加上下文", exact: true });
+const pickerButton = (page) => page.getByRole("button", { name: "添加照片和文件", exact: true });
 const noApps = "可在「扩展 → 应用」中连接或启用应用";
 const unloadedApps = "Fixture thread is not loaded";
 const legacyMention = "旧消息 [@Legacy](plugin://legacy@local)";
@@ -302,50 +298,82 @@ async function verify(page, origin) {
   await page.goto(url.href, { waitUntil: "commit" });
   await page.getByText("验收引用目录", { exact: true }).waitFor({ timeout: 45000 });
   await page.locator('[data-plugin-mention-id="legacy@local"]').waitFor();
-  const picker = composerPicker(page);
+  const attachmentMenu = page.getByRole("menu");
+  const at = page.getByTestId("prompt-suggestion-panel").and(page.locator('[data-trigger="@"]'));
+  const slash = page.getByTestId("prompt-suggestion-panel").and(page.locator('[data-trigger="/"]'));
   const dollar = page
     .getByTestId("prompt-suggestion-panel")
     .and(page.locator('[data-trigger="$"]'));
   const editor = page.getByTestId("v4-composer-input");
   const send = page.getByTestId("v4-composer-send");
-  const open = async (optionKind = "plugin") => {
-    await activate(pickerButton(page));
-    await picker.waitFor();
-    // 每次打开都会重新读取候选，管理按钮在加载期间已可见。等目标组的候选挂载后再扫描虚拟列表。
-    await picker
+  await editor.focus();
+  await page.keyboard.insertText("保留附件草稿");
+  const previousQueries = appQueries.length;
+  await activate(pickerButton(page));
+  await attachmentMenu.waitFor();
+  assert.deepEqual(await attachmentMenu.getByRole("menuitem").allTextContents(), [
+    "添加照片和文件",
+  ]);
+  const fileChooser = page.waitForEvent("filechooser");
+  await activate(attachmentMenu.getByRole("menuitem", { name: "添加照片和文件" }));
+  await (await fileChooser).setFiles([]);
+  await attachmentMenu.waitFor({ state: "detached" });
+  assert.equal(await editor.innerText(), "保留附件草稿");
+  assert.equal(appQueries.length, previousQueries, "Attachments must not read the app catalog");
+  await editor.press("ControlOrMeta+a");
+  await editor.press("Backspace");
+
+  const open = async (optionKind = "plugin", query = "") => {
+    await editor.focus();
+    await page.keyboard.insertText("@" + query);
+    await at.waitFor();
+    await at
       .locator(`[role="option"][data-option-id^="${optionKind}:"]`)
       .first()
       .waitFor({ state: "attached" });
   };
-  const closePicker = async () => {
+  const closePicker = async (query = "") => {
     await page.keyboard.press("Escape");
-    await picker.waitFor({ state: "detached" });
+    await at.waitFor({ state: "detached" });
+    for (const _ of query) await page.keyboard.press("Backspace");
+    await page.keyboard.press("Backspace");
   };
   const select = async (optionId, description) => {
-    await open(optionId.split(":", 1)[0]);
-    const option = await revealPickerOption(picker, optionId);
+    const kind = optionId.split(":", 1)[0];
+    await open(kind, kind === "app" ? "fixture-docs" : "review");
+    const option = await revealPickerOption(at, optionId);
     assert(await option.isEnabled(), optionId + " should be selectable");
     if (description) assert((await option.innerText()).includes(description));
     await activate(option);
-    await picker.waitFor({ state: "detached" });
+    await at.waitFor({ state: "detached" });
   };
 
   await open();
-  const appStatus = await revealPickerItem(picker, "prompt-suggestion-status-apps");
+  const appStatus = await revealPickerItem(at, "prompt-suggestion-status-apps");
   await appStatus.and(page.locator('[data-status="error"]')).waitFor();
   assert.equal(await appStatus.textContent(), unloadedApps);
   assert(appQueries.length > 0 && appQueries.every((query) => query.threadId === threadId));
-  const skillStatus = await revealPickerItem(picker, "prompt-suggestion-status-skills");
+  const skillStatus = await revealPickerItem(at, "prompt-suggestion-status-skills");
   await skillStatus.and(page.locator('[data-status="error"]')).waitFor();
-  const appTools = await revealPickerOption(picker, "plugin:codex-app-tools@bundled");
-  assert.equal(await appTools.innerText(), "Codex App Tools");
-  assert.equal(await picker.locator('[data-option-id="plugin:disabled@bundled"]').count(), 0);
-  assert.equal(await picker.locator('[data-option-id="plugin:available@bundled"]').count(), 0);
   await closePicker();
+  await editor.focus();
+  await page.keyboard.insertText("@codex-app-tools");
+  const appTools = at.getByTestId("prompt-suggestion-option-plugin:codex-app-tools@bundled");
+  await appTools.waitFor();
+  assert.equal(await appTools.innerText(), "Codex App Tools");
+  await editor.press("ControlOrMeta+a");
+  await editor.press("Backspace");
+  for (const plugin of ["disabled", "available"]) {
+    await page.keyboard.insertText("@" + plugin);
+    await at.waitFor();
+    assert.equal(await at.locator('[data-option-id="plugin:' + plugin + '@bundled"]').count(), 0);
+    await editor.press("ControlOrMeta+a");
+    await editor.press("Backspace");
+  }
 
   appDirectory = "empty";
   await open();
-  await picker.getByText(noApps, { exact: true }).waitFor();
+  await (await revealPickerItem(at, "prompt-suggestion-status-apps")).getByText(noApps).waitFor();
   await closePicker();
   await editor.focus();
   await page.keyboard.insertText("$");
@@ -364,10 +392,10 @@ async function verify(page, origin) {
 
   failSkills = false;
   // All three native skill paths remain selectable with the same display name.
-  await open("skill");
-  const builtIn = await revealPickerOption(picker, "skill:" + systemSkill.path);
+  await open("skill", systemSkill.name);
+  const builtIn = await revealPickerOption(at, "skill:" + systemSkill.path);
   assert.match(await builtIn.textContent(), /Codex 内置/u);
-  await closePicker();
+  await closePicker(systemSkill.name);
   await select("skill:" + repoSkill.path, repoSkill.path);
   await select("skill:" + userSkill.path, userSkill.path);
   await select("skill:" + pluginSkill.path, `${pluginSkill.pluginId} · ${pluginSkill.path}`);
@@ -409,6 +437,20 @@ async function verify(page, origin) {
   await page.waitForURL((windowUrl) => !windowUrl.searchParams.has("thread"));
   await editor.waitFor();
   await editor.focus();
+  await page.keyboard.insertText("保留正文 /plan");
+  await activate(slash.getByRole("option", { name: /^\/plan(?:\s|$)/u }));
+  const planMarker = page.getByTestId("v4-composer-plan-marker");
+  await planMarker.waitFor();
+  assert.equal((await editor.innerText()).trim(), "保留正文");
+  await activate(planMarker.getByRole("button"));
+  await editor.press("ControlOrMeta+a");
+  await editor.press("Backspace");
+  await page.keyboard.insertText("/goal");
+  await activate(await revealPickerOption(slash, "slash:goal"));
+  await editor.locator('[data-mention-id="slash:goal"]').waitFor();
+  assert.equal(submissions.length, 1, "Choosing a goal only fills the input");
+  await editor.press("ControlOrMeta+a");
+  await editor.press("Backspace");
   await page.keyboard.insertText("$fixture-docs");
   const appOption = dollar.getByTestId("prompt-suggestion-option-app:" + app.id);
   await appOption.waitFor();
@@ -423,7 +465,6 @@ async function verify(page, origin) {
   await activate(dollar.getByTestId("prompt-suggestion-option-skill:" + repoSkill.path));
   await chip("skill:" + repoSkill.path).waitFor();
   await page.keyboard.insertText("@plugin-23");
-  const at = page.getByTestId("prompt-suggestion-panel").and(page.locator('[data-trigger="@"]'));
   await activate(at.getByTestId("prompt-suggestion-option-plugin:plugin-23@local"));
   await activate(send);
   await page.waitForURL((windowUrl) => windowUrl.searchParams.get("thread") === draftThreadId);
@@ -447,24 +488,19 @@ async function verify(page, origin) {
   assert.equal(submissions.length, 2, "replaying history must not send another turn");
   await editor.focus();
   await page.keyboard.insertText("管理页往返草稿");
-  for (const [section, label] of [
-    ["apps", "管理应用"],
-    ["plugins", "管理插件"],
-    ["skills", "管理技能"],
-  ]) {
-    await open();
-    const manage = await revealPickerOption(picker, `manage-${section}`);
-    assert.equal(await manage.getAttribute("data-section-id"), section);
-    assert.equal(await manage.textContent(), label);
-    await activate(manage);
-    const extensions = page.getByTestId("workspace-extensions");
+  await showTaskList();
+  await activate(page.getByTestId("plugin-store-sidebar-open"));
+  const extensions = page.getByTestId("workspace-extensions");
+  for (const section of ["plugins", "apps", "skills"]) {
+    await activate(extensions.getByTestId(`workspace-extensions-${section}`));
     await extensions
       .getByTestId(`workspace-extensions-${section}`)
       .and(page.locator('[aria-pressed="true"]'))
       .waitFor();
-    await activate(extensions.getByRole("button", { name: "返回", exact: true }));
-    await editor.getByText("管理页往返草稿", { exact: true }).waitFor();
   }
+  await activate(extensions.getByRole("button", { name: "返回", exact: true }));
+  if (mobile) await activate(page.getByTestId(`task-item-${threadId}`));
+  await editor.getByText("管理页往返草稿", { exact: true }).waitFor();
   assert.equal(submissions.length, 2, "extension management must leave the draft unsent");
   assert.deepEqual(detailQueries, [], "Loading references must make no per-plugin detail calls");
   assert.deepEqual(pageErrors, []);

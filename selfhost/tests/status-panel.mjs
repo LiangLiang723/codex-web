@@ -639,7 +639,7 @@ async function verifyDesktop(page, origin, width, screenshots) {
   await page.getByRole("button", { name: "收起侧边面板", exact: true }).click();
   await status.waitFor();
 
-  await status.getByRole("button", { name: "查看完整计划", exact: true }).click();
+  await status.getByRole("button", { name: "工作区发布方案", exact: true }).click();
   await page
     .locator('[data-plan-detail-tool-call-id="written-plan"]')
     .getByText("核对原生事件后验证发布。", { exact: true })
@@ -737,7 +737,7 @@ async function verifyMobile(page, origin, screenshots) {
   assert(triggerBox.y + triggerBox.height < editorBox.y);
   await statusTrigger(page).click();
   const sheet = page.getByRole("dialog", { name: "会话状态", exact: true });
-  await sheet.waitFor();
+  await sheet.getByRole("button", { name: "工作区发布方案", exact: true }).waitFor();
   await verifySections(sheet);
   await verifyMainTrack(page);
   await verifyIndependentStatusScroll(page, mobileStatusScroller);

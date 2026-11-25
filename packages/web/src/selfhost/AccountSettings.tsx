@@ -1,8 +1,9 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { z } from "zod";
 import { useZCodeIntl } from "@zcode/ui";
 import { Button } from "@zcode/ui/button";
 import { Input } from "@zcode/ui/input";
+import { WorkspaceAvatar } from "@zcode/ui/workspace-avatar";
 import {
   Dialog,
   DialogContent,
@@ -11,40 +12,65 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@zcode/ui/dialog";
-import type { Gateway } from "./gateway.js";
+import { AvatarImageUpload } from "./AvatarPicker.js";
+import { accountAvatarSchema, type AccountProfile, type Gateway } from "./gateway.js";
 
 export function AccountSettings({
   gateway,
+  profile,
+  loadError,
+  onAvatarSaved,
   close,
   signOut,
 }: {
   gateway: Gateway;
+  profile?: AccountProfile;
+  loadError?: string;
+  onAvatarSaved: (avatar: string | null) => void;
   close: () => void;
   signOut: () => void;
 }) {
   const { intl } = useZCodeIntl();
   const msg = (key: string) => intl.formatMessage({ id: "selfhost." + key });
-  const [username, setUsername] = useState<string>();
+  const [avatarDraft, setAvatarDraft] = useState<string | null>();
+  const [readingAvatar, setReadingAvatar] = useState(false);
+  const [savingAvatar, setSavingAvatar] = useState(false);
+  const [avatarError, setAvatarError] = useState("");
+  const [avatarSaved, setAvatarSaved] = useState(false);
   const [error, setError] = useState(""),
     [saving, setSaving] = useState(false);
-  useEffect(() => {
-    let active = true;
-    void gateway
-      .request("/api/auth/me", z.object({ user: z.object({ username: z.string() }) }))
-      .then(
-        (result) => {
-          if (active) setUsername(result.user.username);
-        },
-        (err) => {
-          if (active) setError(String(err));
-        },
+  const avatar = avatarDraft === undefined ? (profile?.avatar ?? null) : avatarDraft;
+  const writing = savingAvatar || saving;
+  const canSaveAvatar = profile && avatar !== profile.avatar && !readingAvatar && !writing;
+  function editAvatar(next: string | null) {
+    setAvatarDraft(next);
+    setAvatarSaved(false);
+    setAvatarError("");
+  }
+  async function saveAvatar() {
+    if (!canSaveAvatar) return;
+    setSavingAvatar(true);
+    setAvatarError("");
+    setAvatarSaved(false);
+    try {
+      const result = await gateway.request(
+        "/api/selfhost/account/avatar",
+        accountAvatarSchema,
+        "PATCH",
+        { avatar },
       );
-    return () => {
-      active = false;
-    };
-  }, [gateway]);
+      onAvatarSaved(result.avatar);
+      setAvatarDraft(undefined);
+      setAvatarSaved(true);
+    } catch (cause) {
+      setAvatarError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSavingAvatar(false);
+    }
+  }
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!profile || writing) return;
     const fields = new FormData(event.currentTarget);
     const name = String(fields.get("username") || "").trim();
     const next = String(fields.get("newPassword") || "");
@@ -52,7 +78,7 @@ export function AccountSettings({
       setError(msg("mismatch"));
       return;
     }
-    if (name === username && !next) {
+    if (name === profile.username && !next) {
       close();
       return;
     }
@@ -81,16 +107,71 @@ export function AccountSettings({
     <Dialog
       open
       onOpenChange={(v) => {
-        if (!v && !saving) close();
+        if (!v && !writing) close();
       }}
     >
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{msg("account")}</DialogTitle>
-          <DialogDescription>{msg("accountHint")}</DialogDescription>
         </DialogHeader>
+        {loadError ? (
+          <p role="alert" className="text-ui-xs text-destructive">
+            {loadError}
+          </p>
+        ) : null}
+        {profile ? (
+          <fieldset className="grid gap-2 border-b border-border pb-4" disabled={writing}>
+            <legend className="mb-2 text-ui-sm font-medium">{msg("accountAvatar")}</legend>
+            <div className="flex flex-wrap items-center gap-2">
+              <WorkspaceAvatar
+                value={avatar ?? undefined}
+                fallback={profile.username.charAt(0).toUpperCase() || undefined}
+                size="lg"
+              />
+              <AvatarImageUpload
+                change={editAvatar}
+                onError={setAvatarError}
+                onBusy={(busy) => {
+                  setReadingAvatar(busy);
+                  if (busy) setAvatarSaved(false);
+                }}
+              />
+              {avatar ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={readingAvatar}
+                  onClick={() => editAvatar(null)}
+                >
+                  {msg("accountAvatarReset")}
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={!canSaveAvatar}
+                onClick={() => void saveAvatar()}
+              >
+                {msg("accountAvatarSave")}
+              </Button>
+            </div>
+            {avatarError ? (
+              <p role="alert" className="text-ui-xs text-destructive">
+                {avatarError}
+              </p>
+            ) : null}
+            {avatarSaved ? (
+              <p role="status" className="text-ui-xs text-foreground-subtle">
+                {msg("accountAvatarSaved")}
+              </p>
+            ) : null}
+          </fieldset>
+        ) : null}
         <form onSubmit={save} className="grid gap-3">
-          {username !== undefined && (
+          <DialogDescription>{msg("accountHint")}</DialogDescription>
+          {profile && (
             <label className="grid gap-1 text-ui-xs">
               {msg("username")}
               <Input
@@ -98,7 +179,7 @@ export function AccountSettings({
                 autoComplete="username"
                 maxLength={128}
                 name="username"
-                defaultValue={username}
+                defaultValue={profile.username}
               />
             </label>
           )}
@@ -131,10 +212,10 @@ export function AccountSettings({
             </p>
           )}
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={close}>
+            <Button type="button" variant="ghost" disabled={writing} onClick={close}>
               {msg("cancel")}
             </Button>
-            <Button disabled={saving || username === undefined}>{msg("save")}</Button>
+            <Button disabled={writing || !profile}>{msg("save")}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

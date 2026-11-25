@@ -48,7 +48,7 @@ sh selfhost/update.sh --no-build
 
 ## 连接和切换主机
 
-在「SSH 工作区」选择「添加主机」，填写 SSH 地址和认证方式。地址支持普通主机名、Tailscale 地址，以及 `user@host`、`ssh://user@host:port` 和 `ssh -p 2222 user@host`。可在保存前按「测试连接」验证认证。指纹、密钥类型、SOCKS5 代理和头像在「高级选项」。
+在「SSH 工作区」选择「添加主机」，填写 SSH 地址和登录方式。地址支持普通主机名、Tailscale 地址，以及 `user@host`、`ssh://user@host:port` 和 `ssh -p 2222 user@host`。可在保存前按「测试连接」验证认证。指纹、密钥类型和 SOCKS5 代理在「高级选项」。「外观」支持搜索 Font Awesome 图标、设置图标颜色和上传图片。
 
 - **SSH Agent** 可通过 `compose.agent.yml` 暴露专用签名套接字。设置 `COMPOSE_FILE=docker-compose.yml:compose.agent.yml` 和 `CODEX_WEB_AGENT_DIR`，其下应有应用进程 uid 1000 可访问的 `agent.sock`。
 - **SSH 私钥** 可粘贴到表单，服务端用 AES-GCM 加密持久化。也可将专用密钥置于只读挂载的 `ssh-keys/`，填入相对文件名。`compose.identity.yml` 可将单个密钥挂载为 `default`。密钥口令只写不回显。

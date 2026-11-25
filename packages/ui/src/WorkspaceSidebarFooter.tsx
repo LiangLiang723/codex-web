@@ -86,7 +86,9 @@ function getSidebarProfileBadge(
   return formatMessage({ id: "sidebar.profile.notLoggedIn" });
 }
 
-function getAvatarFallbackText(user: UserInfo | null | undefined): string {
+function getAvatarFallbackText(
+  user: { displayName?: string; username?: string } | null | undefined,
+): string {
   const source = user?.displayName?.trim() || user?.username?.trim() || "Z";
   return source[0]?.toUpperCase() ?? "Z";
 }
@@ -145,9 +147,10 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   const profileBadge = workspace
     ? intl.formatMessage({ id: "selfhost.account" })
     : getSidebarProfileBadge(user, intl.formatMessage);
-  const avatarFallbackText = getAvatarFallbackText(user);
-  const avatarKey = user?.avatarUrl ?? user?.id ?? "guest";
-  const showAuthRestoreLoading = !user && isRestoringOAuthSession;
+  const profile = workspace ? workspace.profile : user;
+  const avatarFallbackText = getAvatarFallbackText(profile);
+  const avatarKey = profile?.avatarUrl ?? (workspace ? profile?.username : user?.id) ?? "guest";
+  const showAuthRestoreLoading = !workspace && !user && isRestoringOAuthSession;
   const usageSummaryState = useWorkspaceSidebarFooterUsageSummaryState({
     enabled: !selfHostedBuild,
     workspaceIdentity,
@@ -165,27 +168,29 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   const profileContent = (
     <>
       <Avatar key={avatarKey} size="default">
-          {user?.avatarUrl ? <AvatarImage src={user.avatarUrl} alt={profileBadge} /> : null}
-          <AvatarFallback className="bg-background text-foreground">
-            {user ? (
-              avatarFallbackText
-            ) : showAuthRestoreLoading ? (
-              <>
-                {/* Bugfix: OAuth 启动恢复未落定前，footer 之前会直接显示未登录头像，
+        {profile?.avatarUrl ? (
+          <AvatarImage src={profile.avatarUrl} alt={workspace ? "" : profileBadge} />
+        ) : null}
+        <AvatarFallback className="bg-background text-foreground">
+          {profile ? (
+            avatarFallbackText
+          ) : showAuthRestoreLoading ? (
+            <>
+              {/* Bugfix: OAuth 启动恢复未落定前，footer 之前会直接显示未登录头像，
                   用户很容易把“还在校验”误判成“已经退出”。
                   这里用 loading 图标明确表达“状态确认中”，等恢复成功或失败后再展示最终状态。 */}
-                <LoaderCircle className="size-4 animate-spin" />
-                <span className="sr-only">{intl.formatMessage({ id: "common.loading" })}</span>
-              </>
-            ) : (
-              <User className="size-4" />
-            )}
-          </AvatarFallback>
+              <LoaderCircle className="size-4 animate-spin" />
+              <span className="sr-only">{intl.formatMessage({ id: "common.loading" })}</span>
+            </>
+          ) : (
+            <User className="size-4" />
+          )}
+        </AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1 overflow-hidden text-left">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="min-w-0 truncate text-ui-base font-semibold text-foreground">
-            {profileBadge}
+            {workspace?.profile?.username ?? profileBadge}
           </span>
         </div>
       </div>

@@ -144,8 +144,13 @@ try {
     "PASS canceling direct and SOCKS5 probes closes the server's pending socket\n",
   );
 
-  const configured = await api("/api/hosts", { ...draft, port: heldPort });
+  const configured = await api("/api/hosts", {
+    ...draft,
+    port: heldPort,
+    avatar: "fab fa-docker:#7654c9",
+  });
   assert.equal(configured.password, undefined);
+  assert.equal(configured.avatar, "fab fa-docker:#7654c9");
   socket = new WebSocket(origin.replace("http:", "ws:") + "/api/realtime");
   function nextMessage(predicate) {
     return new Promise((done, reject) => {
@@ -192,7 +197,9 @@ try {
   assert.equal(heldSockets.size, 0);
   const { password: _password, ...edit } = draft;
   await outcome(edit, "connected", configured.id);
-  assert.equal((await api("/api/hosts"))[0].port, heldPort);
+  const [saved] = await api("/api/hosts");
+  assert.equal(saved.port, heldPort);
+  assert.equal(saved.avatar, "fab fa-docker:#7654c9");
   process.stdout.write(
     "PASS saved host cancellation, explicit retry and stored credential reuse\n",
   );

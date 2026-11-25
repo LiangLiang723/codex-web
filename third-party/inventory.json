@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "inputHashEncoding": "UTF-8 with CRLF normalized to LF; notice and source snapshot hashes remain byte-exact",
   "scope": "Production dependency union across current workspace projects, copied source/assets and native tools; not a per-installer SBOM or a certification of all licensing obligations.",
-  "noticesSha256": "04cbc4bd3801cb12adb878eb28272595833de3e4c33dedfd77c6e99454f308ae",
+  "noticesSha256": "a1e66772fb52513f5b7c3e355b0dab0e7a76abc1e909f97d57a823873162ebe9",
   "inputs": {
     ".agents/skills/agent-browser/references/authentication.md": "e2c3b0f4a1dc1368dee821f03c000d818a48421d09f3872525dddffe73f2112b",
     ".agents/skills/agent-browser/references/commands.md": "17522fc56d742663f47231ff06c4811abc87e12c7f78e11f94d253ddd540a909",
@@ -796,7 +796,7 @@
     "docs/knip/docs/src/styles/theme-light.css": "e2e85900fd43b5b563f56b9ce7e2a09f07d7420a78e80f0133efffeb8fce2aa0",
     "docs/knip/docs/src/util/post.ts": "6d7c45bd29035a73f1b67d24524760c7e317f367d32216de2c9a240dda7a40d1",
     "docs/knip/docs/tsconfig.json": "662b1f10a5e572b49a45669e4be9ee46c22f987dcf277c204948777b367df1cd",
-    "package.json": "fd92975dad5c18e2018871b4868195eeb2704a1e2f106302c24c9a59017c94a3",
+    "package.json": "b312db36723328dae2f2ae99847d9635ff11d261199a4155a34c6fc656edad0d",
     "packages/client/package.json": "e76f441549130dc3e5e68072a36b6cb9044e19a6625f1e813f19a4def2b1b689",
     "packages/design-runtime/package.json": "647d36a7bb3b5b13f87ddb8a94811152a1a024f0293eebd0b16032e1c0976d9c",
     "packages/desktop/package.json": "b8450de7a149c8e45995744fd7b37bb0d07a0178d546c3ece1bcd30f91387f50",
@@ -1977,10 +1977,10 @@
     "packages/services/package.json": "5d96b013c7a80ec8d5a928e36532ce4e3b1fda61460fb45727b82f1407f0e6d4",
     "packages/session-control/package.json": "abe4e64b8ceebb9fa9240e6c88d2b9f5bfa55fc15733f70a51b7502294aef8f3",
     "packages/share-ui/package.json": "bf4e08759bc010d24d2559aa82a538832bee7c749c07c230158ee8d810cfdf41",
-    "packages/shared/package.json": "fba2e4c4a0719b1c6b5fdd86d94d11a7cf2420bda598369c304ad7c438b7bc86",
+    "packages/shared/package.json": "1c74f3d16b9625aad1beebb6e0e3ee47104e821f342943b451c973c46563e8cb",
     "packages/shared/src/zcode-protocol-v4/wire-codec.ts": "ac2494a3acc795c809c94ee9393f50271a9c2a0fd33813459e5ab93842ceef75",
     "packages/stream-animate/package.json": "31cb25ed87e64dbcd695bbc932729ac30499107d45f747b96a5c3de832afdc28",
-    "packages/ui/package.json": "53fc211a75d724c1bc3771a5c265e388907d5512fc9bf821c396511b8f42e59e",
+    "packages/ui/package.json": "9f5db20fdd5883c7fe7c20f400a9a73300b360c7047633c830dd39a158524aec",
     "packages/ui/src/components/ai-elements/agent.tsx": "830e7ea9e927de1524851337f1d35bda0e5690e3e4fa307fff854b60006b16c7",
     "packages/ui/src/components/ai-elements/artifact.tsx": "7d73f08864d6280ac86c77d32e56d0e702f8aa6208e5910820139d0fb08ce64c",
     "packages/ui/src/components/ai-elements/attachments.tsx": "7a847ce6c8ac9dc630481a82dd20a5e9e00949bf710a41fea1d32a18123011d8",
@@ -1989,7 +1989,7 @@
     "packages/ui/src/components/ai-elements/chain-of-thought.tsx": "d9755d90e2949137f03bb603ed34a1e1893a83fdc3cae321a02814af307400e3",
     "packages/ui/src/components/ai-elements/chat-loading.tsx": "21a495a53ccb0d7c1db1d2b62c41e8b6274bc582a2e88ed54d6be3e3338d3f82",
     "packages/ui/src/components/ai-elements/checkpoint.tsx": "72459f6fb8668e9245ec32542f92c7de809cc9b5a366bb44ab08f91ea4e1255b",
-    "packages/ui/src/components/ai-elements/code-block.tsx": "05fbfa2e2e0145a9ccc11b6128b0dc47fef93b24f84c2ffbe17ae60985840325",
+    "packages/ui/src/components/ai-elements/code-block.tsx": "4d753ae626aa3549d35ba087d3f425c6154b86f75f23381408f868af41193947",
     "packages/ui/src/components/ai-elements/commit.tsx": "e9f5dcffac4ec7702b6d77b41cfc28fab54f0595375dd2c992dc972c0a9e74d2",
     "packages/ui/src/components/ai-elements/confirmation.tsx": "bb39ae89d5550f4ffcbb36e73dc8b75d1c9930f0fdba28cc8ff135d753b65a9b",
     "packages/ui/src/components/ai-elements/connection.tsx": "6e6cf65efcef612a3d14f5fda69e27009bc06046d1f7aa842a1a93b9142a7f81",
@@ -2008,9 +2008,9 @@
     "packages/ui/src/components/ai-elements/markdown-blockquote.tsx": "0c76599780a464136703d40d07172dcc62730dee1ce01a155100cf4712440a7f",
     "packages/ui/src/components/ai-elements/markdown-image.tsx": "aedf797b19d4f5d37fc7e8833b2824a9d1a1a4fca440b69519b43a43eb122e90",
     "packages/ui/src/components/ai-elements/markdown-list.tsx": "ecf50ad4f48cd460ddcf90db7b463671f915d8c22c7cb8e7760ff3b02282c7f1",
-    "packages/ui/src/components/ai-elements/markdown-table.tsx": "e598edff66f537d3838fc233c10b931156d06172b1921fbe387e02878ce61d02",
+    "packages/ui/src/components/ai-elements/markdown-table.tsx": "50230fc976cc2602e280faf0f7da85c54665d5b7bd7dc6d1da782326304a6c22",
     "packages/ui/src/components/ai-elements/mermaid-block.tsx": "0a68cb98554853a9b4bbdddc142456f91ad34cb10fa6cd611f37d335041e2537",
-    "packages/ui/src/components/ai-elements/message.tsx": "5d8d2eb94418db872979b2b328ebfd76f26fbaa90e8c6d864685264029cb6e70",
+    "packages/ui/src/components/ai-elements/message.tsx": "308c3206102c0c382bb2c3096b4cfe6821f29c1d249efe5a83099ad00a48df95",
     "packages/ui/src/components/ai-elements/mic-selector.tsx": "e6249c6380a9aa768a411b7fc05e57388b7dc8a6e2afae687250d33ce9bb54db",
     "packages/ui/src/components/ai-elements/model-selector.tsx": "745414195be63160ab61efadc8352c2c6a28d3ba53107896c146a499c0847b99",
     "packages/ui/src/components/ai-elements/node.tsx": "d7b68c41717a509bd9063f0a9fc0c4525ceb2b23bae4028bcd49ec949fc6268f",
@@ -2046,7 +2046,7 @@
     "packages/ui/src/components/ui/accordion.tsx": "4a72f846da91bdeac1dbba849572132b98c8b96f0b03e611f46d0f3e41791947",
     "packages/ui/src/components/ui/alert-dialog.tsx": "3dd074ddbfcefdad6a6c231b6cf055bbcd5fce40bf8feecc6950b60d9ab53b81",
     "packages/ui/src/components/ui/alert.tsx": "5f29338fc9b767994b39849edeac71ee91dc1fd4a875252b40c5cf9001b1c0a7",
-    "packages/ui/src/components/ui/avatar.tsx": "5d87a3860936de1795099bc995ca64b2d5a9179caa74385b4e5de5fd3ee59725",
+    "packages/ui/src/components/ui/avatar.tsx": "45049e72991d643a3903fdc468521db0d1f618006fb89528ef0a1882ab5b4cd4",
     "packages/ui/src/components/ui/badge.tsx": "d4966b2604bc7acf38bd3aecc899b08a6aec8b62552f680d4e1fd4616d2198b9",
     "packages/ui/src/components/ui/button-group.tsx": "3c455ad047c87097070c4e107bc0e58dd087531e85b1c60f28f1f526dd9a0061",
     "packages/ui/src/components/ui/button.tsx": "3bf0b1573c940999f875a1dd5e67a32e7d9bcb3e320774fa8277f5c00748b32b",
@@ -2095,7 +2095,7 @@
     "packages/ui/src/lib/builtinSkillI18n.ts": "c21bf530dd4e2ed9e0fc62394efcf0e72cc82adb12b2e2e6cb718416b7068142",
     "packages/ui/src/styles.css": "a1a7c10978909de324679e4355995775bf04134c35ae66eed220147caaa4d164",
     "packages/web-share/package.json": "4865c14968b96d355c45c2edf612443f79d6d05cfbe433a28374e19b1b0c9d88",
-    "packages/web/package.json": "c70390c0404808451a621a15a2489821883e2511d60a0b73ba298e10c583d1af",
+    "packages/web/package.json": "d59fe3ddf9f1028474ccda1ffcd594a3eacf91ef358fdecb96df7449fd4612e6",
     "packages/web/public/material-icons/3d.svg": "9527b849f0fba57ca7640e2717b3a19cb5f5e046712cbbd8b75d73af338c68fb",
     "packages/web/public/material-icons/abap.svg": "1335bd7eb9a0ed49deb622330d680c2e97731726a7a5eee8e4f46dc1e5db4de4",
     "packages/web/public/material-icons/abc.svg": "d1a68020e8f020ef29dca5f94dc8613b7ae8fb5b212d8b1cc23b0f975ac7acda",
@@ -3253,7 +3253,7 @@
     "patches/@radix-ui__react-menu@2.1.16.patch": "4b05eae73074149ac453ee047d9f48707df7d5c9ddedeab8d514f9b9fa097a6c",
     "patches/vitest@4.1.7.patch": "11fdb66aa985e1d77e68752deeb7c1130ae33c9a4e2968f23aae8adaf8bc9ba0",
     "patches/wdio-electron-service@9.2.1.patch": "52481dae5e76772fcb8c2a9ff42feb3d0e1478e28815a4b975c81b9287e3385f",
-    "pnpm-lock.yaml": "6a02982c16704bb0a010f14e615361b63c19210a59554c88a5f657cffd0197d5",
+    "pnpm-lock.yaml": "b853a0fb36018f2e44698a489fc357a5d14e132eac8b7eb5ae41bd77254a0cea",
     "pnpm-workspace.yaml": "ddf4d195a433a1fae0a991462b9b19281435d7055d768d2a2942de8f4aff89f3",
     "scripts/license-texts/Apache-2.0.txt": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
     "scripts/native-search-tools-config.mjs": "7cadab538877a3f64a3161f1c64ec50fe06c83aa32dbebef3553941c314a689a",
@@ -4513,6 +4513,26 @@
         {
           "member": "LICENSE",
           "sha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce"
+        }
+      ]
+    },
+    {
+      "name": "@fortawesome/fontawesome-free",
+      "version": "6.7.2",
+      "license": "(CC-BY-4.0 AND OFL-1.1 AND MIT)",
+      "repository": "https://github.com/FortAwesome/Font-Awesome",
+      "notices": [
+        {
+          "member": "LICENSE.txt",
+          "sha256": "9b914eae88817d63b576eab5aafde7068c7a1abae125d7cdfb034f1da43a9afc"
+        },
+        {
+          "member": "svgs/regular/copyright.svg",
+          "sha256": "016df284ec8cccc0b1eb750926d939f3845054d0ec37211ead01bc4f12b9fa05"
+        },
+        {
+          "member": "svgs/solid/copyright.svg",
+          "sha256": "055012ea150367d1ff9bbc244acc0b67d6cea043459b41ed5d2cf55e359a3341"
         }
       ]
     },
@@ -19825,7 +19845,7 @@
         },
         {
           "file": "packages/ui/src/components/ui/avatar.tsx",
-          "sha256": "5d87a3860936de1795099bc995ca64b2d5a9179caa74385b4e5de5fd3ee59725"
+          "sha256": "45049e72991d643a3903fdc468521db0d1f618006fb89528ef0a1882ab5b4cd4"
         },
         {
           "file": "packages/ui/src/components/ui/badge.tsx",
@@ -20191,7 +20211,7 @@
         },
         {
           "file": "packages/ui/src/components/ai-elements/code-block.tsx",
-          "sha256": "05fbfa2e2e0145a9ccc11b6128b0dc47fef93b24f84c2ffbe17ae60985840325"
+          "sha256": "4d753ae626aa3549d35ba087d3f425c6154b86f75f23381408f868af41193947"
         },
         {
           "file": "packages/ui/src/components/ai-elements/commit.tsx",
@@ -20267,7 +20287,7 @@
         },
         {
           "file": "packages/ui/src/components/ai-elements/markdown-table.tsx",
-          "sha256": "e598edff66f537d3838fc233c10b931156d06172b1921fbe387e02878ce61d02"
+          "sha256": "50230fc976cc2602e280faf0f7da85c54665d5b7bd7dc6d1da782326304a6c22"
         },
         {
           "file": "packages/ui/src/components/ai-elements/mermaid-block.tsx",
@@ -20275,7 +20295,7 @@
         },
         {
           "file": "packages/ui/src/components/ai-elements/message.tsx",
-          "sha256": "5d8d2eb94418db872979b2b328ebfd76f26fbaa90e8c6d864685264029cb6e70"
+          "sha256": "308c3206102c0c382bb2c3096b4cfe6821f29c1d249efe5a83099ad00a48df95"
         },
         {
           "file": "packages/ui/src/components/ai-elements/mic-selector.tsx",

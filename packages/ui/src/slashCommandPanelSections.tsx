@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { isAppSlashCommandSuggestion } from "@/slashCommandHelpers.js";
 import type { IntlInstance } from "@/i18n/IntlProvider.js";
 import type { PromptInputSuggestionItem } from "@/lib/promptInputTriggers.js";
@@ -18,32 +19,32 @@ export function useSlashCommandMentionPanelSections(
   subagentsLoading: boolean,
   subagentsError: string | null,
 ): MentionPanelSection[] {
-  return useMemo(
-    () => [
+  return useMemo(() => {
+    const sections: MentionPanelSection[] = [
       {
         id: "commands",
         title: intl.formatMessage({ id: "chat.slash.commands.title" }),
-        options: filteredCommandSuggestions.map<MentionPanelOption>((suggestion) => ({
-          id: suggestion.id,
-          // 修复原因：7c20a02c71（无关的浏览器资源修复）误删了 App 操作的本地化名称，计划模式
-          // 退回显示 `/plan`，违反 docs/plan-slash-command.md；App 操作按其 label 展示。
-          label: isAppSlashCommandSuggestion(suggestion)
-            ? suggestion.label
-            : `/${suggestion.value}`,
-          description: suggestion.description,
-          content: (
-            <span className="min-w-0 flex-1 flex items-center gap-2">
-              <span className="truncate text-ui-base font-medium text-foreground max-w-[40%]">
-                {isAppSlashCommandSuggestion(suggestion)
-                  ? suggestion.label
-                  : `/${suggestion.value}`}
+        options: filteredCommandSuggestions.map<MentionPanelOption>((suggestion) => {
+          const label =
+            !selfHostedBuild && isAppSlashCommandSuggestion(suggestion)
+              ? suggestion.label
+              : `/${suggestion.value}`;
+          return {
+            id: suggestion.id,
+            label,
+            description: suggestion.description,
+            content: (
+              <span className="min-w-0 flex-1 flex items-center gap-2">
+                <span className="truncate text-ui-base font-medium text-foreground max-w-[40%]">
+                  {label}
+                </span>
+                <span className="truncate text-ui-sm text-foreground-subtlest flex-1">
+                  {suggestion.description}
+                </span>
               </span>
-              <span className="truncate text-ui-base text-foreground-subtlest flex-1">
-                {suggestion.description}
-              </span>
-            </span>
-          ),
-        })),
+            ),
+          };
+        }),
         loading: false,
         emptyText:
           commandsLength === 0
@@ -73,39 +74,45 @@ export function useSlashCommandMentionPanelSections(
         emptyText: intl.formatMessage({ id: "chat.slash.skills.empty" }),
         errorText: skillsError,
       },
-      {
-        id: "subagents",
-        title: intl.formatMessage({ id: "chat.slash.subagents.title" }),
-        options: filteredSubagentSuggestions.map<MentionPanelOption>((suggestion) => ({
-          id: suggestion.id,
-          label: suggestion.value,
-          description: suggestion.description,
-          content: (
-            <span className="min-w-0 flex-1 flex items-center gap-2">
-              <span className="truncate text-ui-base font-medium text-foreground max-w-[40%]">
-                {suggestion.value}
-              </span>
-              <span className="truncate text-ui-base text-foreground-subtlest flex-1">
-                {suggestion.description}
-              </span>
-            </span>
-          ),
-        })),
-        loading: subagentsLoading,
-        emptyText: intl.formatMessage({ id: "chat.slash.subagents.empty" }),
-        errorText: subagentsError,
-      },
-    ],
-    [
-      commandsLength,
-      filteredCommandSuggestions,
-      filteredSkillSuggestions,
-      filteredSubagentSuggestions,
-      intl,
-      skillsError,
-      skillsLoading,
-      subagentsError,
-      subagentsLoading,
-    ],
-  );
+      ...(!selfHostedBuild
+        ? [
+            {
+              id: "subagents",
+              title: intl.formatMessage({ id: "chat.slash.subagents.title" }),
+              options: filteredSubagentSuggestions.map<MentionPanelOption>((suggestion) => ({
+                id: suggestion.id,
+                label: suggestion.value,
+                description: suggestion.description,
+                content: (
+                  <span className="min-w-0 flex-1 flex items-center gap-2">
+                    <span className="truncate text-ui-base font-medium text-foreground max-w-[40%]">
+                      {suggestion.value}
+                    </span>
+                    <span className="truncate text-ui-base text-foreground-subtlest flex-1">
+                      {suggestion.description}
+                    </span>
+                  </span>
+                ),
+              })),
+              loading: subagentsLoading,
+              emptyText: intl.formatMessage({ id: "chat.slash.subagents.empty" }),
+              errorText: subagentsError,
+            },
+          ]
+        : []),
+    ];
+    return selfHostedBuild
+      ? sections.filter((section) => section.options.length || section.loading || section.errorText)
+      : sections;
+  }, [
+    commandsLength,
+    filteredCommandSuggestions,
+    filteredSkillSuggestions,
+    filteredSubagentSuggestions,
+    intl,
+    skillsError,
+    skillsLoading,
+    subagentsError,
+    subagentsLoading,
+  ]);
 }

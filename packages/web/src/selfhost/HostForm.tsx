@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useZCodeIntl } from "@zcode/ui";
 import { Button } from "@zcode/ui/button";
+import { WorkspaceAvatar } from "@zcode/ui/workspace-avatar";
 import {
   Dialog,
   DialogContent,
@@ -115,7 +116,8 @@ export function HostForm({
   const t = (id: string) => intl.formatMessage({ id });
   const [avatar, setAvatar] = useState(host?.avatar ?? "server");
   const [readingAvatar, setReadingAvatar] = useState(false);
-  const [mode, setMode] = useState<Host["authMode"]>(host?.authMode ?? "agent");
+  const [mode, setMode] = useState<Host["authMode"]>(host?.authMode ?? "privateKey");
+  const [appearance, setAppearance] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<TestStatus | null>(null);
@@ -138,7 +140,7 @@ export function HostForm({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (probe.active || saving) return;
+    if (probe.active || saving || readingAvatar) return;
     const form = event.currentTarget;
     const submitter = (event.nativeEvent as SubmitEvent).submitter;
     const test = submitter?.getAttribute("value") === "test";
@@ -184,7 +186,11 @@ export function HostForm({
           { hostId: host?.id, host: body },
           controller.signal,
         );
-        if (probe.active === controller) setResult(reply.status);
+        if (probe.active === controller) {
+          setResult(reply.status);
+          // 试连失败后直接显示要核对的指纹与密钥类型。
+          if (reply.status === "hostKey") setAdvanced(true);
+        }
       } catch {
         if (probe.active === controller) setResult("failed");
       } finally {
@@ -230,12 +236,13 @@ export function HostForm({
         <form
           className="grid gap-4"
           onSubmit={submit}
-          onChange={() => {
+          onChange={(event) => {
+            if ((event.target as HTMLElement).closest("[data-ssh-appearance]")) return;
             setResult(null);
             setError("");
           }}
         >
-          <fieldset disabled={testing || saving} className="grid min-w-0 gap-3">
+          <fieldset disabled={testing || saving || readingAvatar} className="grid min-w-0 gap-3">
             <label className={labelClass}>
               {t("selfhost.ssh.address")}
               <Input
@@ -253,7 +260,7 @@ export function HostForm({
             </label>
             <div className="grid grid-cols-[minmax(0,1fr)_6rem] gap-3">
               <label className={labelClass}>
-                {t("selfhost.username")}
+                {t("selfhost.ssh.user")}
                 <Input name="user" defaultValue={host?.username ?? ""} autoComplete="off" />
               </label>
               <label className={labelClass}>
@@ -268,32 +275,25 @@ export function HostForm({
                 />
               </label>
             </div>
-            <label className={labelClass}>
-              {t("selfhost.ssh.name")}
-              <Input name="name" defaultValue={host?.name} />
-            </label>
-            <label className={labelClass}>
-              {t("selfhost.ssh.auth")}
+            <div className={labelClass}>
+              <label htmlFor="selfhost-ssh-auth">{t("selfhost.ssh.auth")}</label>
               <select
+                id="selfhost-ssh-auth"
                 className={selectClass}
                 value={mode}
+                aria-describedby="selfhost-ssh-auth-help"
                 onChange={(event) => setMode(event.currentTarget.value as Host["authMode"])}
               >
                 <option value="agent">{t("selfhost.ssh.agent")}</option>
                 <option value="privateKey">{t("selfhost.ssh.key")}</option>
                 <option value="password">{t("selfhost.ssh.password")}</option>
               </select>
-            </label>
+            </div>
+            <p id="selfhost-ssh-auth-help" className="text-ui-sm text-foreground-subtle">
+              {t(`selfhost.ssh.${mode}Hint`)}
+            </p>
             {mode === "privateKey" ? (
               <>
-                <label className={labelClass}>
-                  {t("selfhost.ssh.keyPath")}
-                  <Input
-                    name="path"
-                    defaultValue={host?.privateKeyPath ?? ""}
-                    placeholder="/run/ssh-keys/work"
-                  />
-                </label>
                 <label className={labelClass}>
                   {t("selfhost.ssh.pasteKey")}
                   <Textarea
@@ -301,6 +301,14 @@ export function HostForm({
                     autoComplete="off"
                     spellCheck={false}
                     placeholder={host ? t("selfhost.ssh.keepKey") : undefined}
+                  />
+                </label>
+                <label className={labelClass}>
+                  {t("selfhost.ssh.keyPath")}
+                  <Input
+                    name="path"
+                    defaultValue={host?.privateKeyPath ?? ""}
+                    placeholder="/run/ssh-keys/work"
                   />
                 </label>
                 <label className={labelClass}>
@@ -370,6 +378,29 @@ export function HostForm({
                   defaultValue={host?.proxyUrl ?? ""}
                   placeholder="socks5h://127.0.0.1:1080"
                 />
+              </label>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-fit gap-2 px-0"
+              aria-expanded={appearance}
+              aria-controls="selfhost-ssh-appearance"
+              onClick={() => setAppearance(!appearance)}
+            >
+              <ChevronDown aria-hidden className={appearance ? "rotate-180" : ""} />
+              {t("selfhost.ssh.appearance")}
+              {!appearance ? <WorkspaceAvatar value={avatar} size="sm" /> : null}
+            </Button>
+            <div
+              id="selfhost-ssh-appearance"
+              data-ssh-appearance
+              hidden={!appearance}
+              className={appearance ? "grid gap-3" : undefined}
+            >
+              <label className={labelClass}>
+                {t("selfhost.ssh.name")}
+                <Input name="name" defaultValue={host?.name} />
               </label>
               <AvatarPicker
                 value={avatar}

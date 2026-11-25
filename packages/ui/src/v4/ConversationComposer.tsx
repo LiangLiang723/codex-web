@@ -119,6 +119,7 @@ import { usePromptEditorDragState } from "@/prompt-editor/usePromptEditorDragSta
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { advanceComposerDraftRevision } from "@/v4/composer/composerDraftRevision.js";
 import type { AppSlashCommand } from "@/slashCommandHelpers.js";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { useOptionalServices } from "@/hooks/useServices.js";
 import { logger } from "@/logger.js";
 import { runUserAction, startUserAction } from "@/lib/userActionTelemetry.js";
@@ -649,6 +650,14 @@ function ConversationComposerImpl({
   appSlashCommands,
   onDropTargetControllerChange,
 }: ConversationComposerProps) {
+  const compactUnavailable = selfHostedBuild && !onSendCompressionCommand;
+  const excludedSlashCommandNames = useMemo(
+    () => [
+      ...(suppressGoalCommands ? ["goal"] : []),
+      ...(compactUnavailable ? ["compact"] : []),
+    ],
+    [compactUnavailable, suppressGoalCommands],
+  );
   const remoteAvailable = useRemoteConversationAvailable();
   const remoteController = useOptionalRemoteWorkspaceController();
   const reconnectProject = useRemoteProjectReconnect();
@@ -3082,9 +3091,7 @@ function ConversationComposerImpl({
           promptHistory={promptHistory}
           avoidIosInputFocusZoom={avoidIosInputFocusZoom}
           compactPlaceholder={compactMobilePlaceholder}
-          // Bugfix 原因：命令目录必须完整来自 CLI workspace slash catalog；UI 只在
-          // secondary pane 按产品能力隐藏 goal，不再追加任何内建命令或别名。
-          excludedSlashCommandNames={suppressGoalCommands ? ["goal"] : undefined}
+          excludedSlashCommandNames={excludedSlashCommandNames}
           appSlashCommands={appSlashCommands?.filter((command) =>
             command.recovery ? recoveryAvailable : !runtimeBlocked,
           )}

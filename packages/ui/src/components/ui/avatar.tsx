@@ -1,5 +1,4 @@
 import * as React from "react";
-import { Server, Terminal, Cloud, CodeXml, Cpu, Laptop } from "lucide-react";
 import { Avatar as AvatarPrimitive } from "radix-ui";
 
 import { cn } from "../lib/utils.js";
@@ -94,33 +93,91 @@ function AvatarGroupCount({ className, ...props }: React.ComponentProps<"div">) 
 
 export { Avatar, AvatarImage, AvatarFallback, AvatarGroup, AvatarGroupCount, AvatarBadge };
 
-const workspaceIcons = {
-  server: Server,
-  terminal: Terminal,
-  cloud: Cloud,
-  code: CodeXml,
-  cpu: Cpu,
-  laptop: Laptop,
+export const legacyWorkspaceIcons: Readonly<Record<string, string>> = {
+  server: "fas fa-server",
+  terminal: "fas fa-terminal",
+  cloud: "fas fa-cloud",
+  code: "fas fa-code",
+  cpu: "fas fa-microchip",
+  laptop: "fas fa-laptop",
+  monitor: "fas fa-desktop",
+  smartphone: "fas fa-mobile-screen",
+  database: "fas fa-database",
+  drive: "fas fa-hard-drive",
+  network: "fas fa-network-wired",
+  router: "fas fa-wifi",
+  radio: "fas fa-tower-broadcast",
+  globe: "fas fa-globe",
+  home: "fas fa-house",
+  folder: "fas fa-folder-tree",
+  file: "fas fa-file-code",
+  braces: "fas fa-code-branch",
+  container: "fab fa-docker",
+  package: "fas fa-box-open",
+  layers: "fas fa-layer-group",
+  box: "fas fa-cube",
+  archive: "fas fa-box-archive",
+  shield: "fas fa-shield-halved",
+  lock: "fas fa-lock",
+  key: "fas fa-key",
+  board: "fas fa-memory",
+  wrench: "fas fa-wrench",
+  bug: "fas fa-bug",
+  lightning: "fas fa-bolt",
+  camera: "fas fa-camera",
+  gamepad: "fas fa-gamepad",
 };
-export const workspaceIconNames = Object.keys(workspaceIcons) as (keyof typeof workspaceIcons)[];
+const defaultWorkspaceIcon = "fas fa-server";
+const workspaceIconClass = /^(?:fas|far|fab) fa-[a-z0-9-]{1,64}$/;
+const workspaceIconSizes = {
+  sm: "size-6 text-sm",
+  default: "size-8 text-base",
+  lg: "size-10 text-xl",
+};
+
+export function parseWorkspaceAvatar(value: string) {
+  const [name = "server", color] = value.split(":", 2);
+  const legacy = Object.hasOwn(legacyWorkspaceIcons, name) ? legacyWorkspaceIcons[name] : undefined;
+  return {
+    image: value.startsWith("data:image/png;base64,") ? value : undefined,
+    icon: legacy ?? (workspaceIconClass.test(name) ? name : defaultWorkspaceIcon),
+    color: color && /^#[a-f0-9]{6}$/i.test(color) ? color.toLowerCase() : undefined,
+  };
+}
 
 export function WorkspaceAvatar({
   value = "server",
   size = "default",
+  fallback,
 }: {
   value?: string;
   size?: "sm" | "default" | "lg";
+  fallback?: string;
 }) {
-  const uploaded = value.startsWith("data:image/png;base64,");
-  const preset = Object.hasOwn(workspaceIcons, value)
-    ? (value as keyof typeof workspaceIcons)
-    : "server";
-  const Icon = workspaceIcons[preset];
+  const { image, icon, color } = parseWorkspaceAvatar(value);
+  const iconMarkup = (
+    <i className={cn(icon, "fa-fw leading-none")} style={color ? { color } : undefined} />
+  );
+  if (!image && !fallback) {
+    return (
+      <span
+        aria-hidden="true"
+        className={cn(
+          "inline-flex shrink-0 items-center justify-center text-foreground",
+          workspaceIconSizes[size],
+        )}
+        data-workspace-avatar={icon.slice(7)}
+        data-workspace-avatar-color={color}
+      >
+        {iconMarkup}
+      </span>
+    );
+  }
   return (
-    <Avatar size={size} aria-hidden="true" data-workspace-avatar={uploaded ? "image" : preset}>
-      {uploaded && <AvatarImage src={value} alt="" />}
+    <Avatar size={size} aria-hidden="true" data-workspace-avatar={image ? "image" : undefined}>
+      {image && <AvatarImage src={image} alt="" />}
       <AvatarFallback className="bg-surface text-foreground">
-        <Icon className="size-4" />
+        {fallback ?? iconMarkup}
       </AvatarFallback>
     </Avatar>
   );

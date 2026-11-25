@@ -1,4 +1,5 @@
 import "./bootstrap.js";
+import "@fortawesome/fontawesome-free/css/all.min.css";
 import {
   useCallback,
   useEffect,
@@ -18,7 +19,13 @@ import { ConversationShareReadonlyTimeline } from "@zcode/ui/conversation-share-
 import { projectThread, str } from "./threadProjection.js";
 import { AccountSettings } from "./AccountSettings.js";
 import { Catalog } from "./Catalog.js";
-import { Gateway, type Host, type Project } from "./gateway.js";
+import {
+  Gateway,
+  accountProfileSchema,
+  type AccountProfile,
+  type Host,
+  type Project,
+} from "./gateway.js";
 import {
   hostConnectionMessages,
   hostConnectionPending,
@@ -66,7 +73,7 @@ function Login({ onLogin }: { onLogin: (token: string) => void }) {
     <WebLoginPage
       local={{
         title: "登录",
-        description: "使用中心服务器账号登录 Codex 工作区。",
+        description: "使用网页账号登录 Codex 工作区。",
         form: (
           <form onSubmit={submit} className="grid gap-3">
             <label className="grid gap-1 text-ui-xs">
@@ -93,10 +100,12 @@ function Workbench({
   gateway,
   logout,
   account,
+  profile,
 }: {
   gateway: Gateway;
   logout: () => void;
   account: () => void;
+  profile?: AccountProfile;
 }) {
   const { intl } = useZCodeIntl();
   const [catalogSnapshot, setCatalogSnapshot] = useState<{
@@ -309,6 +318,9 @@ function Workbench({
             sshWorkspace: {
               name: selectedName,
               avatar: selectedAvatar ?? "server",
+              profile: profile
+                ? { username: profile.username, avatarUrl: profile.avatar ?? undefined }
+                : undefined,
               manage,
               account,
               logout,
@@ -323,7 +335,7 @@ function Workbench({
         return { activated: false };
       },
     }),
-    [selectedId, selectedName, selectedAvatar, navigate, manage, account, logout],
+    [selectedId, selectedName, selectedAvatar, navigate, manage, account, logout, profile],
   );
   const sshConnection = host && hostConnections[host.id];
   const sshStatus = sshConnection?.status;
@@ -554,6 +566,11 @@ function PrivateShare({ gateway, id }: { gateway: Gateway; id: string }) {
 function App() {
   const [token, setToken] = useState(() => localStorage.getItem(tokenKey) || "");
   const [accountOpen, setAccountOpen] = useState(false);
+  const [accountResult, setAccountResult] = useState<{
+    gateway: Gateway;
+    profile?: AccountProfile;
+    error?: string;
+  }>();
   const showAccount = useCallback(() => setAccountOpen(true), []);
   const logout = useCallback(() => {
     // 旧请求可能在新登录后才收到 401；只清理发起该请求的令牌。
@@ -577,22 +594,54 @@ function App() {
   }, [gateway, logout]);
   useEffect(() => {
     if (!gateway) return;
-    let active = true;
-    void gateway.request("/api/auth/me", z.unknown()).catch((e) => {
-      if (active && /unauthorized|invalid bearer|401/i.test(String(e))) logout();
-    });
+    const controller = new AbortController();
+    void gateway
+      .request(
+        "/api/auth/me",
+        z.object({ user: accountProfileSchema }),
+        "GET",
+        undefined,
+        controller.signal,
+      )
+      .then(
+        ({ user }) => {
+          if (!controller.signal.aborted) setAccountResult({ gateway, profile: user });
+        },
+        (error: Error) => {
+          if (!controller.signal.aborted) setAccountResult({ gateway, error: error.message });
+        },
+      );
     return () => {
-      active = false;
+      controller.abort();
       gateway.close();
     };
-  }, [gateway, logout]);
+  }, [gateway]);
+  const currentAccount = accountResult?.gateway === gateway ? accountResult : undefined;
   const share = new URLSearchParams(location.search).get("share");
   if (gateway && share) return <PrivateShare gateway={gateway} id={share} />;
   return gateway ? (
     <>
-      <Workbench gateway={gateway} logout={endSession} account={showAccount} />
+      <Workbench
+        gateway={gateway}
+        logout={endSession}
+        account={showAccount}
+        profile={currentAccount?.profile}
+      />
       {accountOpen && (
-        <AccountSettings gateway={gateway} close={() => setAccountOpen(false)} signOut={logout} />
+        <AccountSettings
+          gateway={gateway}
+          profile={currentAccount?.profile}
+          loadError={currentAccount?.error}
+          onAvatarSaved={(avatar) => {
+            setAccountResult((current) =>
+              current?.gateway === gateway && current.profile
+                ? { gateway, profile: { ...current.profile, avatar } }
+                : current,
+            );
+          }}
+          close={() => setAccountOpen(false)}
+          signOut={logout}
+        />
       )}
     </>
   ) : (

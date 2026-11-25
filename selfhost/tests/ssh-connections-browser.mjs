@@ -96,15 +96,22 @@ async function verify(page, origin) {
   const errors = [];
   const released = Promise.withResolvers();
   let saveCount = 0;
+  let accountAvatar = null;
   let socket;
+  const theme = page.viewportSize().width >= 768 ? "zai-light" : "zai-dark";
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.addInitScript(() => {
+  await page.addInitScript((activeTheme) => {
     localStorage.setItem("selfhost.auth", "ssh-test-fixture");
     localStorage.setItem("zcode-locale-preference", "zh-CN");
-  });
+    localStorage.setItem("zcode-theme", activeTheme);
+  }, theme);
   await page.route(new URL("/api/**", origin).href, async (route) => {
     const url = new URL(route.request().url());
     if (!url.pathname.startsWith("/api/")) return route.continue();
+    if (url.pathname === "/api/selfhost/account/avatar") {
+      accountAvatar = route.request().postDataJSON().avatar;
+      return route.fulfill({ json: { avatar: accountAvatar } });
+    }
     if (url.pathname === "/api/selfhost/ssh-test") {
       const draft = route.request().postDataJSON();
       drafts.push(draft);
@@ -127,8 +134,9 @@ async function verify(page, origin) {
     const request = route.request().postDataJSON();
     const items = projects.filter((p) => !hostId || p.hostId === hostId);
     const values = {
+      "/api/auth/me": { user: { username: "fixture-account", avatar: accountAvatar } },
       "/api/hosts": hosts,
-      "/api/selfhost/settings": { locale: "zh-CN" },
+      "/api/selfhost/settings": { locale: "zh-CN", theme },
       "/api/selfhost/thread-summary": {
         thread: threads.find((item) => item.id === url.searchParams.get("threadId")),
       },
@@ -211,7 +219,9 @@ async function verify(page, origin) {
       if (command.requestId) reply({ type: "fixture.result" });
     });
   });
-  await page.goto(new URL("/?host=1&cwd=%2Ffixture&thread=ssh-test-thread", origin).href);
+  await page.goto(new URL("/?host=1&cwd=%2Ffixture&thread=ssh-test-thread", origin).href, {
+    waitUntil: "commit",
+  });
   const previousChat = page.getByText("切换前的对话", { exact: true });
   await previousChat.waitFor({ timeout: 30000 }).catch(async (cause) => {
     throw Error(
@@ -238,8 +248,40 @@ async function verify(page, origin) {
   assert.equal(new URL(page.url()).searchParams.get("thread"), thread.id);
   await button(catalog, "添加主机").click();
   const form = page.getByTestId("selfhost-ssh-host-form");
+  assert(await page.locator(`html.theme-${theme}`).count());
   const address = form.locator("[name=address]");
   const test = button(form, "测试连接");
+  const auth = form.getByLabel("登录方式", { exact: true });
+  assert.equal(await auth.inputValue(), "privateKey");
+  await auth.selectOption("agent");
+  await form.getByText(/使用网页服务已加载的 SSH 密钥/).waitFor();
+  await auth.selectOption("password");
+  await form.getByLabel("SSH 密码", { exact: true }).fill("fixture-password");
+  await button(form, "外观").click();
+  await button(form, "浏览图标").click();
+  const search = form.getByRole("searchbox", { name: "搜索图标" });
+  await search.fill("fab fa-docker");
+  await form.getByRole("radio", { name: "Docker", exact: true }).waitFor();
+  await search.press("Enter");
+  const preview = form.locator('[data-workspace-avatar="docker"]').first();
+  const glyph = preview.locator("i.fab.fa-docker");
+  const background = await preview.evaluate((element) => getComputedStyle(element).backgroundColor);
+  await glyph.evaluate(() => document.fonts.ready);
+  assert.match(
+    await glyph.evaluate((element) => getComputedStyle(element).fontFamily),
+    /Font Awesome 6 Brands/,
+  );
+  assert.equal(
+    await glyph.evaluate((element) => getComputedStyle(element, "::before").content.codePointAt(1)),
+    0xf395,
+  );
+  await form.getByLabel("自选颜色", { exact: true }).fill("#7654c9");
+  assert.equal(await glyph.evaluate((icon) => getComputedStyle(icon).color), "rgb(118, 84, 201)");
+  assert.equal(
+    await preview.evaluate((element) => getComputedStyle(element).backgroundColor),
+    background,
+  );
+  await button(form, "外观").click();
   await address.fill("ssh -p 2201 example@fixture");
   await test.click();
   await form.getByText("SSH 认证成功", { exact: true }).waitFor();
@@ -247,6 +289,8 @@ async function verify(page, origin) {
   assert.equal(await form.locator("[name=user]").inputValue(), "example");
   assert.equal(await form.locator("[name=port]").inputValue(), "2201");
   assert.equal(drafts[0].host.port, 2201);
+  assert.equal(drafts[0].host.authMode, "password");
+  assert.equal(drafts[0].host.avatar, "fab fa-docker:#7654c9");
   assert.equal(await form.locator("[name=fingerprint]").isVisible(), false);
   await button(form, "高级选项").click();
   await form.locator("[name=fingerprint]").waitFor();
@@ -308,7 +352,30 @@ async function verify(page, origin) {
     "host.mfa.connect",
     "host.mfa.connect",
   ]);
+  const footer = page.getByTestId("login-trigger").filter({ visible: true }).first();
+  if (!(await footer.isVisible()) && (await button(page, "返回任务首页").isVisible())) {
+    await button(page, "返回任务首页").click();
+  }
+  await footer.getByText("fixture-account", { exact: true }).waitFor();
+  await footer.click();
+  await page.getByRole("menuitem", { name: "账号设置" }).click();
+  const account = page.getByRole("dialog", { name: "账号设置" });
+  const avatar = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    return canvas.toDataURL().split(",")[1];
+  });
+  await account.locator('input[type="file"]').setInputFiles({
+    name: "avatar.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(avatar, "base64"),
+  });
+  await button(account, "保存头像").click();
+  await account.getByText("头像已保存", { exact: true }).waitFor();
+  await page.keyboard.press("Escape");
+  await footer.locator("img").waitFor();
+  assert.equal(await footer.locator("img").getAttribute("src"), accountAvatar);
   assert.deepEqual(errors, []);
+  await socket?.close({ code: 1000 });
 }
 
 try {
@@ -325,7 +392,7 @@ try {
       try {
         await verify(await context.newPage(), origin);
         process.stdout.write(
-          `PASS SSH header, draft test, host switch and cancellation at ${width}px\n`,
+          `PASS SSH connection, icon foreground and account avatar at ${width}px\n`,
         );
       } finally {
         await context.close();

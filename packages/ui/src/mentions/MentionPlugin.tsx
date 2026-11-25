@@ -186,12 +186,13 @@ export function MentionPlugin({
   const isContextTrigger = activeTrigger?.trigger === "@";
   const isSessionTrigger = activeTrigger?.trigger === "#";
   const isSkillTrigger = activeTrigger?.trigger === "$";
+  const showNativeReferences = selfHostedBuild && isContextTrigger;
   const appsResult = useCodexAppsMentionProvider(
     workspacePath,
     workspaceIdentity,
     nativeThreadId ?? null,
     deferredActiveQuery,
-    isOpen && isSkillTrigger,
+    isOpen && (isSkillTrigger || showNativeReferences),
   );
 
   // 修复说明：之前把 @ 面板拆成了两层，导致用户输入 query 后还要再确认一次，
@@ -202,7 +203,7 @@ export function MentionPlugin({
     sessionId ?? null,
     provider,
     deferredActiveQuery,
-    isOpen && isSkillTrigger,
+    isOpen && (isSkillTrigger || showNativeReferences),
     false,
     intl.formatMessage({ id: "chat.mention.skills.empty" }),
     intl.formatMessage({ id: "chat.mention.skills.title" }),
@@ -224,7 +225,7 @@ export function MentionPlugin({
     workspacePath,
     workspaceIdentity,
     deferredActiveQuery,
-    isOpen && isContextTrigger && Boolean(onWhiteboardMentionSelected),
+    isOpen && isContextTrigger && !selfHostedBuild && Boolean(onWhiteboardMentionSelected),
     intl.formatMessage({ id: "chat.mention.whiteboards.empty" }),
     intl.formatMessage({ id: "chat.mention.whiteboards.title" }),
   );
@@ -260,7 +261,7 @@ export function MentionPlugin({
     // 用即时 query 而不是 deferred：插件按 query 远程查询，延后没有收益；面板刚打开时 deferred 值
     // 还是上一次的空串，会多发一次查询，tool 条目还会因此多弹一次审批（运行时日志：同一次输入先查 "" 再查 "qx"）。
     query: activeQuery,
-    enabled: isOpen && isContextTrigger,
+    enabled: isOpen && isContextTrigger && !selfHostedBuild,
   });
 
   const panelGroups = useMemo<MentionResultGroup<MentionItem>[]>(() => {
@@ -317,19 +318,30 @@ export function MentionPlugin({
       },
     } satisfies Record<MentionPanelGroupId, MentionResultGroup<MentionItem>>;
 
-    // Codex 的 $ 同时保留两组状态，应用目录为空时也要展示设置入口的指引。
-    if (selfHostedBuild && activeTrigger?.trigger === "$") {
-      return [
-        groupsById.skills,
-        {
-          id: "apps",
-          title: appsResult.title,
-          items: appsResult.items,
-          loading: appsResult.loading,
-          errorText: appsResult.error?.message ?? null,
-          emptyText: appsResult.emptyText,
-        },
-      ];
+    if (selfHostedBuild) {
+      const apps = {
+        id: "apps",
+        title: appsResult.title,
+        items: appsResult.items,
+        loading: appsResult.loading,
+        errorText: appsResult.error?.message ?? null,
+        emptyText: appsResult.emptyText,
+      };
+      if (activeTrigger?.trigger === "$") return [groupsById.skills, apps];
+      if (activeTrigger?.trigger === "@") {
+        const groups = [
+          groupsById.files,
+          groupsById.sessions,
+          groupsById.plugins,
+          groupsById.skills,
+        ];
+        if (hasActiveQuery) return buildVisibleMentionGroups([...groups, apps]);
+        // 空查询预览各类内容，远端目录较大时也能看到后面的分组。
+        return [...buildVisibleMentionGroups(groups), apps].map((group) => ({
+          ...group,
+          items: group.items.slice(0, MENTION_DEFAULT_GROUP_PREVIEW_LIMIT),
+        }));
+      }
     }
     return buildVisibleMentionGroups([
       ...getMentionPanelGroupOrder(activeTrigger?.trigger).map((groupId) => groupsById[groupId]),
@@ -343,6 +355,7 @@ export function MentionPlugin({
     fileResult.loading,
     fileResult.title,
     activeTrigger?.trigger,
+    hasActiveQuery,
     appsResult.emptyText,
     appsResult.error,
     appsResult.items,
@@ -378,7 +391,7 @@ export function MentionPlugin({
       panelGroups.map((group) => ({
         id: group.id,
         title: group.title,
-        showHeader: activeTrigger?.trigger === "#" || group.showHeader === true,
+        showHeader: selfHostedBuild || activeTrigger?.trigger === "#" || group.showHeader === true,
         options: group.items.map<MentionPanelOption>((item) => ({
           id: item.id,
           label: item.displayLabel ?? item.label,
@@ -759,13 +772,14 @@ export function MentionPlugin({
   }, [editor, flatItems, isOpen, selectOption, selectedIndex]);
 
   const panelTitle = intl.formatMessage({ id: "chat.mention.title" });
-  const panelDescription = hasActiveQuery
-    ? ""
-    : activeTrigger?.trigger === "#"
-      ? intl.formatMessage({ id: "chat.mention.sessions.searchHint" })
-      : activeTrigger?.trigger === "$"
-        ? intl.formatMessage({ id: "chat.mention.skills.searchHint" })
-        : intl.formatMessage({ id: "chat.mention.searchHint" });
+  const panelDescription =
+    selfHostedBuild || hasActiveQuery
+      ? ""
+      : activeTrigger?.trigger === "#"
+        ? intl.formatMessage({ id: "chat.mention.sessions.searchHint" })
+        : activeTrigger?.trigger === "$"
+          ? intl.formatMessage({ id: "chat.mention.skills.searchHint" })
+          : intl.formatMessage({ id: "chat.mention.searchHint" });
   const panelEmptyText = hasActiveQuery
     ? intl.formatMessage({ id: "chat.mention.emptyResults" })
     : "";
@@ -778,6 +792,7 @@ export function MentionPlugin({
     <MentionPanel
       title={panelTitle}
       description={panelDescription}
+      compact={selfHostedBuild}
       trigger={activeTrigger?.trigger ?? "@"}
       sections={panelSections}
       emptyText={panelEmptyText}

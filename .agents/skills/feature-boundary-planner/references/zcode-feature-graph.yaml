@@ -341,13 +341,15 @@ nodes:
   - id: "capability.selfhost-ssh-workspaces"
     kind: "capability"
     label: "Self-hosted Web SSH workspaces"
-    aliases: ["SSH 工作区", "SSH 测试连接", "取消 SSH 连接"]
+    aliases: ["SSH 工作区", "SSH 测试连接", "取消 SSH 连接", "SSH 主机外观"]
     docs: ["specs/selfhost-codex/README.md", "packages/web/src/selfhost/CONTRACT.md"]
     codeSeeds:
       - file: "packages/web/src/selfhost/Catalog.tsx"
         symbol: "Catalog"
       - file: "packages/web/src/selfhost/HostForm.tsx"
         symbol: "HostForm"
+      - file: "packages/web/src/selfhost/AvatarPicker.tsx"
+        symbol: "AvatarPicker"
       - file: "packages/web/src/selfhost/HostConnection.tsx"
         symbol: "waitForHostConnection"
       - file: "packages/ui/src/web-remote-control/WebRemoteControlDeviceHeader.tsx"
@@ -356,6 +358,19 @@ nodes:
       - "The current-host entry preserves the mounted conversation while showing the workspace directory. Only the current successful navigation can change the selected host and directory."
       - "Gateway owns persisted host configuration and shared connections. A draft connection test uses the same host verification and credential resolution with an isolated SSH client."
       - "Host-scoped cancel releases its pending transport and blocks automatic reconnect until an explicit retry. Unrelated existing connections keep their leases."
+      - "Font Awesome class and optional foreground color are saved together and projected in each host entry. Legacy icon names resolve to Font Awesome glyphs. Connection verification uses the saved credential mode or the current draft."
+  - id: "capability.selfhost-web-account-avatar"
+    kind: "capability"
+    label: "Self-hosted Web account avatar"
+    aliases: ["账号头像", "左下角头像"]
+    docs: ["specs/selfhost-codex/README.md", "packages/web/src/selfhost/CONTRACT.md"]
+    codeSeeds:
+      - file: "packages/web/src/selfhost/AccountSettings.tsx"
+        symbol: "AccountSettings"
+      - file: "packages/ui/src/WorkspaceSidebarFooter.tsx"
+        symbol: "WorkspaceSidebarFooter"
+    invariants:
+      - "Gateway persists the authenticated account's avatar. The active Web login holds the server response, which the workspace footer and account settings share."
   - id: "capability.referrals-embedded"
     kind: "capability"
     label: "Rewards center embedded website"
@@ -4108,11 +4123,14 @@ nodes:
       - "输入框触发器"
     docs:
       - "docs/ui/mention-panel-layout.md"
+      - "specs/selfhost-codex/README.md"
     codeSeeds:
       - symbol: "extractActivePromptInputTrigger"
         file: "packages/ui/src/lib/promptInputTriggers.ts"
       - symbol: "ChatPromptActionMenu"
         file: "packages/ui/src/prompt-editor/ChatPromptActionMenu.tsx"
+    invariants:
+      - "Self-hosted Web uses + to open the attachment picker. @ searches workspace references, / lists available commands and skills, and $ searches apps and skills. Selection reuses the native UserInput translation."
 
   - id: "capability.plan-slash-shortcut"
     kind: "capability"

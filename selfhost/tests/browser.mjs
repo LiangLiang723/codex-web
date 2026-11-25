@@ -2,7 +2,6 @@ import { verifyElicitation } from "./elicitation.mjs";
 import { verifyWorkspaceIdentity } from "./workspace-identity.mjs";
 import { verifyAccount } from "./account.mjs";
 import { verifyNativeRecovery } from "./native-history.mjs";
-import { composerPicker, revealPickerOption } from "./fixtures/composer-picker.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { once } from "node:events";
@@ -111,8 +110,11 @@ async function catalog(page, mutation) {
     try {
       await button(page, "添加主机").click();
       dialog = page.getByRole("dialog");
+      await dialog.locator("select").first().selectOption("agent");
+      await button(dialog, "外观").click();
       await dialog.locator("[name=name]").fill(name);
       await button(dialog, "高级选项").click();
+      await button(dialog, "浏览图标").click();
       await dialog.getByRole("radio", { name: "终端", exact: true }).locator("..").click();
       await dialog.locator("[name=address]").fill(host.sshHost);
       await dialog.locator("[name=user]").fill(host.username);
@@ -125,7 +127,8 @@ async function catalog(page, mutation) {
         .filter({ has: page.getByRole("heading", { name, exact: true }) });
       await button(newCard, "编辑").click();
       dialog = page.getByRole("dialog");
-      await button(dialog, "高级选项").click();
+      await button(dialog, "外观").click();
+      await button(dialog, "浏览图标").click();
       assert.equal(await dialog.getByRole("radio", { name: "终端" }).isChecked(), true);
       await dialog.locator("[name=name]").fill(renamed);
       await button(dialog, "保存").click();
@@ -187,9 +190,10 @@ async function workspace(page, width, projects) {
     ),
     (async () => {
       await page.goto(base + "/?" + query);
-      const plus = button(page, "添加上下文");
-      await plus.waitFor({ timeout: 75000 });
-      await plus.click();
+      const editor = page.getByTestId("v4-composer-input");
+      await editor.waitFor({ timeout: 75000 });
+      await editor.focus();
+      await page.keyboard.insertText("@");
     })(),
   ]);
   assert(
@@ -201,19 +205,24 @@ async function workspace(page, width, projects) {
     const first = market.plugins.find((plugin) => plugin.enabled && plugin.installed && plugin.id);
     return first ? [first] : [];
   });
-  const picker = composerPicker(page);
+  const picker = page
+    .getByTestId("prompt-suggestion-panel")
+    .and(page.locator('[data-trigger="@"]'));
   await picker.waitFor();
   if (installed.length) {
     await picker.locator('[role="option"][data-section-id="plugins"]').first().waitFor();
   }
   // The visible label is localized, and the picker mounts only the current scroll window.
   for (const plugin of installed) {
+    await page.keyboard.insertText(plugin.name);
     const option = await revealPickerOption(picker, "plugin:" + plugin.id);
     assert(await option.isEnabled(), "Installed plugin is selectable: " + plugin.id);
+    for (const _ of plugin.name) await page.keyboard.press("Backspace");
   }
   assert.deepEqual(detailReads, [], "Composer references requested per-plugin details");
   await verify(page);
   await page.keyboard.press("Escape");
+  await page.keyboard.press("Backspace");
   const model = page.locator('button[aria-label^="OpenAI Codex/"]').first();
   await model.click();
   await page.getByRole("dialog", { name: "选择模型" }).waitFor();

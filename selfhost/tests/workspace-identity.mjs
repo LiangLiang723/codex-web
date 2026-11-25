@@ -22,16 +22,24 @@ export async function verifyWorkspaceIdentity({ page, browser, base, hostId, cwd
     await page.goto(base + "/?manage=1");
     await card(host.name).getByRole("button", { name: "编辑", exact: true }).click();
     const dialog = page.getByRole("dialog");
+    await dialog.getByRole("button", { name: "外观", exact: true }).click();
     await dialog.locator("input[name=name]").fill(name);
-    await dialog.getByRole("button", { name: "高级选项" }).click();
-    await dialog.getByRole("radio", { name: "终端", exact: true }).locator("..").click();
+    await dialog.getByRole("button", { name: "浏览图标", exact: true }).click();
+    await dialog.getByRole("searchbox", { name: "搜索图标" }).fill("fab fa-docker");
+    await dialog.getByRole("radio", { name: "Docker", exact: true }).locator("..").click();
+    await dialog.getByLabel("自选颜色", { exact: true }).fill("#7654c9");
     await dialog.getByRole("button", { name: "保存", exact: true }).click();
-    await other
+    const savedIcon = other
       .getByTestId("selfhost-workspaces-open")
-      .locator('[data-workspace-avatar="terminal"]')
-      .waitFor();
+      .locator(
+        '[data-workspace-avatar="docker"][data-workspace-avatar-color="#7654c9"] i.fab.fa-docker',
+      );
+    assert.equal(
+      await savedIcon.evaluate((icon) => getComputedStyle(icon).color),
+      "rgb(118, 84, 201)",
+    );
     await card(name).getByRole("button", { name: "编辑", exact: true }).click();
-    await dialog.getByRole("button", { name: "高级选项" }).click();
+    await dialog.getByRole("button", { name: "外观", exact: true }).click();
     const png = await page.evaluate(() => {
       const c = document.createElement("canvas");
       c.width = c.height = 4;

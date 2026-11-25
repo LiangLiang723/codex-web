@@ -48,6 +48,7 @@ interface MentionPanelProps {
   title: string;
   description: string;
   footer?: ReactNode;
+  compact?: boolean;
   listMaxHeight?: string;
   trigger: string;
   sections: MentionPanelSection[];
@@ -80,7 +81,6 @@ type VirtualRow =
 
 const OPTION_ROW_HEIGHT = 34;
 const STATUS_ROW_HEIGHT = 40;
-const LOADING_ROW_COUNT = 4;
 export const SECTION_HEADER_ROW_HEIGHT = 34;
 
 // 分组标题改用 base 字号后，旧的 28px 虚拟行装不下默认行高与 12px 上下 padding。
@@ -154,6 +154,7 @@ export function MentionPanel({
   title,
   description,
   footer,
+  compact = false,
   listMaxHeight,
   sections,
   emptyText,
@@ -180,6 +181,7 @@ export function MentionPanel({
     [virtualRows],
   );
 
+  const loadingRowCount = compact ? 1 : 4;
   const virtualizer = useVirtualizer({
     getItemKey,
     count: virtualRows.length,
@@ -190,7 +192,7 @@ export function MentionPanel({
         : virtualRows[index]?.kind === "section_header"
           ? SECTION_HEADER_ROW_HEIGHT
           : virtualRows[index]?.kind === "status" && virtualRows[index].content === "loading"
-            ? OPTION_ROW_HEIGHT * LOADING_ROW_COUNT
+            ? OPTION_ROW_HEIGHT * loadingRowCount
             : STATUS_ROW_HEIGHT,
     overscan: 8,
   });
@@ -310,7 +312,10 @@ export function MentionPanel({
 
   return (
     <div
-      className="mb-1 overflow-hidden rounded-2xl border border-border bg-menu shadow-xs"
+      className={cn(
+        "mb-1 overflow-hidden border border-border bg-menu shadow-xs",
+        compact ? "w-full max-w-lg rounded-lg" : "rounded-2xl",
+      )}
       data-testid={TID_PROMPT_SUGGESTION_PANEL}
       data-trigger={trigger}
     >
@@ -347,9 +352,9 @@ export function MentionPanel({
                   }}
                 >
                   {row.kind === "status" ? (
-                    <StatusRow row={row} />
+                    <StatusRow row={row} loadingRowCount={loadingRowCount} />
                   ) : row.kind === "section_header" ? (
-                    <SectionHeaderRow row={row} />
+                    <SectionHeaderRow row={row} compact={compact} />
                   ) : (
                     <OptionRow
                       row={row}
@@ -380,10 +385,20 @@ export function MentionPanel({
   );
 }
 
-function SectionHeaderRow({ row }: { row: Extract<VirtualRow, { kind: "section_header" }> }) {
+function SectionHeaderRow({
+  row,
+  compact,
+}: {
+  row: Extract<VirtualRow, { kind: "section_header" }>;
+  compact: boolean;
+}) {
   return (
     <div
-      className={SECTION_HEADER_CLASS_NAME}
+      className={
+        compact
+          ? "flex h-8 items-center px-2 text-ui-xs font-medium text-foreground-subtle"
+          : SECTION_HEADER_CLASS_NAME
+      }
       data-testid={testId(TID_PROMPT_SUGGESTION_SECTION, row.sectionId)}
       data-section-id={row.sectionId}
     >
@@ -392,7 +407,13 @@ function SectionHeaderRow({ row }: { row: Extract<VirtualRow, { kind: "section_h
   );
 }
 
-function StatusRow({ row }: { row: Extract<VirtualRow, { kind: "status" }> }) {
+function StatusRow({
+  row,
+  loadingRowCount,
+}: {
+  row: Extract<VirtualRow, { kind: "status" }>;
+  loadingRowCount: number;
+}) {
   if (row.content === "loading") {
     return (
       <div
@@ -403,7 +424,7 @@ function StatusRow({ row }: { row: Extract<VirtualRow, { kind: "status" }> }) {
         data-section-id={row.sectionId}
         data-status="loading"
       >
-        {Array.from({ length: LOADING_ROW_COUNT }, (_, index) => (
+        {Array.from({ length: loadingRowCount }, (_, index) => (
           <div key={index} aria-hidden="true" className="py-px">
             <div className="flex h-8 items-center gap-3 px-3 motion-safe:animate-pulse">
               <span className="size-5 shrink-0 rounded-md bg-surface-hover" />

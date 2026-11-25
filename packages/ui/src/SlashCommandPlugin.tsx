@@ -18,6 +18,7 @@ import {
   type SetStateAction,
 } from "react";
 import type { ZCodeProvider } from "@zcode/shared";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { createPortal } from "react-dom";
 import {
@@ -169,7 +170,7 @@ export function SlashCommandPlugin({
     agents,
     loading: subagentsLoading,
     error: subagentsError,
-  } = useSubagents(workspacePath, provider, workspaceIdentity);
+  } = useSubagents(selfHostedBuild ? null : workspacePath, provider, workspaceIdentity);
   const {
     skills,
     loading: skillsLoading,
@@ -192,13 +193,23 @@ export function SlashCommandPlugin({
     const cliSuggestions = buildSlashSuggestions(commands).filter(
       (item) => !excluded.has(item.value) && !recoveryNames.has(item.value),
     );
+    const nativeSuggestions = selfHostedBuild
+      ? buildSlashSuggestions([
+          { name: "goal", description: intl.formatMessage({ id: "selfhost.composer.goal" }) },
+          { name: "compact", description: intl.formatMessage({ id: "selfhost.composer.compact" }) },
+        ]).filter(
+          (item) =>
+            !excluded.has(item.value) &&
+            !cliSuggestions.some((entry) => entry.value === item.value),
+        )
+      : [];
     // App 层命令追加在 CLI catalog 之后展示；CLI 已提供同名命令时以 CLI 为准，避免遮蔽。
     const cliValues = new Set(cliSuggestions.map((item) => item.value));
     const appSuggestions = buildAppSlashCommandSuggestions(appCommands ?? []).filter(
       (item) => !cliValues.has(item.value) && !excluded.has(item.value),
     );
-    return [...cliSuggestions, ...appSuggestions];
-  }, [appCommands, commands, excludedCommandNames]);
+    return [...cliSuggestions, ...appSuggestions, ...nativeSuggestions];
+  }, [appCommands, commands, excludedCommandNames, intl]);
   const subagentSuggestions = useMemo(() => buildSubagentSuggestions(agents), [agents]);
   const skillSuggestions = useMemo(
     () =>
@@ -458,13 +469,12 @@ export function SlashCommandPlugin({
 
   const panelTitle = intl.formatMessage({ id: "chat.slash.title" });
   const hasActiveQuery = (activeTrigger?.query ?? "").trim().length > 0;
-  const panelDescription = hasActiveQuery
-    ? ""
-    : intl.formatMessage({ id: "chat.slash.searchHint" });
+  const panelDescription =
+    selfHostedBuild || hasActiveQuery ? "" : intl.formatMessage({ id: "chat.slash.searchHint" });
 
   const panelSections = useSlashCommandMentionPanelSections(
     intl,
-    commands.length,
+    commandSuggestions.length,
     filteredCommandSuggestions,
     filteredSkillSuggestions,
     skillsLoading,
@@ -483,8 +493,9 @@ export function SlashCommandPlugin({
       title={panelTitle}
       description={panelDescription}
       trigger="/"
+      compact={selfHostedBuild}
       sections={panelSections}
-      emptyText=""
+      emptyText={selfHostedBuild ? intl.formatMessage({ id: "chat.slash.emptyResults" }) : ""}
       selectedIndex={selectedIndex}
       selectionScope={activeSignature}
       hasActiveQuery={hasActiveQuery}

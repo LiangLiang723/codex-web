@@ -821,6 +821,7 @@ export interface IPlatformService {
   readonly sshWorkspace?: {
     name: string;
     avatar: string;
+    profile?: { username: string; avatarUrl?: string };
     manage(): void;
     account(): void;
     logout(): void;

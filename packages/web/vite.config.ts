@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
 import { build as bundleGatewayProtocol } from "esbuild";
 import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, loadEnv } from "vite";
+import { parse as parseYaml } from "yaml";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { pdfJsCMapsPlugin } from "../ui/vite/pdfJsCMapsPlugin.js";
@@ -16,6 +19,8 @@ const { version, zcodeCompatibility } = JSON.parse(
   readFileSync(resolve(REPO_ROOT, "package.json"), "utf-8"),
 ) as { version: string; zcodeCompatibility?: { minCompatibleVersion?: string } };
 const minCompatibleVersion = zcodeCompatibility?.minCompatibleVersion ?? version;
+const resolveDependency = createRequire(import.meta.url).resolve;
+const fontAwesomePrefixes = { solid: "fas", regular: "far", brands: "fab" } as const;
 
 function resolveZCodeEnv(value: string | undefined): "test" | "production" {
   return value?.trim().toLowerCase() === "production" ? "production" : "test";
@@ -36,8 +41,33 @@ export default defineConfig(({ mode, command }) => {
           resolveId(id: string) {
             if (id === "virtual:zcode-projection-state") return "\0zcode-projection-state.js";
             if (id === "virtual:gateway-terminal-stream") return "\0gateway-terminal-stream.js";
+            if (id === "virtual:selfhost-workspace-icons") return "\0selfhost-workspace-icons.js";
           },
           async load(id: string) {
+            if (id === "\0selfhost-workspace-icons.js") {
+              const metadata = parseYaml(
+                await readFile(
+                  resolveDependency("@fortawesome/fontawesome-free/metadata/icons.yml"),
+                  "utf8",
+                ),
+              ) as Record<
+                string,
+                {
+                  label: string;
+                  styles: (keyof typeof fontAwesomePrefixes)[];
+                  search: { terms: string[] };
+                }
+              >;
+              // Tabby 也按 Font Awesome 的样式生成类名，浏览器只需要类名与搜索字段。
+              const icons = Object.entries(metadata).flatMap(([name, icon]) =>
+                icon.styles.map((style) => [
+                  `${fontAwesomePrefixes[style]} fa-${name}`,
+                  icon.label,
+                  icon.search.terms.join(" "),
+                ]),
+              );
+              return `export default ${JSON.stringify(icons)};`;
+            }
             if (id === "\0zcode-projection-state.js") {
               const path = resolve(
                 REPO_ROOT,

@@ -83,6 +83,7 @@ import { GitActionMenu } from "@/GitActionMenu.js";
 import { HostedGitBranchSwitcher } from "@/GitBranchSwitcher.js";
 import { resolveGitBranchTriggerLabel } from "@/git-branch-switcher/display.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { getPlanDirectoryTitle } from "@/lib/planToolCall.js";
 import type {
   OpenPlanDetailSideTabRequest,
   OpenSubagentDirectorySideTabRequest,
@@ -2042,7 +2043,8 @@ export function SelfhostConversationStatusPanel(props: SelfhostConversationStatu
     summary.workspacePath === (props.gitCwd ?? props.workspacePath),
   );
   const hasAgents = Boolean(props.runningSubagents?.length || props.endedSubagentCount);
-  const hasPlan = Boolean(props.plan?.items.length || (props.writtenPlan && props.onOpenPlan));
+  const { writtenPlan, onOpenPlan } = props;
+  const hasPlan = Boolean(props.plan?.items.length || (writtenPlan && onOpenPlan));
   const hasContent = Boolean(hasGit || props.goal || hasPlan || hasAgents || props.sources?.length);
   const { mobile } = props;
   const inline = !mobile && wide && expanded;
@@ -2072,6 +2074,10 @@ export function SelfhostConversationStatusPanel(props: SelfhostConversationStatu
   if (!hasContent) return null;
   const title = intl.formatMessage({ id: "selfhost.status.title" });
   const openLabel = intl.formatMessage({ id: "selfhost.status.open" });
+  const writtenTitle =
+    writtenPlan &&
+    (getPlanDirectoryTitle(writtenPlan.markdown) ??
+      intl.formatMessage({ id: "planTool.panel.viewFull" }));
   const closeTransient = () => setOpen(false);
   const sections = (
     <>
@@ -2098,23 +2104,25 @@ export function SelfhostConversationStatusPanel(props: SelfhostConversationStatu
             ) : undefined
           }
         >
+          {writtenPlan && onOpenPlan ? (
+            <Button
+              variant="ghost"
+              className="h-auto min-h-8 w-full justify-start gap-2 px-2 py-1.5 text-left text-ui-base"
+              title={writtenTitle}
+              onClick={() => {
+                closeTransient();
+                onOpenPlan(writtenPlan);
+              }}
+            >
+              <ListChecksIcon aria-hidden className="size-4 shrink-0" />
+              <span className="min-w-0 flex-1 truncate">{writtenTitle}</span>
+              <ChevronRightIcon aria-hidden className="size-4 shrink-0 text-foreground-subtle" />
+            </Button>
+          ) : null}
           {props.plan?.items.length ? (
             <ul className="max-h-44 overflow-auto">
               <PlanStatusItemRows items={props.plan.items} />
             </ul>
-          ) : null}
-          {props.writtenPlan && props.onOpenPlan ? (
-            <Button
-              variant="ghost"
-              className="w-full justify-start gap-2 px-2 text-ui-base text-foreground-subtle"
-              onClick={() => {
-                closeTransient();
-                if (props.writtenPlan) props.onOpenPlan?.(props.writtenPlan);
-              }}
-            >
-              <ListChecksIcon aria-hidden className="size-4" />
-              {intl.formatMessage({ id: "planTool.panel.viewFull" })}
-            </Button>
           ) : null}
         </SelfhostStatusSection>
       ) : null}
