@@ -1,6 +1,5 @@
 /** Russian translations（缺失 key 由 IntlProvider 回退到 en-US） */
 const ruRU: Record<string, string> = {
-  "selfhost.editWorkspace": "Изменить пространство",
   "selfhost.hosts": "Рабочие пространства SSH",
   "selfhost.account": "Настройки аккаунта",
   "selfhost.username": "Имя пользователя",

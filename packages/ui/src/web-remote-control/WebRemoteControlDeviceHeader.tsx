@@ -11,13 +11,18 @@ import type { WebRemoteControlDeviceNavigation } from "@/web-remote-control/cont
 export function WebRemoteControlDeviceHeader({
   navigation,
 }: {
-  navigation: WebRemoteControlDeviceNavigation;
+  navigation?: WebRemoteControlDeviceNavigation;
 }) {
   const workspace = useOptionalPlatform()?.sshWorkspace;
   const { intl } = useZCodeIntl();
+  if (!workspace && !navigation) return null;
   const deviceName =
-    navigation.deviceName?.trim() || intl.formatMessage({ id: "webRemoteControl.unnamedDevice" });
-  const switchLabel = intl.formatMessage({ id: "webRemoteControl.switchDevice" });
+    workspace?.name ||
+    navigation?.deviceName?.trim() ||
+    intl.formatMessage({ id: "webRemoteControl.unnamedDevice" });
+  const switchLabel = workspace
+    ? intl.formatMessage({ id: "selfhost.ssh.switch" }, { host: deviceName })
+    : intl.formatMessage({ id: "webRemoteControl.switchDevice" });
 
   return (
     <SidebarNativeTooltip>
@@ -27,13 +32,14 @@ export function WebRemoteControlDeviceHeader({
         size="lg"
         aria-label={switchLabel}
         title={switchLabel}
+        data-testid={workspace ? "selfhost-workspaces-open" : undefined}
         className="w-full justify-start gap-2"
-        onClick={navigation.chooseOtherDevice}
+        onClick={workspace?.manage ?? navigation?.chooseOtherDevice}
       >
         {workspace ? (
           <WorkspaceAvatar value={workspace.avatar} size="sm" />
         ) : (
-          <DevicePlatformIcon platform={navigation.devicePlatform} className="size-4" />
+          <DevicePlatformIcon platform={navigation?.devicePlatform} className="size-4" />
         )}
         <span className="min-w-0 flex-1 truncate text-left font-medium">{deviceName}</span>
         <ChevronsUpDownIcon className="size-4 shrink-0 text-foreground-subtle" />

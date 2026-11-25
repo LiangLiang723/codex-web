@@ -1919,6 +1919,7 @@ function SelfhostStatusAgents({
     >
       <ul className="max-h-36 overflow-auto">
         {agents.map((agent) => {
+          const title = agent.title || intl.formatMessage({ id: "sidePane.subagent" });
           const target = buildRunningSubagentOpenRequest({
             parentSessionId,
             rootSessionId,
@@ -1935,14 +1936,14 @@ function SelfhostStatusAgents({
           const row = (
             <>
               <WorkflowAgentFace
-                name={agent.subagentType}
+                name={agent.childSessionId}
                 avatarIndex={undefined}
                 status={status}
                 idle={status === undefined}
                 className="size-4 min-h-4! min-w-4!"
               />
-              <span className="min-w-0 flex-1 truncate" title={agent.title}>
-                {agent.title}
+              <span className="min-w-0 flex-1 break-words" title={title}>
+                {title}
               </span>
               <span className="shrink-0 text-ui-sm text-foreground-subtle">
                 {intl.formatMessage({ id: "subagentDirectory.status." + agent.status })}
@@ -1950,7 +1951,7 @@ function SelfhostStatusAgents({
             </>
           );
           const rowClass =
-            "flex min-h-8 w-full min-w-0 items-center gap-2 px-2 text-left text-ui-base";
+            "flex h-auto min-h-8 w-full min-w-0 items-center gap-2 whitespace-normal px-2 py-1 text-left text-ui-base";
           return (
             <li key={agent.childSessionId}>
               {target && onOpenSession ? (

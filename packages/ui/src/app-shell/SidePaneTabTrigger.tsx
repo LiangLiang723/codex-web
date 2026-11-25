@@ -1,4 +1,5 @@
 import { ZCODE_AGENT_PROVIDER } from "@zcode/shared";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { useSubagents } from "@/hooks/useSubagents.js";
 import { SUBAGENT_WORKFLOW_COLOR } from "@/lib/subagentColors.js";
 import {
@@ -615,8 +616,8 @@ function SubagentTabAvatar({
   return (
     <WorkflowAgentFace
       avatarIndex={undefined}
-      name={tab.subagentType}
-      color={color ? SUBAGENT_WORKFLOW_COLOR[color] : undefined}
+      name={selfHostedBuild ? tab.childSessionId : tab.subagentType}
+      color={!selfHostedBuild && color ? SUBAGENT_WORKFLOW_COLOR[color] : undefined}
       status={undefined}
       idle
       // 头像默认最小尺寸为 20px；紧凑标签必须同时覆盖，否则 size 不生效。

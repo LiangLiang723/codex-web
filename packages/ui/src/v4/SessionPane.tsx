@@ -2,6 +2,7 @@ import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { GitBranchActionsHost } from "@/GitBranchSwitcher.js";
 import { completeNewModelSelection } from "@zcode/provider";
 import { useSubagents } from "@/hooks/useSubagents.js";
+import { thoughtLevelLabelId } from "@/chat-input-toolbar/thoughtLevelLabels.js";
 import { ToolPresentationCapabilitiesProvider } from "@/ToolCallBlocks/presentationCapabilities.js";
 import { V4_PRIMARY_PANE_ID } from "@/v4/paneLayoutStore.js";
 import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
@@ -6351,6 +6352,17 @@ export function SessionPane({
     !quotaBanner.dismissed &&
     (!projectedComposerError || quotaBanner.takesOverError || quotaBanner.state.blocksSubmit);
   const StatusPanel = selfHostedBuild ? SelfhostConversationStatusPanel : ConversationStatusPanel;
+  const selfhostSubagent = selfHostedBuild && openTrigger === "subagent";
+  const childConfig =
+    selfhostSubagent && snapshot?.sessionId === sessionId ? snapshot.config : null;
+  const childModel = childConfig
+    ? childConfig.model || intl.formatMessage({ id: "settings.usage.unknownModel" })
+    : undefined;
+  const childEffort = childConfig?.thought;
+  const childEffortLabelId = childEffort ? thoughtLevelLabelId(childEffort) : undefined;
+  const childEffortLabel = childEffortLabelId
+    ? intl.formatMessage({ id: childEffortLabelId })
+    : childEffort;
   const writtenPlan = selfHostedBuild && sessionId && onOpenPlanDetail
     ? snapshot?.rows.window.findLast((row) =>
       row.kind === "toolCall" && row.toolName === "ExitPlanMode" && row.status === "success",
@@ -6860,12 +6872,32 @@ export function SessionPane({
 
         <div
           ref={conversationLayoutContainerRef}
+          data-selfhost-subagent={selfhostSubagent ? "" : undefined}
           className={cn(
             "@container/conversation relative flex min-h-0 flex-1 flex-col",
             compactForRemoteControl && "min-w-0",
           )}
         >
           {selfHostedBuild && !shareSelectionPanelVisible ? sessionStatus : null}
+          {childConfig ? (
+            <div
+              data-testid="selfhost-subagent-model"
+              className="absolute inset-x-4 top-2 z-10 flex h-7 min-w-0 items-center gap-2 pr-11 text-ui-sm text-foreground-subtle @md/conversation:inset-x-6"
+            >
+              <span className="sr-only">
+                {intl.formatMessage({ id: "settings.subagents.table.model" })}
+              </span>
+              <span className="min-w-0 truncate font-medium text-foreground" title={childModel}>
+                {childModel}
+              </span>
+              <span aria-hidden>·</span>
+              <span className="min-w-0 truncate">
+                {childEffortLabel
+                  ? `${intl.formatMessage({ id: "chat.toolbar.thoughtLevel.label" })} ${childEffortLabel}`
+                  : intl.formatMessage({ id: "settings.subagents.reasoningUnavailable" })}
+              </span>
+            </div>
+          ) : null}
           {sessionId && !compactForRemoteControl ? (
             <ConversationSharePopover
               key={sessionId}

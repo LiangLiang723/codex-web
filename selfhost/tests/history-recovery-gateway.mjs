@@ -244,6 +244,23 @@ try {
   assert.equal(resumes, resumesWhileWritable);
   process.stdout.write("PASS warm writer, typed provider mismatch and subscription reuse\n");
 
+  subscribed = false;
+  resumeError = new gateway.CodexRpcError(
+    "thread/resume",
+    -32600,
+    "cannot resume an unloaded multi-agent v2 sub-agent through its parent; resume the parent first, or use thread/read to inspect it",
+  );
+  await assert.rejects(open(), /cannot resume an unloaded/);
+  threadFixture.parentThreadId = "parent-thread";
+  const inspected = await open();
+  assert.equal(inspected.readOnly, true);
+  assert.equal(inspected.readOnlyReason, "subagent");
+  assert.equal(inspected.history.thread.turns[0].items[0].text, "前");
+  assert.equal(subscribed, false, "Inspecting an unloaded child must not acquire a writer");
+  threadFixture.parentThreadId = null;
+  resumeError = undefined;
+  process.stdout.write("PASS unloaded native child history and lineage check\n");
+
   // Exercise the actual Gateway publisher and canonical reduction. RPC, authentication, and
   // external notifications are fixture boundaries. No SSH, files, or model are involved.
   const paginated = { ...native, historyMode: "paginated" };

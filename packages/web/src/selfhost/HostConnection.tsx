@@ -12,11 +12,22 @@ import {
 import { Input } from "@zcode/ui/input";
 import { z } from "zod";
 import type { Gateway, Message } from "./gateway.js";
+import { rec } from "./nativeValues.js";
 
 const hostIdSchema = z.number().int().positive();
 const lifecycleSchema = z.object({
   hostId: hostIdSchema,
-  status: z.enum(["connecting", "connected", "failed", "mfaRequired"]),
+  status: z.enum([
+    "connecting",
+    "checkingVersion",
+    "upgrading",
+    "restarting",
+    "connected",
+    "failed",
+    "mfaRequired",
+    "canceled",
+  ]),
+  message: z.string().optional(),
 });
 const challengeSchema = z.object({
   hostId: hostIdSchema,
@@ -29,20 +40,99 @@ type Challenge = z.infer<typeof challengeSchema> & { revision: number };
 type Connection = {
   status: ConnectionStatus;
   challenge?: Challenge;
-  canceling?: boolean;
+  message?: string;
   sendFailed?: boolean;
 };
-type HostConnections = Record<number, Connection>;
+export type HostConnections = Record<number, Connection>;
 const emptyConnections: HostConnections = {};
+
+export const hostConnectionMessages = {
+  connecting: "selfhost.network.sshConnecting",
+  checkingVersion: "selfhost.network.sshPreparing",
+  upgrading: "selfhost.network.sshPreparing",
+  restarting: "selfhost.network.sshPreparing",
+  failed: "selfhost.network.sshFailed",
+  mfaRequired: "selfhost.network.sshMfaRequired",
+  canceled: "selfhost.network.sshCanceled",
+} as const;
+
+export function hostConnectionPending(status?: ConnectionStatus) {
+  return (
+    status === "connecting" ||
+    status === "checkingVersion" ||
+    status === "upgrading" ||
+    status === "restarting"
+  );
+}
+
+export async function waitForHostConnection(gateway: Gateway, hostId: number, signal: AbortSignal) {
+  await gateway.connect();
+  signal.throwIfAborted();
+  await new Promise<void>((resolve, reject) => {
+    const stop = () => {
+      off();
+      signal.removeEventListener("abort", cancel);
+    };
+    const fail = (error: unknown) => {
+      stop();
+      reject(error);
+    };
+    const cancel = () => {
+      fail(signal.reason);
+      try {
+        gateway.sendOnReadyConnection({ type: "host.mfa.cancel", hostId });
+      } catch {
+        // 旧 WebSocket 已断开时不能把对旧连接的取消发送给新连接。
+      }
+    };
+    const off = gateway.on((message) => {
+      if (message.type === "disconnected") {
+        fail(new Error("Gateway disconnected"));
+        return;
+      }
+      const request = rec(message.request);
+      if (
+        message.type === "error" &&
+        request.type === "host.mfa.connect" &&
+        request.hostId === hostId
+      ) {
+        fail(
+          new Error(
+            typeof message.message === "string" ? message.message : "SSH connection failed",
+          ),
+        );
+        return;
+      }
+      if (message.type !== "host.lifecycle") return;
+      const event = lifecycleSchema.safeParse(message.event);
+      if (!event.success || event.data.hostId !== hostId) return;
+      if (event.data.status === "connected") {
+        stop();
+        resolve();
+      } else if (event.data.status === "failed" || event.data.status === "canceled") {
+        fail(new Error(event.data.message || event.data.status));
+      }
+    });
+    signal.addEventListener("abort", cancel, { once: true });
+    try {
+      gateway.sendOnReadyConnection({ type: "host.mfa.connect", hostId });
+    } catch (error) {
+      fail(error);
+    }
+  });
+}
 
 export function useHostConnections(gateway: Gateway) {
   const [state, setState] = useState(() => ({ gateway, hosts: emptyConnections }));
   const latest = useRef(state);
-  const publish = useCallback((hosts: HostConnections) => {
-    const snapshot = { gateway, hosts };
-    latest.current = snapshot;
-    setState(snapshot);
-  }, [gateway]);
+  const publish = useCallback(
+    (hosts: HostConnections) => {
+      const snapshot = { gateway, hosts };
+      latest.current = snapshot;
+      setState(snapshot);
+    },
+    [gateway],
+  );
   const update = useCallback(
     (hostId: number, connection: Connection) => {
       const previous = latest.current;
@@ -61,7 +151,8 @@ export function useHostConnections(gateway: Gateway) {
         publish(emptyConnections);
       } else if (message.type === "host.lifecycle") {
         const event = lifecycleSchema.safeParse(message.event);
-        if (event.success) update(event.data.hostId, { status: event.data.status });
+        if (event.success)
+          update(event.data.hostId, { status: event.data.status, message: event.data.message });
       } else if (message.type === "host.mfa.request") {
         const challenge = challengeSchema.safeParse(message);
         if (challenge.success)
@@ -80,7 +171,8 @@ export function useHostConnections(gateway: Gateway) {
       update(hostId, nextState);
       return true;
     } catch {
-      update(hostId, { status: "mfaRequired", sendFailed: true });
+      const previous = latest.current.hosts[hostId];
+      update(hostId, { status: previous?.status ?? "failed", sendFailed: true });
       return false;
     }
   };
@@ -89,13 +181,17 @@ export function useHostConnections(gateway: Gateway) {
     connections: state.gateway === gateway ? state.hosts : emptyConnections,
     connect: (hostId: number) =>
       send(hostId, { type: "host.mfa.connect" }, { status: "connecting" }),
+    cancel: (hostId: number) => send(hostId, { type: "host.mfa.cancel" }, { status: "canceled" }),
     respond: (challenge: Challenge, code: string | null) => {
       const { hostId } = challenge;
       // 事件可能已清除或替换挑战，但 React 尚未关闭旧表单。
-      if (latest.current.gateway !== gateway || latest.current.hosts[hostId]?.challenge !== challenge)
+      if (
+        latest.current.gateway !== gateway ||
+        latest.current.hosts[hostId]?.challenge !== challenge
+      )
         return false;
       return code === null
-        ? send(hostId, { type: "host.mfa.cancel" }, { status: "mfaRequired", canceling: true })
+        ? send(hostId, { type: "host.mfa.cancel" }, { status: "canceled" })
         : send(hostId, { type: "host.mfa.submit", code }, { status: "connecting" });
     },
   };

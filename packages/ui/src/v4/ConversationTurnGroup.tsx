@@ -1503,6 +1503,10 @@ function ConversationTurnGroupImpl({
         className={cn(
           "relative mx-auto flex w-full flex-col gap-5 px-4 @md/conversation:px-6 pb-5",
           startsWithoutUserBubble ? "pt-0" : "pt-14",
+          // Codex 子会话常从工作摘要开头，收紧为用户气泡预留的顶部间距。
+          !startsWithoutUserBubble &&
+            visibleUserRows.length === 0 &&
+            "[[data-selfhost-subagent]_&]:pt-4",
           showHighspeedAnimatedGradient && "highspeed-animated-gradient-text",
         )}
       >

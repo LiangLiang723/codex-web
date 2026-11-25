@@ -338,6 +338,24 @@ nodes:
       - "Codex CLI and App Server own installation and enablement on the selected SSH host. Web actions use full plugin ID or skill path."
       - "Desktop and mobile SSH Web reuse the plugin store and settings UI. The installed reference catalog stays independent of marketplace detail reads."
       - "SSH skill preview reads SKILL.md on the selected host. Skill use, creation and discovery prefill a draft in that workspace."
+  - id: "capability.selfhost-ssh-workspaces"
+    kind: "capability"
+    label: "Self-hosted Web SSH workspaces"
+    aliases: ["SSH 工作区", "SSH 测试连接", "取消 SSH 连接"]
+    docs: ["specs/selfhost-codex/README.md", "packages/web/src/selfhost/CONTRACT.md"]
+    codeSeeds:
+      - file: "packages/web/src/selfhost/Catalog.tsx"
+        symbol: "Catalog"
+      - file: "packages/web/src/selfhost/HostForm.tsx"
+        symbol: "HostForm"
+      - file: "packages/web/src/selfhost/HostConnection.tsx"
+        symbol: "waitForHostConnection"
+      - file: "packages/ui/src/web-remote-control/WebRemoteControlDeviceHeader.tsx"
+        symbol: "WebRemoteControlDeviceHeader"
+    invariants:
+      - "The current-host entry preserves the mounted conversation while showing the workspace directory. Only the current successful navigation can change the selected host and directory."
+      - "Gateway owns persisted host configuration and shared connections. A draft connection test uses the same host verification and credential resolution with an isolated SSH client."
+      - "Host-scoped cancel releases its pending transport and blocks automatic reconnect until an explicit retry. Unrelated existing connections keep their leases."
   - id: "capability.referrals-embedded"
     kind: "capability"
     label: "Rewards center embedded website"
@@ -2705,6 +2723,7 @@ nodes:
       - "docs/subagent-session-side-tabs.md"
       - "docs/v4-composer-api-retry-status.md"
       - "docs/chat/manual-model-switch-resolution-chain.md"
+      - "specs/selfhost-codex/README.md"
     codeSeeds:
       - symbol: "SubagentSessionSidePane"
         file: "packages/ui/src/app-shell/SubagentSessionSidePane.tsx"
@@ -2714,6 +2733,8 @@ nodes:
         file: "packages/ui/src/v4/ConversationTimeline.tsx"
       - symbol: "ConversationTurnGroup"
         file: "packages/ui/src/v4/ConversationTurnGroup.tsx"
+      - symbol: "projectNativeSubagents"
+        file: "packages/web/src/selfhost/nativeSubagents.ts"
 
   - id: "surface.conversation-query-edit"
     kind: "ui-surface"

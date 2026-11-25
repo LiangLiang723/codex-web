@@ -8,6 +8,8 @@ session 标题通过 `useOptionalProjectSelectionDirectory` 读取同一 owner �
 不订阅展开偏好或任务活动；无 Provider 的嵌入场景返回 null。顶部导航与列表标题按原输入
 隔离项目展开更新，真实目录、导航、视图及语言变化仍传播，不新增目录缓存或偏好 owner。
 
+自托管 Web 从平台能力读取当前 SSH 主机和管理入口。桌面 Web 由顶部浮层在侧栏留白内将主机入口放在对话历史按钮左侧；手机 Web 在任务首页首行复用设备导航。点击后由自托管工作区打开主机目录。普通远控继续通过设备导航展示当前设备。
+
 恢复时通过公开的 `resolveEntryProject` 从所属 Host 项目树解析有效项目，复用旧入口的唯一匹配规则。原项目 ID 显式传给 Root 草稿 owner，同时更新内存与持久化草稿范围，不从同目录缓存反推归属。
 
 创建经 Host prepareSession 固化 cwd，草稿持有 projectId，首发前由 Host 原子预留归属。选择其他项目会重建尚未提升的预热实例，已提交任务不受影响。拖动只发 moveTask，缺 root 经确认重试，失败保持原树。软删项目保留任务归属；时间线可见；恢复需用户显式选择同 roots 的已删项目。

@@ -822,7 +822,6 @@ export interface IPlatformService {
     name: string;
     avatar: string;
     manage(): void;
-    edit(): void;
     account(): void;
     logout(): void;
   };

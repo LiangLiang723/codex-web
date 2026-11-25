@@ -37,7 +37,7 @@ export const ProjectSidebarNavigation = memo(function ProjectSidebarNavigation({
       data-testid="sidebar-primary-navigation"
       className={`flex flex-col gap-1 px-2 py-3 ${props.isWebRemoteControl && !deviceNavigation ? "max-md:pt-11" : ""}`}
     >
-      {/* Relay V2 远控：当前电脑是项目与任务的上一级，放在导航首行；手机端占用原顶部留白。 */}
+      {/* 手机任务首页复用设备导航，桌面自托管入口由侧栏顶栏承载。 */}
       {deviceNavigation ? <WebRemoteControlDeviceHeader navigation={deviceNavigation} /> : null}
       <NewTaskButtonGroup onCreateTask={onCreate} />
       {/* 远控主视图会把自动化和插件市场重置为聊天；入口必须一同隐藏，避免点击无效。 */}

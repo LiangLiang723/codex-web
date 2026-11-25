@@ -17,9 +17,14 @@ import { WebLoginPage } from "../auth/index.js";
 import { ConversationShareReadonlyTimeline } from "@zcode/ui/conversation-share-readonly";
 import { projectThread, str } from "./threadProjection.js";
 import { AccountSettings } from "./AccountSettings.js";
-import { Catalog, HostForm } from "./Catalog.js";
+import { Catalog } from "./Catalog.js";
 import { Gateway, type Host, type Project } from "./gateway.js";
-import { HostMfaDialog, useHostConnections } from "./HostConnection.js";
+import {
+  hostConnectionMessages,
+  hostConnectionPending,
+  HostMfaDialog,
+  useHostConnections,
+} from "./HostConnection.js";
 import { openWorkspace } from "./services.js";
 import "../styles.css";
 
@@ -38,11 +43,6 @@ function workspaceKey(host: Host, cwd: string) {
     cwd,
   ]);
 }
-const hostConnectionMessages = {
-  connecting: "selfhost.network.sshConnecting",
-  failed: "selfhost.network.sshFailed",
-  mfaRequired: "selfhost.network.sshMfaRequired",
-} as const;
 
 function Login({ onLogin }: { onLogin: (token: string) => void }) {
   const [error, setError] = useState(""),
@@ -106,7 +106,9 @@ function Workbench({
   } | null>(null);
   // 切换登录后，新主机挑战不能和上一账号目录中的同号主机匹配。
   const catalog = catalogSnapshot?.gateway === gateway ? catalogSnapshot : null;
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [managing, setManaging] = useState(false);
+  const [catalogTargetId, setCatalogTargetId] = useState<number | null>(null);
+  const [workspaceAttempt, setWorkspaceAttempt] = useState(0);
   const [route, setRoute] = useState(location.search);
   const [mobile, setMobile] = useState(() => matchMedia("(max-width: 767px)").matches);
   useEffect(() => {
@@ -128,6 +130,7 @@ function Workbench({
   const {
     connections: hostConnections,
     connect: connectHost,
+    cancel: cancelHostConnection,
     respond: respondToMfa,
   } = useHostConnections(gateway);
   const query = new URLSearchParams(route),
@@ -163,7 +166,8 @@ function Workbench({
     const search = params.toString();
     history.pushState({}, "", location.pathname + (search ? "?" + search : ""));
     setRoute(location.search);
-    setEditingId(null);
+    setManaging(false);
+    setCatalogTargetId(null);
     setError("");
   }, []);
   const openProjectDraft = async (request: WorkspaceDraft) => {
@@ -205,17 +209,20 @@ function Workbench({
       draft,
     });
   };
-  const manage = useCallback(() => navigate(new URLSearchParams({ manage: "1" })), [navigate]);
+  const manage = useCallback(() => setManaging(true), []);
+  const chooseHost = () => navigate(new URLSearchParams({ manage: "1" }));
   const select = useCallback(
     (h: Host, path: string) => {
-      navigate(new URLSearchParams({ host: String(h.id), cwd: path }));
+      if (h.id !== hostId || path !== cwd)
+        navigate(new URLSearchParams({ host: String(h.id), cwd: path }));
+      else setManaging(false);
       void gateway
         .request("/api/selfhost/settings", z.unknown(), "PATCH", {
           selfhostLastProject: { hostId: h.id, cwd: path },
         })
         .catch(() => {});
     },
-    [gateway, navigate],
+    [cwd, gateway, hostId, navigate],
   );
   useEffect(() => {
     if (route || !catalog) return;
@@ -245,6 +252,8 @@ function Workbench({
     const pop = () => {
       navigationVersion.current++;
       setDraftHandoff(null);
+      setManaging(false);
+      setCatalogTargetId(null);
       setRoute(location.search);
     };
     window.addEventListener("popstate", pop);
@@ -291,7 +300,7 @@ function Workbench({
       active = false;
       resource?.dispose();
     };
-  }, [gateway, selectedId, identity, cwd, manage]);
+  }, [gateway, selectedId, identity, cwd, manage, workspaceAttempt]);
   const platform = useMemo(
     () => ({
       ...createWebPlatform(),
@@ -300,7 +309,6 @@ function Workbench({
             sshWorkspace: {
               name: selectedName,
               avatar: selectedAvatar ?? "server",
-              edit: () => setEditingId(selectedId),
               manage,
               account,
               logout,
@@ -321,43 +329,66 @@ function Workbench({
   const sshStatus = sshConnection?.status;
   const noticeMessage = webReconnecting
     ? intl.formatMessage({ id: "selfhost.network.webReconnecting" })
-    : host && sshStatus && sshStatus !== "connected"
+    : host && cwd && !managing && sshStatus && sshStatus !== "connected"
       ? intl.formatMessage({ id: hostConnectionMessages[sshStatus] }, { host: host.name })
       : catalogIssue || null;
   const connectionNotice = noticeMessage && (
     <div className="pointer-events-none fixed inset-x-3 top-[max(0.5rem,env(safe-area-inset-top))] z-40 mx-auto flex w-fit max-w-[calc(100%_-_1.5rem)] flex-wrap items-center gap-2 rounded-lg border border-border bg-popover px-3 py-2 text-ui-sm text-popover-foreground shadow-sm">
       <div className="min-w-0 break-words" role="status">
         <p>{noticeMessage}</p>
+        {!webReconnecting && !managing && sshStatus === "failed" && sshConnection?.message ? (
+          <p className="max-w-lg text-ui-xs text-foreground-subtle">
+            {sshConnection.message.slice(0, 240)}
+          </p>
+        ) : null}
         {sshConnection?.sendFailed ? (
           <p>{intl.formatMessage({ id: "selfhost.network.sshActionFailed" })}</p>
         ) : null}
       </div>
       {host &&
-      cwd &&
+      !managing &&
       !webReconnecting &&
-      sshStatus === "mfaRequired" &&
-      !sshConnection?.challenge ? (
+      (sshStatus === "canceled" ||
+        sshStatus === "failed" ||
+        (sshStatus === "mfaRequired" && !sshConnection?.challenge)) ? (
         <Button
           type="button"
           size="sm"
           className="pointer-events-auto"
           data-testid="selfhost-ssh-connect"
-          disabled={sshConnection?.canceling}
           onClick={() => connectHost(host.id)}
         >
           {intl.formatMessage({ id: "selfhost.network.sshConnect" })}
         </Button>
       ) : null}
+      {host && !managing && !webReconnecting && hostConnectionPending(sshStatus) ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="pointer-events-auto"
+          data-testid="selfhost-ssh-cancel"
+          onClick={() => cancelHostConnection(host.id)}
+        >
+          {intl.formatMessage({ id: "selfhost.ssh.cancelConnection" })}
+        </Button>
+      ) : null}
     </div>
   );
-  const challenge = sshConnection?.challenge;
+  const challengeHost =
+    catalogTargetId !== null
+      ? catalog?.hosts.find((candidate) => candidate.id === catalogTargetId)
+      : managing || !cwd
+        ? undefined
+        : host;
+  const challenge = challengeHost && hostConnections[challengeHost.id]?.challenge;
   const connectionFeedback = (
     <>
       {connectionNotice}
-      {host && challenge && !webReconnecting ? (
+      {challengeHost && challenge && !webReconnecting ? (
         <HostMfaDialog
-          key={`${workspaceKey(host, cwd)}:${challenge.revision}`}
-          hostName={host.name}
+          key={`${workspaceKey(challengeHost, cwd)}:${challenge.revision}`}
+          hostName={challengeHost.name}
           challenge={challenge}
           onRespond={(code) => respondToMfa(challenge, code)}
         />
@@ -378,8 +409,16 @@ function Workbench({
           description: error || catalogIssue,
           form: (
             <div className="flex gap-2">
-              <Button onClick={() => location.reload()}>重试</Button>
-              <Button variant="outline" onClick={manage}>
+              <Button
+                onClick={() => {
+                  setError("");
+                  if (catalog) setWorkspaceAttempt((current) => current + 1);
+                  else void refresh().catch(() => {});
+                }}
+              >
+                重试
+              </Button>
+              <Button variant="outline" onClick={chooseHost}>
                 选择主机
               </Button>
               <Button variant="ghost" onClick={logout}>
@@ -388,7 +427,7 @@ function Workbench({
             </div>
           ),
         }}
-      />
+      />,
     );
   if (!catalog || (host && cwd && !opened))
     return withConnectionFeedback(
@@ -398,38 +437,31 @@ function Workbench({
           description: host?.name ?? "正在读取服务器配置…",
           form: null,
         }}
-      />
+      />,
     );
-  if (!host || !cwd || !opened)
-    return withConnectionFeedback(
-        <Catalog
-          gateway={gateway}
-          hosts={catalog.hosts}
-          refresh={refresh}
-          logout={logout}
-          account={account}
-          select={select}
-          renderConnectionAction={(candidate) => {
-            const state = hostConnections[candidate.id];
-            if (state?.status !== "mfaRequired") return null;
-            return (
-              <Button
-                type="button"
-                size="sm"
-                data-testid="selfhost-catalog-ssh-connect"
-                data-host-id={candidate.id}
-                disabled={webReconnecting || state.canceling}
-                onClick={() => {
-                  navigate(new URLSearchParams({ host: String(candidate.id) }));
-                  if (!state.challenge) connectHost(candidate.id);
-                }}
-              >
-                {intl.formatMessage({ id: state.challenge ? "selfhost.network.sshVerify" : "selfhost.network.sshConnect" })}
-              </Button>
-            );
-          }}
-        />
-    );
+  const renderCatalog = (modal: boolean) => (
+    <Catalog
+      gateway={gateway}
+      hosts={catalog.hosts}
+      connections={hostConnections}
+      currentHostId={modal ? host?.id : undefined}
+      refresh={refresh}
+      logout={logout}
+      account={account}
+      select={select}
+      onConnecting={setCatalogTargetId}
+      cancelConnection={cancelHostConnection}
+      onClose={
+        modal
+          ? () => {
+              setCatalogTargetId(null);
+              setManaging(false);
+            }
+          : undefined
+      }
+    />
+  );
+  if (!host || !cwd || !opened) return withConnectionFeedback(renderCatalog(false));
   const services = opened.services;
   const switcher: NonNullable<Parameters<typeof Root>[0]["webRemoteControlWorkspaceSwitcher"]> = {
     deviceNavigation: { deviceName: host.name, chooseOtherDevice: manage },
@@ -453,7 +485,7 @@ function Workbench({
       navigate(new URLSearchParams({ host: String(host.id), cwd: key }));
     },
     async reconnectWorkspace() {
-      location.reload();
+      connectHost(host.id);
     },
   };
   return withConnectionFeedback(
@@ -479,16 +511,8 @@ function Workbench({
         supportsEmbeddedBrowser={false}
         webRemoteControlFeatureEnabled={false}
       />
-      {editingId === host.id && (
-        <HostForm
-          key={host.id}
-          host={host}
-          gateway={gateway}
-          finish={refresh}
-          onClose={() => setEditingId(null)}
-        />
-      )}
-    </ZCodeIntlProvider>
+      {managing ? renderCatalog(true) : null}
+    </ZCodeIntlProvider>,
   );
 }
 function PrivateShare({ gateway, id }: { gateway: Gateway; id: string }) {

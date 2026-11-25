@@ -37,6 +37,17 @@ function isActiveChildStatus(status: NativeChildStatus) {
   return status === "running" || status === "waiting" || status === "blocked";
 }
 
+function nativeAgentName(value: unknown, childSessionId: string) {
+  const name = str(value).trim();
+  if (
+    !name ||
+    name === childSessionId ||
+    /^(?:[0-9a-f]{8}-[0-9a-f-]{27}|agent-[0-9a-f]{8}(?:-[0-9a-f-]+)?)$/i.test(name)
+  )
+    return "";
+  return name.replace(/_+/g, " ").trim();
+}
+
 export function projectNativeSubagents(
   activation: Message,
   revision: number,
@@ -51,10 +62,15 @@ export function projectNativeSubagents(
     canRestart: boolean,
   ) => {
     const previous = children.get(childSessionId);
-    const path = str(item.agentPath).trim();
-    const title = path || previous?.title || str(item.prompt).trim() || childSessionId;
-    const type =
-      path.split("/").filter(Boolean).at(-1) || previous?.subagentType || "general-purpose";
+    // agentPath 是 Codex 的父子关系路径。显示其末段，避免把整条身份路径用作标题。
+    const leaf = str(item.agentPath).split("/").filter(Boolean).at(-1);
+    const nickname = nativeAgentName(item.agentNickname, childSessionId);
+    const leafName = leaf === "root" ? "" : nativeAgentName(leaf, childSessionId);
+    const prompt = str(item.prompt).trim().split(/\r?\n/, 1)[0] ?? "";
+    const preview = Array.from(prompt).slice(0, 64).join("");
+    const title =
+      nickname || leafName || previous?.title || (preview === prompt ? preview : preview + "…");
+    const type = str(item.agentRole).trim() || previous?.subagentType || "general-purpose";
     // 回执可更新时间线的原行；旧状态不能覆盖更晚的活动。没有时间戳的旧记录，
     // 也只有原生启动、恢复或向子智能体发送新输入才可以重新打开终态。
     const preserve =

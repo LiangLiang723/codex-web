@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import type { ZCodeSessionEndedSubagent } from "@zcode/shared";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import type { RunningSubagentSummary } from "@zcode/shared/zcode-protocol-v4";
 import { WorkflowAgentFace } from "@/components/workflow-timeline/WorkflowAgentFace.js";
 import { useToolPresentationCapabilities } from "@/ToolCallBlocks/presentationCapabilities.js";
@@ -47,7 +48,9 @@ const DirectoryRow = memo(function DirectoryRow({
   const { intl } = useZCodeIntl();
   const timestamp = "endedAt" in item ? item.endedAt : item.startedAt;
   const presentation = useToolPresentationCapabilities();
-  const configuredColor = presentation.agentColor?.(item.subagentType);
+  const configuredColor = selfHostedBuild
+    ? undefined
+    : presentation.agentColor?.(item.subagentType);
   const faceStatus =
     item.status === "success"
       ? "done"
@@ -66,7 +69,7 @@ const DirectoryRow = memo(function DirectoryRow({
       <span className="flex h-[1lh] w-5 shrink-0 items-center justify-center">
         <WorkflowAgentFace
           avatarIndex={undefined}
-          name={item.subagentType}
+          name={selfHostedBuild ? item.childSessionId : item.subagentType}
           status={faceStatus}
           idle={item.status === "cancelled" || item.status === "lost"}
           showCompletionMark={item.status === "success"}
@@ -76,7 +79,9 @@ const DirectoryRow = memo(function DirectoryRow({
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate font-medium text-foreground">{item.title}</span>
+          <span className="min-w-0 break-words font-medium text-foreground">
+            {item.title || intl.formatMessage({ id: "sidePane.subagent" })}
+          </span>
           {item.status !== "success" ? (
             <span className="shrink-0 text-ui-sm text-foreground-subtle">
               {intl.formatMessage({ id: `subagentDirectory.status.${item.status}` })}
@@ -146,7 +151,6 @@ const SubagentDirectoryContents = memo(function SubagentDirectoryContents({
     refreshKey: subagents?.revision ?? 0,
   });
   const running = subagents?.running ?? EMPTY_RUNNING;
-  const endedTotal = subagents?.endedTotal ?? 0;
   const handleOpen = (item: DirectoryItem) => {
     onOpenSubagentSession(buildSubagentDirectoryOpenRequest(tab, item));
   };
@@ -167,7 +171,9 @@ const SubagentDirectoryContents = memo(function SubagentDirectoryContents({
 
         <section className={running.length > 0 ? "mt-3" : undefined}>
           <h3 className="px-3 pb-1.5 text-ui-sm font-medium text-foreground-subtlest">
-            {intl.formatMessage({ id: "subagentDirectory.ended" })} · {endedTotal}
+            {intl.formatMessage({ id: "subagentDirectory.ended" })}
+            {/* 历史补页可以先于父会话快照，标题与结束列表必须使用同一次目录查询。 */}
+            {directory.revision > 0 ? ` · ${directory.ended.total}` : null}
           </h3>
           {directory.ended.items.map((item) => (
             <DirectoryRow key={item.childSessionId} item={item} onOpen={handleOpen} />

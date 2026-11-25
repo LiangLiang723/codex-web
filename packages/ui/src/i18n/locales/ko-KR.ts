@@ -1,6 +1,5 @@
 /** Korean translations（缺失 key 由 IntlProvider 回退到 en-US） */
 const koKR: Record<string, string> = {
-  "selfhost.editWorkspace": "작업 공간 편집",
   "selfhost.hosts": "SSH 작업 공간",
   "selfhost.account": "계정 설정",
   "selfhost.username": "사용자 이름",

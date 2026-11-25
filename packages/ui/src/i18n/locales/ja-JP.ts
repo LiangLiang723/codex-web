@@ -1,6 +1,5 @@
 /** Japanese translations（缺失 key 由 IntlProvider 回退到 en-US） */
 const jaJP: Record<string, string> = {
-  "selfhost.editWorkspace": "ワークスペースを編集",
   "selfhost.hosts": "SSH ワークスペース",
   "selfhost.account": "アカウント設定",
   "selfhost.username": "ユーザー名",

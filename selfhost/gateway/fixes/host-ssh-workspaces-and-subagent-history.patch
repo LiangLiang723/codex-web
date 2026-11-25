@@ -1,0 +1,837 @@
+diff --git a/server/utils/gateway/host-mfa/host-mfa-manager.ts b/server/utils/gateway/host-mfa/host-mfa-manager.ts
+index 322ad0b..7d56180 100644
+--- a/server/utils/gateway/host-mfa/host-mfa-manager.ts
++++ b/server/utils/gateway/host-mfa/host-mfa-manager.ts
+@@ -22,6 +22,7 @@ export class HostMfaManager {
+   private awaitedHosts = new Set<string>();
+   private detectedHosts = new Set<string>();
+   private connectionPermits = new Set<string>();
++  private pausedConnections = new Set<string>();
+ 
+   isMfaHost(userId: number, hostId: number): boolean {
+     return this.detectedHosts.has(`${userId}:${hostId}`);
+@@ -29,13 +30,25 @@ export class HostMfaManager {
+ 
+   canStartConnection(userId: number, hostId: number): boolean {
+     const key = `${userId}:${hostId}`;
+-    return !this.detectedHosts.has(key) || this.connectionPermits.has(key);
++    return !this.pausedConnections.has(key) &&
++      (!this.detectedHosts.has(key) || this.connectionPermits.has(key));
+   }
+ 
+   permitConnection(userId: number, hostId: number) {
++    this.pausedConnections.delete(`${userId}:${hostId}`);
+     this.connectionPermits.add(`${userId}:${hostId}`);
+   }
+ 
++  isConnectionPaused(userId: number, hostId: number) {
++    return this.pausedConnections.has(`${userId}:${hostId}`);
++  }
++
++  pauseConnection(userId: number, hostId: number) {
++    this.pausedConnections.add(`${userId}:${hostId}`);
++    this.revokeConnectionPermit(userId, hostId);
++    this.cancelMfa(userId, hostId);
++  }
++
+   revokeConnectionPermit(userId: number, hostId: number) {
+     this.connectionPermits.delete(`${userId}:${hostId}`);
+   }
+@@ -162,5 +175,6 @@ export class HostMfaManager {
+     this.awaitedHosts.delete(key);
+     this.detectedHosts.delete(key);
+     this.connectionPermits.delete(key);
++    this.pausedConnections.delete(key);
+   }
+ }
+diff --git a/server/utils/gateway/infra/codex/codex-runtime.ts b/server/utils/gateway/infra/codex/codex-runtime.ts
+index 4fcdef8..038dffc 100644
+--- a/server/utils/gateway/infra/codex/codex-runtime.ts
++++ b/server/utils/gateway/infra/codex/codex-runtime.ts
+@@ -48,7 +48,9 @@ export class CodexRuntimeService {
+       this.failedVersionChecks.delete(key);
+     }
+ 
+-    const check = this.checkAndUpgradeCodex(host)
++    const check: Promise<RemoteCodexVersionState> = this.checkAndUpgradeCodex(
++      host, () => this.versionChecks.get(key) === check,
++    )
+       .then((result) => {
+         if (this.versionChecks.get(key) === check) this.failedVersionChecks.delete(key);
+         return result;
+@@ -76,7 +78,10 @@ export class CodexRuntimeService {
+     return check;
+   }
+ 
+-  async checkAndUpgradeCodex(host: HostWithSecret): Promise<RemoteCodexVersionState> {
++  async checkAndUpgradeCodex(
++    host: HostWithSecret,
++    isCurrent = () => true,
++  ): Promise<RemoteCodexVersionState> {
+     try {
+       hostLifecycleBus.emit({
+         hostId: host.id,
+@@ -86,11 +91,14 @@ export class CodexRuntimeService {
+       });
+       return await this.upgradeWorkflow.ensure(host);
+     } catch (error) {
+-      hostLifecycleBus.emit({
+-        hostId: host.id,
+-        status: "failed",
+-        message: messageFromError(error),
+-      });
++      // 取消或更换主机已清除本次检查，旧错误不能覆盖重试中的新连接。
++      if (isCurrent()) {
++        hostLifecycleBus.emit({
++          hostId: host.id,
++          status: "failed",
++          message: messageFromError(error),
++        });
++      }
+       throw error;
+     }
+   }
+diff --git a/server/utils/gateway/infra/ssh/ssh-config.ts b/server/utils/gateway/infra/ssh/ssh-config.ts
+index 681891d..aceb116 100644
+--- a/server/utils/gateway/infra/ssh/ssh-config.ts
++++ b/server/utils/gateway/infra/ssh/ssh-config.ts
+@@ -1,5 +1,8 @@
+ import { createHash } from "node:crypto";
+-import { existsSync, readFileSync, realpathSync } from "node:fs";
++import { existsSync, readFileSync } from "node:fs";
++import { readFile, realpath } from "node:fs/promises";
++import { once } from "node:events";
++import { Socket } from "node:net";
+ import { homedir } from "node:os";
+ import { isAbsolute, join, relative, resolve } from "node:path";
+ import { SocksClient } from "socks";
+@@ -9,14 +12,14 @@ export function expandHome(path: string) {
+   return path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
+ }
+ 
+-export function readSshPrivateKey(path: string) {
+-  const root = realpathSync(process.env.CODEX_GATEWAY_SSH_KEY_DIR ?? "/run/ssh-keys");
+-  const key = realpathSync(resolve(root, expandHome(path)));
++export async function readSshPrivateKey(path: string) {
++  const root = await realpath(process.env.CODEX_GATEWAY_SSH_KEY_DIR ?? "/run/ssh-keys");
++  const key = await realpath(resolve(root, expandHome(path)));
+   const within = relative(root, key);
+   if (!within || within === ".." || within.startsWith("../") || isAbsolute(within)) {
+     throw new Error("SSH identity file must be inside the configured key directory");
+   }
+-  return readFileSync(key);
++  return await readFile(key);
+ }
+ 
+ export function resolveSshConfig(host: HostWithSecret) {
+@@ -130,23 +133,42 @@ export async function createProxySocket(options: {
+   proxy: NonNullable<ReturnType<typeof parseProxyUrl>>;
+   targetHost: string;
+   targetPort: number;
++  signal: AbortSignal;
+ }) {
+-  const { socket } = await SocksClient.createConnection({
+-    command: "connect",
+-    timeout: 10_000,
+-    proxy: {
+-      host: options.proxy.host,
+-      port: options.proxy.port,
+-      type: 5,
+-      userId: options.proxy.username === "" ? undefined : options.proxy.username,
+-      password: options.proxy.password === "" ? undefined : options.proxy.password,
+-    },
+-    destination: {
+-      host: options.targetHost,
+-      port: options.targetPort,
+-    },
+-  });
+-  return socket;
++  const signal = AbortSignal.any([options.signal, AbortSignal.timeout(10_000)]);
++  signal.throwIfAborted();
++  const socket = new Socket();
++  const cancel = () => socket.destroy();
++  signal.addEventListener("abort", cancel, { once: true });
++  try {
++    const connected = once(socket, "connect", { signal });
++    socket.connect(options.proxy.port, options.proxy.host);
++    await connected;
++    const result = await SocksClient.createConnection({
++      command: "connect",
++      existing_socket: socket,
++      timeout: 10_000,
++      proxy: {
++        host: options.proxy.host,
++        port: options.proxy.port,
++        type: 5,
++        userId: options.proxy.username === "" ? undefined : options.proxy.username,
++        password: options.proxy.password === "" ? undefined : options.proxy.password,
++      },
++      destination: {
++        host: options.targetHost,
++        port: options.targetPort,
++      },
++    });
++    signal.throwIfAborted();
++    return result.socket;
++  } catch (error) {
++    socket.destroy();
++    signal.throwIfAborted();
++    throw error;
++  } finally {
++    signal.removeEventListener("abort", cancel);
++  }
+ }
+ 
+ function hostPatternMatches(pattern: string, host: string) {
+diff --git a/server/utils/gateway/infra/ssh/ssh-connect-retry.ts b/server/utils/gateway/infra/ssh/ssh-connect-retry.ts
+index 816466a..3deea27 100644
+--- a/server/utils/gateway/infra/ssh/ssh-connect-retry.ts
++++ b/server/utils/gateway/infra/ssh/ssh-connect-retry.ts
+@@ -1,4 +1,5 @@
+ import type { HostWithSecret } from "./ssh-types";
++import { setTimeout as delay } from "node:timers/promises";
+ import { gatewayLog } from "../../logging";
+ 
+ export const SSH_CONNECTION_CLOSED_BEFORE_READY = "SSH connection closed before ready";
+@@ -9,18 +10,21 @@ const CONNECT_RETRY_BASE_DELAY_MS = 500;
+ export async function withSshConnectRetries<T>(
+   host: HostWithSecret,
+   connectOnce: () => Promise<T>,
++  signal?: AbortSignal,
+ ) {
+   let lastError: unknown;
+   for (let attempt = 1; attempt <= CONNECT_ATTEMPTS; attempt += 1) {
++    signal?.throwIfAborted();
+     try {
+       return await connectOnce();
+     } catch (error) {
++      signal?.throwIfAborted();
+       lastError = error;
+       if (attempt >= CONNECT_ATTEMPTS || !isTransientSshConnectError(error)) {
+         throw error;
+       }
+       logSshConnectRetry(host, attempt, error);
+-      await delay(connectRetryDelay(attempt));
++      await delay(connectRetryDelay(attempt), undefined, { signal });
+     }
+   }
+   throw lastError;
+@@ -37,10 +41,6 @@ function connectRetryDelay(attempt: number) {
+   return CONNECT_RETRY_BASE_DELAY_MS * 2 ** Math.max(0, attempt - 1);
+ }
+ 
+-async function delay(ms: number) {
+-  await new Promise((resolve) => setTimeout(resolve, ms));
+-}
+-
+ function logSshConnectRetry(host: HostWithSecret, attempt: number, error: unknown) {
+   gatewayLog("info", "gateway-ssh", "retrying transient SSH connect failure", {
+     hostId: host.id,
+diff --git a/server/utils/gateway/infra/ssh/ssh-connection.ts b/server/utils/gateway/infra/ssh/ssh-connection.ts
+index a44db7f..31c7393 100644
+--- a/server/utils/gateway/infra/ssh/ssh-connection.ts
++++ b/server/utils/gateway/infra/ssh/ssh-connection.ts
+@@ -1,5 +1,5 @@
+ import { StringDecoder } from "node:string_decoder";
+-import { Client, type ClientChannel, type SFTPWrapper } from "ssh2";
++import { Client, type ClientChannel, type Prompt, type SFTPWrapper } from "ssh2";
+ import type {
+   CommandResult,
+   DirectTcpChannelOptions,
+@@ -20,7 +20,6 @@ import { currentGatewayUserId } from "../../state/memory";
+ import { EventEmitter } from "@posva/event-emitter";
+ import { SshBackgroundTaskScheduler } from "./ssh-background-tasks";
+ import { hostMfaManager } from "../../host-mfa/host-mfa-instance";
+-import { HOST_MFA_TIMEOUT_MS } from "../../host-mfa/host-mfa-manager";
+ import { hostKeyAlgorithms, verifySshHostKey } from "./ssh-host-trust";
+ 
+ const SSH_READY_TIMEOUT_MS = 30_000;
+@@ -52,8 +51,16 @@ type SshConnectionPoolEvents = {
+   closed: { connectionKey: string };
+ };
+ 
++type SshAuthentication = {
++  request(instructions: string, prompts: Prompt[]): Promise<string[]>;
++  cancel(): void;
++};
++
++class SshMfaRequiredError extends Error {}
++
+ export class SshConnectionPool extends EventEmitter<SshConnectionPoolEvents> {
+   private clients = new Map<string, Promise<Client>>();
++  private handshakes = new Map<string, AbortController>();
+   private clientTokens = new Map<string, symbol>();
+   private serverFingerprints = new Map<string, string>();
+   private sftpChannels = new SftpChannelPool();
+@@ -68,12 +75,15 @@ export class SshConnectionPool extends EventEmitter<SshConnectionPoolEvents> {
+   connect(host: HostWithSecret): Promise<Client> {
+     const resolved = resolveSshConfig(host);
+     const key = this.connectionKeyFor(host);
++    const userId = currentGatewayUserId();
++    if (userId !== null && hostMfaManager.isConnectionPaused(userId, host.id)) {
++      throw new Error("SSH connection was canceled. Connect explicitly to retry.");
++    }
+     this.scopedHostKeys().set(host.id, key);
+ 
+     const existing = this.clients.get(key);
+     if (existing) return this.notifyReady(existing, host);
+ 
+-    const userId = currentGatewayUserId();
+     // All Gateway features converge on this pool. Enforcing the explicit MFA action here prevents
+     // file, model, Git, thread, and scheduled requests from creating a transport behind the user's
+     // back while still allowing them to reuse an authenticated connection already in the pool.
+@@ -82,18 +92,45 @@ export class SshConnectionPool extends EventEmitter<SshConnectionPoolEvents> {
+     }
+ 
+     const token = Symbol(key);
++    const attempt = new AbortController();
+     this.clientTokens.set(key, token);
+-    const promise = withSshConnectRetries(host, () =>
+-      this.connectOnce(host, resolved, key, token),
+-    ).catch((error) => {
+-      this.deleteClientIfCurrent(key, token);
+-      throw error;
+-    });
++    this.handshakes.set(key, attempt);
++    const authentication = userId === null ? undefined : {
++      request: (instructions: string, prompts: Prompt[]) =>
++        hostMfaManager.requestMfa(userId, host, instructions, prompts),
++      cancel: () => hostMfaManager.cancelMfa(userId, host.id),
++    };
++    const promise = withSshConnectRetries(host, async () => {
++      const client = await this.connectOnce(host, resolved, attempt.signal, (fingerprint) => {
++        this.serverFingerprints.set(key, fingerprint);
++      }, authentication);
++      client.once("end", () => this.deleteClientIfCurrent(key, token));
++      client.once("close", () => this.deleteClientIfCurrent(key, token));
++      return client;
++    }, attempt.signal)
++      .catch((error) => {
++        this.deleteClientIfCurrent(key, token);
++        throw error;
++      })
++      .finally(() => {
++        if (this.handshakes.get(key) === attempt) this.handshakes.delete(key);
++      });
+ 
+     this.clients.set(key, promise);
+     return this.notifyReady(promise, host);
+   }
+ 
++  async testAuthentication(host: HostWithSecret, signal: AbortSignal) {
++    try {
++      const client = await this.connectOnce(host, resolveSshConfig(host), signal);
++      client.end();
++      return "connected" as const;
++    } catch (error) {
++      if (error instanceof SshMfaRequiredError) return "mfaRequired" as const;
++      throw error;
++    }
++  }
++
+   async execIfConnected(host: HostWithSecret, command: string, options: ExecOptions = {}) {
+     const connection = this.clients.get(this.connectionKeyFor(host));
+     if (connection === undefined) return null;
+@@ -433,6 +470,9 @@ export class SshConnectionPool extends EventEmitter<SshConnectionPoolEvents> {
+     this.clients.delete(key);
+     this.clientTokens.delete(key);
+     this.serverFingerprints.delete(key);
++    const handshake = this.handshakes.get(key);
++    this.handshakes.delete(key);
++    handshake?.abort(new Error("SSH connection attempt was canceled"));
+     if (client !== undefined) this.emit("closed", { connectionKey: key });
+     void client?.then((connection) => connection.end()).catch(() => {});
+   }
+@@ -466,70 +506,70 @@ export class SshConnectionPool extends EventEmitter<SshConnectionPoolEvents> {
+   private async connectOnce(
+     host: HostWithSecret,
+     resolved: ReturnType<typeof resolveSshConfig>,
+-    key: string,
+-    token: symbol,
++    signal: AbortSignal,
++    onVerified?: (fingerprint: string) => void,
++    authentication?: SshAuthentication,
+   ) {
+-    const assertCurrentConnection = () => {
+-      if (this.clientTokens.get(key) !== token) {
+-        throw new Error("SSH connection attempt was superseded by Host reconfiguration");
+-      }
+-    };
+-    // The pool entry owns the whole retry sequence, not an individual socket. A Host removed
+-    // during backoff must not start another connection or publish a stale MFA challenge.
+-    assertCurrentConnection();
++    signal.throwIfAborted();
++    const privateKey = host.privateKey
++      ? Buffer.from(host.privateKey)
++      : resolved.privateKeyPath
++        ? await readSshPrivateKey(resolved.privateKeyPath)
++        : undefined;
++    signal.throwIfAborted();
+     const sock = resolved.proxy
+       ? await createProxySocket({
+           proxy: resolved.proxy,
+           targetHost: resolved.hostName,
+           targetPort: host.port ?? resolved.port,
++          signal,
+         })
+       : undefined;
+-    if (this.clientTokens.get(key) !== token) {
++    if (signal.aborted) {
+       sock?.destroy();
+-      assertCurrentConnection();
++      signal.throwIfAborted();
+     }
+     const client = new Client();
+     return await new Promise<Client>((resolve, reject) => {
+       let settled = false;
++      let prompted = false;
++      let timer: ReturnType<typeof setTimeout>;
++      const abort = () => fail(abortReason(signal));
++      const cleanup = () => {
++        clearTimeout(timer);
++        signal.removeEventListener("abort", abort);
++      };
+       const fail = (error: Error) => {
+         if (settled) {
+           return;
+         }
+         settled = true;
+-        if (mfaUserId !== null && this.clientTokens.get(key) === token) {
+-          // The SSH client can time out while waiting for the user's MFA answer. Remove the
+-          // pending request with the transport so a later code cannot target a dead socket.
+-          hostMfaManager.cancelMfa(mfaUserId, host.id);
+-        }
+-        // Keep the shared Promise and token while withSshConnectRetries owns the sequence.
+-        // Deleting them here invalidates every later attempt's MFA answer and lets other callers
+-        // create competing transports. The outer catch evicts the entry after the final failure.
++        cleanup();
++        if (prompted) authentication?.cancel();
+         sock?.destroy();
+-        client.end();
++        client.destroy();
+         reject(error);
+       };
+-
+-      // Capture the user scope at connection time for use in async MFA callbacks
+-      const mfaUserId = currentGatewayUserId();
++      // 旧的 ssh2 握手计时器把两分钟 MFA 等待也给了未响应的主机。
++      // 只在真正等用户回答时暂停握手计时，取消时立即销毁底层连接。
++      const startHandshakeDeadline = () => {
++        timer = setTimeout(() => fail(new Error("SSH handshake deadline exceeded")), SSH_READY_TIMEOUT_MS);
++      };
++      startHandshakeDeadline();
++      signal.addEventListener("abort", abort, { once: true });
+ 
+       client
+         .on("ready", () => {
+-          if (this.clientTokens.get(key) !== token) {
+-            fail(new Error("SSH connection attempt was superseded by Host reconfiguration"));
+-            return;
+-          }
++          if (settled) return;
+           settled = true;
+-          // Only an authenticated transport owns pool eviction on disconnect. Failed attempts
+-          // can emit end/close after a retry has started; those events must not evict that retry.
+-          client.once("end", () => this.deleteClientIfCurrent(key, token));
+-          client.once("close", () => this.deleteClientIfCurrent(key, token));
++          cleanup();
+           resolve(client);
+         })
+         .on("error", fail)
+         .on("end", () => fail(new Error(SSH_CONNECTION_CLOSED_BEFORE_READY)))
+         .on("close", () => fail(new Error(SSH_CONNECTION_CLOSED_BEFORE_READY)))
+-        .on("keyboard-interactive", (name, instructions, _lang, prompts, finish) => {
+-          if (settled || this.clientTokens.get(key) !== token) return;
++        .on("keyboard-interactive", (_name, instructions, _lang, prompts, finish) => {
++          if (settled) return;
+           // PAM may follow the actual verification-code challenge with an informational
+           // keyboard-interactive round that contains no prompts. It requires an empty response,
+           // not another user interaction; publishing it as MFA would leave the Host falsely
+@@ -538,31 +578,31 @@ export class SshConnectionPool extends EventEmitter<SshConnectionPoolEvents> {
+             finish([]);
+             return;
+           }
+-          if (mfaUserId === null) {
+-            // No authenticated user scope — fall back to empty answers, which will likely
+-            // cause authentication to fail so the client can retry with a different method.
+-            finish([]);
++          if (authentication === undefined) {
++            fail(new SshMfaRequiredError("SSH requires interactive authentication"));
+             return;
+           }
+-
+-          hostMfaManager
+-            .requestMfa(mfaUserId, host, instructions, prompts)
++          prompted = true;
++          clearTimeout(timer);
++          void authentication
++            .request(instructions, prompts)
+             .then((answers) => {
+-              if (settled || this.clientTokens.get(key) !== token) return;
++              if (settled) return;
++              prompted = false;
++              startHandshakeDeadline();
+               finish(answers);
+             })
+-            .catch(() => {
+-              // MFA timed out or was canceled — give empty answers so auth fails
+-              if (!settled && this.clientTokens.get(key) === token) finish([]);
+-            });
+-        })
+-        .connect({
++            .catch((error: Error) => fail(error));
++        });
++      try {
++        client.connect({
+           algorithms: { serverHostKey: hostKeyAlgorithms(host) },
+           passphrase: host.authMode === "privateKey" ? (host.passphrase ?? undefined) : undefined,
+           hostVerifier: (serverKey: Buffer) => {
+             try {
+-              assertCurrentConnection();
+-              this.serverFingerprints.set(key, verifySshHostKey(host, serverKey));
++              signal.throwIfAborted();
++              const fingerprint = verifySshHostKey(host, serverKey);
++              onVerified?.(fingerprint);
+               return true;
+             } catch (error: unknown) {
+               fail(error instanceof Error ? error : new Error("SSH host key verification failed"));
+@@ -575,22 +615,15 @@ export class SshConnectionPool extends EventEmitter<SshConnectionPoolEvents> {
+           port: sock ? undefined : (host.port ?? resolved.port),
+           agent: host.authMode === "agent" ? process.env.SSH_AUTH_SOCK : undefined,
+           password: host.authMode === "password" ? (host.password ?? undefined) : undefined,
+-          privateKey:
+-            host.privateKey !== null && host.privateKey !== undefined && host.privateKey !== ""
+-              ? Buffer.from(host.privateKey)
+-              : resolved.privateKeyPath !== null &&
+-                  resolved.privateKeyPath !== undefined &&
+-                  resolved.privateKeyPath !== ""
+-                ? readSshPrivateKey(resolved.privateKeyPath)
+-                : undefined,
+-          // ssh2 keeps this timer running while keyboard-interactive waits for the MFA answer.
+-          // Include the user-input window or a valid challenge is misreported as a handshake
+-          // failure before the sidebar can finish authentication.
+-          readyTimeout: SSH_READY_TIMEOUT_MS + HOST_MFA_TIMEOUT_MS,
++          privateKey,
++          readyTimeout: 0,
+           keepaliveInterval: SSH_KEEPALIVE_INTERVAL_MS,
+           keepaliveCountMax: SSH_KEEPALIVE_COUNT_MAX,
+           tryKeyboard: true,
+         });
++      } catch (error) {
++        fail(error instanceof Error ? error : new Error("SSH client setup failed"));
++      }
+     });
+   }
+ 
+diff --git a/server/utils/gateway/realtime/handlers/host-lifecycle.ts b/server/utils/gateway/realtime/handlers/host-lifecycle.ts
+index 59531af..01eac8c 100644
+--- a/server/utils/gateway/realtime/handlers/host-lifecycle.ts
++++ b/server/utils/gateway/realtime/handlers/host-lifecycle.ts
+@@ -17,7 +17,7 @@ export function subscribeHostLifecycle(peer: RealtimePeer) {
+     stopUpgrades();
+   };
+   // Gateway 重启时发布的 MFA 门禁早于浏览器订阅，首次连接必须读取所属账号的当前状态。
+-  for (const event of hostRuntimeSupervisor.mfaRequiredSnapshot(authenticatedUserId(peer))) send(event);
++  for (const event of hostRuntimeSupervisor.connectionSnapshot(authenticatedUserId(peer))) send(event);
+ }
+ 
+ export function readHostUpgrades(
+diff --git a/server/utils/gateway/realtime/handlers/host-mfa.ts b/server/utils/gateway/realtime/handlers/host-mfa.ts
+index 2dee651..122c3ff 100644
+--- a/server/utils/gateway/realtime/handlers/host-mfa.ts
++++ b/server/utils/gateway/realtime/handlers/host-mfa.ts
+@@ -48,5 +48,5 @@ export function handleHostMfaCancel(
+   peer: RealtimePeer,
+   request: Extract<RealtimeClientMessage, { type: "host.mfa.cancel" }>,
+ ) {
+-  hostMfaManager.cancelMfa(authenticatedUserId(peer), request.hostId);
++  hostRuntimeSupervisor.cancelOnDemand(authenticatedUserId(peer), request.hostId);
+ }
+diff --git a/server/utils/gateway/runtime/active-writer-conflict.ts b/server/utils/gateway/runtime/active-writer-conflict.ts
+index 44c0ef7..0526922 100644
+--- a/server/utils/gateway/runtime/active-writer-conflict.ts
++++ b/server/utils/gateway/runtime/active-writer-conflict.ts
+@@ -9,5 +9,9 @@ export function threadReadOnlyReason(error: unknown): ThreadReadOnlyReason | und
+   if (recordFromUnknown(error.rpcData)?.type === "modelProviderMismatch") {
+     return "modelProviderMismatch";
+   }
++  if (
++    error.rpcMethod === "thread/resume" &&
++    error.message.startsWith("cannot resume an unloaded multi-agent v2 sub-agent through its parent;")
++  ) return "subagent";
+   return activeWriterMessage.test(error.message) ? "activeWriter" : undefined;
+ }
+diff --git a/server/utils/gateway/runtime/host-runtime-connection.ts b/server/utils/gateway/runtime/host-runtime-connection.ts
+index 97f75ea..540c5e5 100644
+--- a/server/utils/gateway/runtime/host-runtime-connection.ts
++++ b/server/utils/gateway/runtime/host-runtime-connection.ts
+@@ -26,6 +26,7 @@ export async function connectHostRuntime(slot: HostRuntimeSlot, isCurrent: () =>
+     });
+     const client = await threadBroker.getHostClient(slot.host);
+     if (!isCurrent()) return;
++    slot.connected = true;
+     // Browser WebSockets outlive an app-server transport reconnect. Their local event listeners
+     // retain lease counts in the registry, so rebuild those upstream controllers before restoring
+     // background-only monitoring; otherwise an idle selected thread silently stops receiving.
+diff --git a/server/utils/gateway/runtime/host-runtime-supervisor.ts b/server/utils/gateway/runtime/host-runtime-supervisor.ts
+index 0d356f5..81b4ffc 100644
+--- a/server/utils/gateway/runtime/host-runtime-supervisor.ts
++++ b/server/utils/gateway/runtime/host-runtime-supervisor.ts
+@@ -190,10 +190,10 @@ class HostRuntimeSupervisor {
+   private handleSessionClosed(event: HostSessionClosedEvent) {
+     activeMainThreadMonitor.forgetHost(event.userId, event.hostId);
+     const slot = this.slots.get(this.slotKey(event.userId, event.hostId));
+-    if (!slot || slot.connecting || slot.timer) {
+-      return;
+-    }
++    if (!slot) return;
+     slot.connected = false;
++    if (slot.connecting || slot.timer) return;
++    if (hostMfaManager.isConnectionPaused(slot.userId, slot.hostId)) return;
+     if (hostMfaManager.isMfaHost(event.userId, event.hostId)) {
+       // Reconnecting a keyboard-interactive Host without a user present would immediately block
+       // the shared runtime on another verification prompt. Keep it disconnected and expose the
+@@ -207,6 +207,14 @@ class HostRuntimeSupervisor {
+   connectOnDemand(userId: number, hostId: number) {
+     const slot = this.slots.get(this.slotKey(userId, hostId));
+     if (!slot) throw new Error(`Host ${hostId} is not configured`);
++    if (slot.connected) {
++      runWithGatewayUser(userId, () => hostLifecycleBus.emit({
++        hostId,
++        status: "connected",
++        message: "app-server RPC OK",
++      }));
++      return;
++    }
+     if (slot.connecting) return;
+     // A transport can fail before SSH reaches keyboard-interactive, so the server cannot know
+     // that this is an MFA host yet. This explicit retry covers both cases; requestMfa() publishes
+@@ -218,6 +226,24 @@ class HostRuntimeSupervisor {
+     this.scheduleConnect(slot, 0);
+   }
+ 
++  cancelOnDemand(userId: number, hostId: number) {
++    const slot = this.slots.get(this.slotKey(userId, hostId));
++    if (!slot || slot.connected) return;
++    this.clearTimer(slot);
++    // 先阻止正在等待中的文件、项目和自动重试再拨号，再释放本主机的传输。
++    // 连接池仍由其他主机或 RPC 租约持有时，其他使用者继续使用它。
++    hostMfaManager.pauseConnection(userId, hostId);
++    slot.generation += 1;
++    slot.connecting = false;
++    slot.connectPromise = null;
++    runWithGatewayUser(userId, () => {
++      threadBroker.disconnectHostTransport(hostId);
++      sshConnections.disconnect(hostId);
++      codexRuntime.clearVersionCheck(hostId);
++      hostLifecycleBus.emit(this.canceledEvent(hostId));
++    });
++  }
++
+   async restartDaemon(userId: number, hostId: number) {
+     const slot = this.slots.get(this.slotKey(userId, hostId));
+     if (!slot) throw new Error(`Host ${hostId} is not configured`);
+@@ -261,7 +287,7 @@ class HostRuntimeSupervisor {
+     this.clearTimer(slot);
+     // Deterministic ownership conflicts cannot heal through repeated daemon updates. All
+     // automatic scheduling paths share this gate; the existing sidebar retry is the opt-in.
+-    if (slot.automaticRetryBlocked) return;
++    if (slot.automaticRetryBlocked || hostMfaManager.isConnectionPaused(slot.userId, slot.hostId)) return;
+     const generation = slot.generation;
+     slot.timer = setTimeout(() => {
+       slot.timer = null;
+@@ -308,7 +334,7 @@ class HostRuntimeSupervisor {
+       }
+       throw error;
+     } finally {
+-      hostMfaManager.revokeConnectionPermit(slot.userId, slot.hostId);
++      if (this.isCurrent(slot, generation)) hostMfaManager.revokeConnectionPermit(slot.userId, slot.hostId);
+       // A replaced slot may already own a newer connection attempt. Never clear state belonging
+       // to that newer generation while an older promise is unwinding.
+       this.releaseConnectAttempt(slot, connection);
+@@ -351,17 +377,25 @@ class HostRuntimeSupervisor {
+     return this.started && slot.connected && !slot.connecting && !slot.timer;
+   }
+ 
+-  mfaRequiredSnapshot(userId: number): HostLifecycleEvent[] {
++  connectionSnapshot(userId: number): HostLifecycleEvent[] {
+     const createdAt = new Date().toISOString();
+     const events: HostLifecycleEvent[] = [];
+     for (const slot of this.slots.values()) {
+-      if (slot.userId !== userId || slot.connected || slot.connecting ||
+-          hostMfaManager.canStartConnection(userId, slot.hostId)) continue;
+-      events.push({ ...this.mfaRequiredEvent(slot.hostId), createdAt });
++      if (slot.userId !== userId || slot.connected) continue;
++      if (hostMfaManager.isConnectionPaused(userId, slot.hostId))
++        events.push({ ...this.canceledEvent(slot.hostId), createdAt });
++      else if (slot.connecting && !hostMfaManager.isWaitingMfa(userId, slot.hostId))
++        events.push({ hostId: slot.hostId, status: "connecting", message: "Connecting", createdAt });
++      else if (!slot.connecting && !hostMfaManager.canStartConnection(userId, slot.hostId))
++        events.push({ ...this.mfaRequiredEvent(slot.hostId), createdAt });
+     }
+     return events;
+   }
+ 
++  private canceledEvent(hostId: number): Omit<HostLifecycleEvent, "createdAt"> {
++    return { hostId, status: "canceled", message: "SSH connection canceled" };
++  }
++
+   private mfaRequiredEvent(hostId: number): Omit<HostLifecycleEvent, "createdAt"> {
+     return {
+       hostId,
+diff --git a/server/utils/gateway/runtime/thread-open-service.ts b/server/utils/gateway/runtime/thread-open-service.ts
+index 0b6234e..a6cc5fb 100644
+--- a/server/utils/gateway/runtime/thread-open-service.ts
++++ b/server/utils/gateway/runtime/thread-open-service.ts
+@@ -18,7 +18,7 @@ import { threadRuntimeEvents } from "./thread-runtime-events";
+ import { DEFAULT_TIMELINE_PAGE_LIMIT, type ThreadOpenSnapshot } from "./types";
+ import { preserveCanonicalUserMessagesInOpenSnapshot } from "./open-snapshot-events";
+ import { currentGatewayUserId } from "../state/memory";
+-import { parseThreadReadResult, parseThreadStartResult } from "~~/shared/runtime/app-server";
++import { isAppServerSubAgentThread, parseThreadReadResult, parseThreadStartResult } from "~~/shared/runtime/app-server";
+ import { gatewayThreadFromAppServer } from "../protocol/gateway-thread";
+ import type { ThreadHistoryReader } from "./thread-history-reader";
+ import { timelinePageToTurns } from "~~/shared/thread-history/app-server-timeline";
+@@ -239,7 +239,7 @@ export class ThreadOpenService {
+       history: threadActivationHistory(snapshot.history, limit),
+       pendingRequests: snapshot.readOnly === true ? [] : pendingServerRequests.forThread(host.id, threadId),
+       runtimeStatus: runtimeStatusFromThreadState(snapshot.thread, snapshot.history, recentEvents),
+-      project: projectStore.ensureForPath(host.id, snapshot.thread.cwd),
++      project: snapshot.readOnlyReason === "subagent" ? null : projectStore.ensureForPath(host.id, snapshot.thread.cwd),
+       oldestTimelineCursor: snapshot.oldestTimelineCursor,
+       threadSettings: snapshot.threadSettings,
+       tokenUsage: latestTokenUsageFromEvents(recentEvents) ?? snapshot.tokenUsage,
+@@ -274,7 +274,7 @@ export class ThreadOpenService {
+           retryWriter,
+           reason,
+         });
+-        return this.readStoredOpenSnapshot(host, threadId, capture, limit, reason);
++        return this.readStoredOpenSnapshot(host, threadId, capture, limit, reason, error);
+       }
+       const timelinePage = await this.historyReader.loadInitialTimelinePage(
+         host,
+@@ -303,6 +303,7 @@ export class ThreadOpenService {
+     capture: ThreadHistoryRefresh,
+     limit: number,
+     readOnlyReason?: ThreadReadOnlyReason,
++    resumeError?: unknown,
+   ) {
+     const client = await this.registry.getHostClient(host);
+     const read = await client.request(
+@@ -311,6 +312,11 @@ export class ThreadOpenService {
+       120_000,
+       parseThreadReadResult,
+     );
++    // 已卸载的 Codex 子智能体不允许独立 resume。核对持久化身份后读取原历史，
++    // 只读快照不取得写权限，也不登记新的项目。
++    if (readOnlyReason === "subagent" &&
++        (read.thread.id !== threadId || !isAppServerSubAgentThread(read.thread)))
++      throw resumeError ?? new Error("Codex child thread identity changed");
+     const timelinePage = await this.historyReader.loadInitialTimelinePage(host, read.thread, limit);
+     return this.storeRemoteOpenSnapshot(
+       host,
+@@ -334,7 +340,7 @@ export class ThreadOpenService {
+   ) {
+     capture.assertCurrent();
+     const threadId = thread.id;
+-    projectStore.ensureForPath(host.id, thread.cwd);
++    if (readOnlyReason !== "subagent") projectStore.ensureForPath(host.id, thread.cwd);
+     threadMetadataStore.record(host.id, thread);
+     const previousSnapshot = threadSnapshotStore.get(host.id, threadId);
+     // Preserve missing summary user rows only. Replaying older materialized events over this
+diff --git a/server/utils/gateway/state/host-events.ts b/server/utils/gateway/state/host-events.ts
+index db9a0bc..1b522b7 100644
+--- a/server/utils/gateway/state/host-events.ts
++++ b/server/utils/gateway/state/host-events.ts
+@@ -9,6 +9,7 @@ export type HostLifecycleStatus =
+   | "connecting"
+   | "connected"
+   | "failed"
++  | "canceled"
+   | "mfaRequired";
+ 
+ export interface HostLifecycleEvent {
+diff --git a/server/utils/gateway/state/hosts.ts b/server/utils/gateway/state/hosts.ts
+index d63a4ff..5a54d3c 100644
+--- a/server/utils/gateway/state/hosts.ts
++++ b/server/utils/gateway/state/hosts.ts
+@@ -22,9 +22,12 @@ function sanitizeHost(host: StoredHostRecord): HostRecord {
+   };
+ }
+ 
+-function normalizeHost(input: HostCreateInput, id = nextId(currentGatewayMemoryState().hosts)) {
++function normalizeHost(
++  input: HostCreateInput,
++  id: number,
++  existing = currentGatewayMemoryState().hosts.find((host) => host.id === id),
++) {
+   const timestamp = nowIso();
+-  const existing = currentGatewayMemoryState().hosts.find((host) => host.id === id);
+   const keyMode = input.authMode === "privateKey";
+   const keyPath = keyMode ? trimmedOrNull(input.privateKeyPath) : null;
+   // The API never returns private material. Blank secret fields retain it while editing.
+@@ -90,11 +93,17 @@ export const hostStore = {
+   },
+ 
+   create(input: HostCreateInput): HostRecord {
+-    const host = normalizeHost(input);
++    const host = normalizeHost(input, nextId(currentGatewayMemoryState().hosts));
+     currentGatewayMemoryState().hosts.push(host);
+     return sanitizeHost(host);
+   },
+ 
++  preview(input: HostCreateInput, id?: number): StoredHostRecord | null {
++    const existing = id === undefined ? undefined : this.getWithSecret(id) ?? undefined;
++    if (id !== undefined && existing === undefined) return null;
++    return normalizeHost(input, id ?? 0, existing);
++  },
++
+   update(id: number, input: HostUpdateInput): HostRecord | null {
+     const existing = currentGatewayMemoryState().hosts.find((host) => host.id === id);
+     if (!existing) {
+diff --git a/shared/runtime/realtime/server-message-schema.ts b/shared/runtime/realtime/server-message-schema.ts
+index 7f5b470..5ae63de 100644
+--- a/shared/runtime/realtime/server-message-schema.ts
++++ b/shared/runtime/realtime/server-message-schema.ts
+@@ -189,7 +189,7 @@ const threadOpenResultFields = {
+   oldestTimelineCursor: z.string().nullable(),
+   recentEvents: z.array(gatewayEventSchema),
+   readOnly: z.boolean().optional(),
+-  readOnlyReason: z.enum(["activeWriter", "modelProviderMismatch"]).optional(),
++  readOnlyReason: z.enum(["activeWriter", "modelProviderMismatch", "subagent"]).optional(),
+ };
+ const terminalSessionSchema = z
+   .object({
+@@ -502,6 +502,7 @@ export const realtimeServerMessageSchema: z.ZodType<RealtimeServerMessage> = z.d
+               "connecting",
+               "connected",
+               "failed",
++              "canceled",
+               "mfaRequired",
+             ]),
+             message: z.string(),
+diff --git a/shared/types/realtime.ts b/shared/types/realtime.ts
+index 6685df8..7db5b3d 100644
+--- a/shared/types/realtime.ts
++++ b/shared/types/realtime.ts
+@@ -449,6 +449,7 @@ export type RealtimeServerMessage =
+           | "connecting"
+           | "connected"
+           | "failed"
++          | "canceled"
+           | "mfaRequired";
+         message: string;
+         messageTranslation?: HostLifecycleMessage;
+diff --git a/shared/types/thread.ts b/shared/types/thread.ts
+index 9a2a405..fa72556 100644
+--- a/shared/types/thread.ts
++++ b/shared/types/thread.ts
+@@ -62,7 +62,7 @@ export interface ThreadGoalTimelineItem extends Record<string, unknown> {
+   updatedAt: number;
+ }
+ 
+-export type ThreadReadOnlyReason = "activeWriter" | "modelProviderMismatch";
++export type ThreadReadOnlyReason = "activeWriter" | "modelProviderMismatch" | "subagent";
+ 
+ export interface ThreadOpenResult {
+   pendingRequests?: GatewayEvent[];

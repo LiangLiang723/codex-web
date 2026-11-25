@@ -11,7 +11,7 @@ import {
   TID_LOGOUT_BUTTON,
   TID_TASK_SETTINGS_BUTTON,
 } from "@zcode/shared/test-ids";
-import { Avatar, AvatarFallback, AvatarImage, WorkspaceAvatar } from "@/components/ui/avatar.js";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar.js";
 import { cn } from "@/components/lib/utils.js";
 import { Button } from "@/components/ui/button.js";
 import { toast } from "@/components/ui/toast.js";
@@ -142,7 +142,9 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   const resetZoomShortcutLabel = useShortcutCommandLabel("resetZoom");
   const isRestoringOAuthSession = useZCodeStore((state) => state.isRestoringOAuthSession);
   const workspace = platform.sshWorkspace;
-  const profileBadge = workspace?.name ?? getSidebarProfileBadge(user, intl.formatMessage);
+  const profileBadge = workspace
+    ? intl.formatMessage({ id: "selfhost.account" })
+    : getSidebarProfileBadge(user, intl.formatMessage);
   const avatarFallbackText = getAvatarFallbackText(user);
   const avatarKey = user?.avatarUrl ?? user?.id ?? "guest";
   const showAuthRestoreLoading = !user && isRestoringOAuthSession;
@@ -162,10 +164,7 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   };
   const profileContent = (
     <>
-      {workspace ? (
-        <WorkspaceAvatar value={workspace.avatar} />
-      ) : (
-        <Avatar key={avatarKey} size="default">
+      <Avatar key={avatarKey} size="default">
           {user?.avatarUrl ? <AvatarImage src={user.avatarUrl} alt={profileBadge} /> : null}
           <AvatarFallback className="bg-background text-foreground">
             {user ? (
@@ -182,8 +181,7 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
               <User className="size-4" />
             )}
           </AvatarFallback>
-        </Avatar>
-      )}
+      </Avatar>
       <div className="min-w-0 flex-1 overflow-hidden text-left">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="min-w-0 truncate text-ui-base font-semibold text-foreground">
@@ -239,19 +237,7 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   return (
     // footer 被 Settings 复用，页面专属边距由调用方传入，避免修改共享默认样式。
     <footer className={cn("flex shrink-0 flex-col gap-2.5 px-4 pt-2 pb-4", className)}>
-      {workspace ? (
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="justify-start"
-          onClick={workspace.manage}
-        >
-          {intl.formatMessage({ id: "selfhost.hosts" })}
-        </Button>
-      ) : (
-        banner
-      )}
+      {!workspace ? banner : null}
       <div className="flex min-w-0 gap-2">
         <DropdownMenu open={profileMenuOpen} onOpenChange={setProfileMenuOpen}>
           <DropdownMenuTrigger asChild>
@@ -476,10 +462,6 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
             {workspace && (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={workspace.edit}>
-                  <PencilRuler className="size-4" />
-                  {intl.formatMessage({ id: "selfhost.editWorkspace" })}
-                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={workspace.account}>
                   <Settings className="size-4" />
                   {intl.formatMessage({ id: "selfhost.account" })}

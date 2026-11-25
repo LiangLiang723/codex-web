@@ -348,24 +348,30 @@ export function projectThread(
   const controls = rec(activation.nativeControls);
   const queueAvailable = controls.queue === true && activation.readOnly !== true;
   const followupMode = queueAvailable && activation.followupMode === "queue" ? "queue" : "guide";
+  const nativeChild =
+    activation.readOnlyReason === "subagent" ||
+    Boolean(str(thread.parentThreadId).trim()) ||
+    Object.hasOwn(rec(thread.source), "subAgent");
+  // 冷读子 Thread 的有效配置在原生元数据里。缺字段时保留空值，避免显示工作区默认值。
   const modelId =
     str(settings.model) ||
     str(thread.model) ||
-    registry.find((m) => m.isDefault)?.model ||
-    registry[0]?.model ||
-    "";
+    (nativeChild ? "" : (registry.find((m) => m.isDefault)?.model ?? registry[0]?.model ?? ""));
   const model = registry.find((m) => m.model === modelId);
   const thought =
     str(settings.effort) ||
     str(rec(collaboration.settings).reasoningEffort) ||
-    model?.defaultReasoningEffort ||
-    "";
+    (nativeChild
+      ? settings.effort === null
+        ? ""
+        : str(thread.reasoningEffort)
+      : (model?.defaultReasoningEffort ?? ""));
   result.seq = revision;
   result.revision = revision;
   result.meta = {
     title: threadName(thread),
     titleSource: typeof thread.name === "string" ? "custom" : "generated",
-    ...(activation.readOnly === true
+    ...(activation.readOnly === true && activation.readOnlyReason !== "subagent"
       ? {
           readOnlyReason:
             activation.readOnlyReason === "modelProviderMismatch"

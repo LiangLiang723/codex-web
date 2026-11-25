@@ -74,7 +74,7 @@ async function catalog(page, mutation) {
   await mode.selectOption("agent");
   await button(dialog, "保存").click();
   assert.equal(
-    await dialog.locator("input[name=name]").evaluate((e) => e.validity.valueMissing),
+    await dialog.locator("input[name=address]").evaluate((e) => e.validity.valueMissing),
     true,
   );
   await dismiss(page);
@@ -112,6 +112,7 @@ async function catalog(page, mutation) {
       await button(page, "添加主机").click();
       dialog = page.getByRole("dialog");
       await dialog.locator("[name=name]").fill(name);
+      await button(dialog, "高级选项").click();
       await dialog.getByRole("radio", { name: "终端", exact: true }).locator("..").click();
       await dialog.locator("[name=address]").fill(host.sshHost);
       await dialog.locator("[name=user]").fill(host.username);
@@ -124,6 +125,7 @@ async function catalog(page, mutation) {
         .filter({ has: page.getByRole("heading", { name, exact: true }) });
       await button(newCard, "编辑").click();
       dialog = page.getByRole("dialog");
+      await button(dialog, "高级选项").click();
       assert.equal(await dialog.getByRole("radio", { name: "终端" }).isChecked(), true);
       await dialog.locator("[name=name]").fill(renamed);
       await button(dialog, "保存").click();

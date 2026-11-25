@@ -86,11 +86,18 @@ export class Gateway {
       throw new Error(response.status === 401 ? "用户名或密码不正确" : String(response.status));
     return z.object({ token: z.string() }).parse(await response.json()).token;
   }
-  async request<T>(url: string, schema: z.ZodType<T>, method = "GET", body?: unknown): Promise<T> {
+  async request<T>(
+    url: string,
+    schema: z.ZodType<T>,
+    method = "GET",
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<T> {
     const response = await this.fetch(url, {
       method,
       headers: body === undefined ? {} : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
     });
     return schema.parse(await response.json());
   }
@@ -265,10 +272,13 @@ export class Gateway {
     ]);
     return { hosts, projects };
   }
-  projects(hostId: number, force = false) {
+  projects(hostId: number, force = false, signal?: AbortSignal) {
     return this.request(
       "/api/selfhost/projects?hostId=" + hostId + (force ? "&refresh=1" : ""),
       z.array(projectSchema),
+      "GET",
+      undefined,
+      signal,
     );
   }
   projectCatalog(hostId: number) {

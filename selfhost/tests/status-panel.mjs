@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright-core";
 import { build, preview } from "vite";
+import { verifyChildDetails, verifySubagentDirectory } from "./fixtures/subagent-details.mjs";
 
 const web = resolve(import.meta.dirname, "../../packages/web");
 const viewportHeight = 720;
@@ -25,7 +26,16 @@ const other = makeThread(otherId, "第二个任务");
 const child = {
   ...makeThread(childId, "子智能体详情"),
   parentThreadId: threadId,
+  model: "fixture-child-model",
+  reasoningEffort: "high",
 };
+const archivedChildren = Array.from({ length: 22 }, (_, index) => ({
+  ...makeThread(`archived-child-${index + 1}`, `历史子智能体 ${index + 1}`),
+  parentThreadId: threadId,
+  model: null,
+  reasoningEffort: null,
+}));
+const threads = [parent, other, child, ...archivedChildren];
 const model = {
   id: "fixture-model",
   model: "fixture-model",
@@ -45,7 +55,7 @@ const activity = {
   type: "subAgentActivity",
   kind: "started",
   agentThreadId: childId,
-  agentPath: "项目审阅",
+  agentPath: "/root/parent_agent/项目审阅",
 };
 const collab = {
   id: "collab",
@@ -153,6 +163,21 @@ const earlierTurns = Array.from({ length: 16 }, (_, index) => ({
     },
   ],
 }));
+const archiveTurnId = "archived-subagent-turn";
+const archiveTurnText = "已读取更早的子智能体历史";
+const archivedActivity = archivedChildren.map(({ id, name }, index) => ({
+  type: "item",
+  position: index + 1,
+  turnId: archiveTurnId,
+  item: {
+    id: `archive-activity-${id}`,
+    type: "subAgentActivity",
+    kind: "completed",
+    agentThreadId: id,
+    agentNickname: name,
+    completedAtMs: 10_000 + index,
+  },
+}));
 const objective = "校验原生投影和右侧会话状态";
 const initialGoal = { objective, status: "budgetLimited", createdAt: 10, timeUsedSeconds: 93 };
 const panel = (page) => page.getByTestId("selfhost-status-panel");
@@ -171,6 +196,8 @@ async function installFixture(page, origin) {
   let cursor = 0;
   let gitReviewed = false;
   let branchListed = false;
+  const olderHistory = Promise.withResolvers();
+  let archivePageDelivered = false;
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => {
@@ -201,7 +228,7 @@ async function installFixture(page, origin) {
         ? { items: [project], memberships: { [threadId]: cwd, [otherId]: cwd } }
         : [project],
       "/api/selfhost/thread-summary": {
-        thread: [parent, child, other].find((item) => item.id === url.searchParams.get("threadId")),
+        thread: threads.find((item) => item.id === url.searchParams.get("threadId")),
       },
       "/api/threads": {
         data: url.searchParams.get("archived") === "true" ? [] : [parent, other],
@@ -259,7 +286,7 @@ async function installFixture(page, origin) {
         case "auth.authenticate":
           return reply({ type: "ready" });
         case "thread.activate": {
-          const selected = [parent, child, other].find((item) => item.id === call.threadId);
+          const selected = threads.find((item) => item.id === call.threadId);
           const items =
             selected === parent
               ? threadItems
@@ -275,13 +302,56 @@ async function installFixture(page, origin) {
                 turns: [
                   ...(selected === parent ? earlierTurns : []),
                   { id: turnId, status: "completed", items },
+                  ...(selected === child
+                    ? [
+                        {
+                          id: "child-followup-turn",
+                          status: "completed",
+                          items: [
+                            {
+                              id: "child-followup",
+                              type: "agentMessage",
+                              text: "子智能体的后续结果",
+                            },
+                          ],
+                        },
+                      ]
+                    : []),
                 ],
               },
             },
             lastEventId: cursor,
             eventEpoch: "status-fixture",
+            ...(selected?.parentThreadId ? { readOnly: true, readOnlyReason: "subagent" } : {}),
+            ...(selected === parent && page.viewportSize().width >= 768
+              ? { oldestTimelineCursor: "archived-agent-history" }
+              : {}),
           });
         }
+        case "thread.timeline.load":
+          assert.equal(call.cursor, "archived-agent-history");
+          void olderHistory.promise.then(() => {
+            archivePageDelivered = true;
+            reply({
+              type: "thread.timeline.page",
+              data: [
+                ...archivedActivity,
+                {
+                  type: "item",
+                  position: 23,
+                  turnId: archiveTurnId,
+                  item: {
+                    id: "archive-note",
+                    type: "agentMessage",
+                    text: archiveTurnText,
+                  },
+                },
+                { type: "turnCompleted", position: 24, turnId: archiveTurnId, status: "completed" },
+              ],
+              nextCursor: null,
+            });
+          });
+          return;
         case "thread.goal.get":
           return reply({
             type: "thread.goal.snapshot",
@@ -323,6 +393,8 @@ async function installFixture(page, origin) {
     },
     gitReviewed: () => gitReviewed,
     branchListed: () => branchListed,
+    releaseOlderHistory: olderHistory.resolve,
+    archivePageDelivered: () => archivePageDelivered,
   };
 }
 
@@ -337,6 +409,7 @@ async function verifySections(status) {
     planSteps.map(({ step }) => step),
   );
   await status.getByRole("button", { name: /项目审阅/ }).waitFor();
+  assert.equal(await status.getByText("/root/parent_agent/项目审阅", { exact: true }).count(), 0);
   await status.getByText("运行中", { exact: true }).waitFor();
   for (const [href, label] of [
     [typedLink, "用户链接"],
@@ -608,6 +681,7 @@ async function verifyDesktop(page, origin, width, screenshots) {
       id: "ended",
       turnId,
       kind: "completed",
+      completedAtMs: 30_000,
     },
   });
   await status.getByText("已完成", { exact: true }).waitFor();
@@ -623,14 +697,19 @@ async function verifyDesktop(page, origin, width, screenshots) {
   });
   await status.locator('[data-plan-status="completed"]').getByText("实时计划已更新").waitFor();
 
-  await status.getByRole("button", { name: "子智能体目录", exact: true }).click();
-  const directory = page.getByRole("button", { name: /项目审阅/ }).last();
-  await directory.waitFor();
-  await directory.click();
-  await page.getByText("子智能体的原生结果", { exact: true }).waitFor();
-  const childPane = sessionPane(page, childId);
-  await childPane.waitFor();
-  assert.equal(await childPane.locator('[contenteditable="true"]').count(), 0);
+  await verifySubagentDirectory({
+    page,
+    status,
+    timeline: page.locator(timelineSelector),
+    child,
+    archive: {
+      children: archivedChildren,
+      text: archiveTurnText,
+      release: fixture.releaseOlderHistory,
+      delivered: fixture.archivePageDelivered,
+    },
+    screenshotPath: screenshots ? join(screenshots, `subagent-${width}.png`) : undefined,
+  });
   const otherTask = sidebar.getByText("第二个任务", { exact: true });
   await otherTask.click();
   await page.getByText("另一会话内容", { exact: true }).waitFor();
@@ -677,7 +756,9 @@ async function verifyMobile(page, origin, screenshots) {
   await statusTrigger(page).click();
   await sheet.getByRole("button", { name: /项目审阅/ }).click();
   await sheet.waitFor({ state: "hidden" });
-  await page.getByText("子智能体的原生结果", { exact: true }).waitFor();
+  await verifyChildDetails(page, child);
+  if (screenshots)
+    await page.screenshot({ path: join(screenshots, "subagent-390.png"), animations: "disabled" });
   fixture.verifyClean();
 }
 

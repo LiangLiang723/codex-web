@@ -383,6 +383,67 @@ sequenceDiagram
 
 SSH 多因素认证沿用 [Gateway 原认证命令](https://github.com/yunhaoli24/codex-gateway/blob/76200537c19f0c4075153c1458667a07e804db6c/server/utils/gateway/realtime/handlers/host-mfa.ts) 与[主机认证界面](https://github.com/yunhaoli24/codex-gateway/blob/76200537c19f0c4075153c1458667a07e804db6c/app/components/sidebar/host-tree/HostMfaDialog.vue)。
 
+## SSH 主机配置、测试与切换
+
+桌面 Web 的侧栏顶栏左侧显示当前 SSH 主机，右侧依次显示对话历史的后退、前进。窄侧栏截断长主机名，悬停或聚焦切换按钮可读全名。手机 Web 从任务首页顶部切换主机。点击当前主机打开「SSH 工作区」弹窗，关闭后回到当前对话或任务首页。首次登录与 `?manage=1` 直接显示同一份主机目录。主机名、头像、修改连接和打开远程目录由主机目录管理，登录账号可从侧栏底部管理。连接后优先打开该主机的上次有效项目，其次打开已有项目或远程家目录。
+
+添加或编辑主机时，地址可接受主机名、`user@host`、`ssh://user@host:port` 或带可选 `-p` 的简单 SSH 命令。粘贴时将用户与端口填入各自的字段。空端口沿用中心服务器 SSH 配置或默认 22。空显示名称使用地址。认证表单按 SSH Agent、私钥或密码展开。常用设置可直接填写，主机指纹、代理和头像位于高级选项。主机验证使用现有指纹与可信 `known_hosts`，编辑时由服务端继续解析此前保存的认证资料。
+
+「测试连接」使用当前草稿，由 Gateway 创建一次独立的 SSH 认证连接。测试通过即表示 SSH 认证成功。需要交互验证时显示对应结果，由用户保存后在进入工作区时继续验证。连接失败显示所在阶段及原因，测试可以取消。HTTP 请求关闭时销毁试连连接。试连只执行 SSH 握手和认证，配置及 Codex 运行时由各自原入口管理。
+
+进入主机和打开目录复用 Host Supervisor 的连接。主机目录显示认证与 Codex 准备进度，两类等待均可取消。用户取消时先停止当前页面的导航，然后由 Gateway 暂停该账号该主机的未完成连接和自动重试，撤销相应 MFA 请求和未完成的 RPC 建立。SSH 池在无其他主机或传输引用时立即中止底层连接。用户显式重试恢复该主机的连接准入，连接世代防止旧结果写回新尝试。已连接的主机由现有连接和会话订阅所有者管理。
+
+```mermaid
+sequenceDiagram
+    participant W as 桌面或手机 Web
+    participant H as Gateway Host Supervisor
+    participant S as SSH 连接池
+    participant C as 远端 Codex
+    W->>S: 当前草稿测试（独立的认证连接）
+    S-->>W: 认证、验证要求或失败
+    W->>H: 主动连接已保存主机
+    H->>S: 复用或建立已验证 SSH
+    S->>C: 建立现有 App Server 连接
+    alt 连接完成
+        H-->>W: 打开选定远程目录
+    else 用户取消
+        W->>H: 停止这一主机的连接
+        H->>S: 释放未完成连接，阻止旧尝试重入
+        H-->>W: 已取消，可以再次连接
+    end
+```
+
+主机目录及连接后的选目录流程参考 [Zed Remote Projects](https://zed.dev/docs/remote-development)。表单的独立 SSH 验证参考 [DBeaver SSH configuration](https://dbeaver.com/docs/dbeaver/SSH-Configuration/)。连接和表单控件沿用本仓库的 Web 界面。
+
+## Codex 子智能体名称与详情
+
+右上会话状态、目录和标签页使用原生昵称或代理路径末段的任务名。无可读名称时显示简短任务描述，最后使用本地化「子智能体」。路径和 Thread ID 保留在协议身份中。长名称可从状态行的完整名称和右侧详情标题读取。父子关系来自当前主机的 Codex 会话和时间线。
+
+Gateway 对已卸载的原生子智能体收到明确的 Codex 恢复拒绝后，读取同一 Thread 的持久历史，并校验原生子智能体类型。历史沿用已有分页与快照链路，并以只读方式显示。已经可订阅的运行中子智能体继续使用实时链路。父会话保持自己的订阅和写入权限。桌面宽度使用右侧标签，手机 Web 使用现有抽屉。
+
+自托管状态面板、目录与详情标签共用头像色板，按子 Thread ID 稳定选色。同一子智能体更名或结束时保持原颜色，色板可复用。目录的已结束总数和行都取自同一分页结果，已加载的更早历史参与计数。
+
+详情顶栏显示子 Thread 当前配置或最后持久化的模型与推理强度。网关快照携带子 Thread 元数据及可用的实时设置。字段缺失时显示未知模型或推理档位暂不可用。无用户气泡的轮次收紧顶部间距，保留时间线、耗时和已折叠的工具过程。桌面标签及手机抽屉使用同样的显示规则。
+
+```mermaid
+flowchart LR
+    Native[原生子 Thread 和设置] --> Snapshot[该子 Thread 的快照]
+    Snapshot --> Header[只读详情顶栏]
+    Parent[父 Thread 已回放的时间线] --> Directory[子智能体目录分页结果]
+    Directory --> Rows[已结束总数和行]
+    Id[子 Thread ID] --> Palette[状态面板、目录和标签的头像色]
+```
+
+| 验收 | 设置与操作 | 证据 |
+| --- | --- | --- |
+| SH-SSH-CONFIG | 1480px 与 390px 粘贴 SSH 地址，在添加和编辑中测试正确凭据、失败、MFA 和取消，再改字段重试 | 自动填写用户和端口，显示当前结果。取消关闭试连连接，编辑和测试沿用同一份凭据规则，主机配置仅在保存后变化。 |
+| SH-SSH-HEADER | 桌面侧栏缩至最小，用长主机名打开主机目录，并在两个对话间后退、前进；手机返回任务首页再打开目录 | 桌面切换入口与两个箭头在同一顶栏，主机名可读全称，两个箭头按历史回放。手机任务首页有一个切换入口。 |
+| SH-SSH-OPEN | 从项目侧栏当前主机打开目录，再取消遇到停滞或验证的主机。重试后进入项目，另在深链接查看连接失败后重试 | 旧对话在目录弹窗关闭后仍可读，错误及取消可见，晚到的完成和其他主机事件无法触发导航。仅完成有效连接后进入项目。 |
+| SH-CODEX-CHILD | 从状态栏及目录打开有层级路径的运行中和已卸载子智能体，切换、重开并回看历史 | 两种宽度显示短名称和完整历史。运行中的现有订阅继续接收原生更新。Cold child 用同一远端 Thread 的只读历史，父对话与项目归属保持一致。 |
+| SH-CODEX-CHILD-DETAIL | 读取更早历史后打开含多页已结束记录的目录；在桌面和手机查看型号与父会话不同的子 Thread，并打开缺字段的旧记录 | 页标题合计所有已投影的结束项，翻页保持合计，状态面板、目录和详情标签中同一子 Thread 颜色一致。详情显示子 Thread 的实际字段，旧记录提示字段缺失，两条无用户气泡的轮次之间留白缩小。 |
+
+浏览器验收运行 `node selfhost/tests/ssh-connections-browser.mjs` 和 `node selfhost/tests/status-panel.mjs`。连接测试在临时账号和端口中运行 `node selfhost/tests/ssh-connections-gateway.mjs <Gateway 构建入口>`。已卸载子智能体的原生错误与转录分页由 `node selfhost/tests/history-recovery-gateway.mjs` 覆盖。
+
 ## 2026-11-24 发布验收
 
 ### SSH 会话与逐轮变更

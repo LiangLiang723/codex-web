@@ -11,6 +11,7 @@ import {
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { UpdateStatusButton } from "@/UpdateStatusButton.js";
 import { DesktopTopOverlayActionButton } from "@/DesktopTopOverlayActionButton.js";
+import { WebRemoteControlDeviceHeader } from "@/web-remote-control/WebRemoteControlDeviceHeader.js";
 import { ZCodeStartupLogoBadge } from "@/root/RootStartupLoading.js";
 import {
   createWindowsCaptionControlsStyle,
@@ -87,6 +88,8 @@ export function DesktopTopOverlay({
   const taskBackTitle = intl.formatMessage({ id: "taskNav.back" });
   const taskForwardTitle = intl.formatMessage({ id: "taskNav.forward" });
   const isNewTaskButtonVisible = showNewTaskButton ?? !isSidebarVisible;
+  const showSshWorkspace =
+    isSidebarVisible && !hideTaskNavigationButtons && Boolean(platform.sshWorkspace);
   const macTopOverlayPaddingStyle =
     isMacDesktop && !isMacFullscreen && Number.isFinite(macWindowControlsLeftPaddingPx)
       ? { paddingLeft: `${Math.round(macWindowControlsLeftPaddingPx ?? 96)}px` }
@@ -107,6 +110,7 @@ export function DesktopTopOverlay({
         style={topOverlayWidthStyle}
         className={cn(
           "@container/topoverlayer pointer-events-none absolute h-14 flex left-0 top-0 z-20 w-fit",
+          showSshWorkspace && "max-w-[50%]",
           // 工具组计入各平台顶部留白和 1px 边框，与 Header 中心线对齐。
           usesCustomCaptionArea && "mt-px",
           isWindowsDesktop ? "top-1.5" : isLinuxDesktop && "top-1",
@@ -119,6 +123,7 @@ export function DesktopTopOverlay({
           }}
           className={cn(
             "flex items-center",
+            showSshWorkspace && "min-w-0 flex-1 gap-2 px-2",
             isMacDesktop && "h-14",
             usesCustomCaptionArea && "h-12",
             // Windows/Linux 工具组计入 4px 外沿留白和 1px 边框，较 8px 左边距右移 5px。
@@ -127,6 +132,11 @@ export function DesktopTopOverlay({
               (isMacFullscreen ? (!isSidebarVisible ? "pl-5 pt-1" : "pl-3 pt-1") : "pt-1"),
           )}
         >
+          {showSshWorkspace ? (
+            <div className="pointer-events-auto min-w-0 flex-1 [app-region:no-drag]">
+              <WebRemoteControlDeviceHeader />
+            </div>
+          ) : null}
           <div
             className={cn(
               // 顶部浮层按钮虽然单个按钮打了 no-drag，但外层容器本身仍悬在窗口标题区上方。
