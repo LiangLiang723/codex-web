@@ -1,12 +1,13 @@
 import { useEffect, useState, useRef, useEffectEvent } from "react";
 import type { IServiceAccessor } from "@zcode/services";
 import type { FileEntry } from "@zcode/shared";
-import { FolderIcon, FolderSymlinkIcon, LoaderCircle } from "lucide-react";
+import { ArrowUp, FileIcon, FolderIcon, FolderSymlinkIcon, LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { Input } from "@/components/ui/input.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
 import { cn } from "@/components/lib/utils.js";
+import { getContainingDirectoryPath, isAbsoluteFilePath } from "@/lib/path.js";
 
 export function createDirectoryBrowserReadParams(
   path: string,
@@ -42,12 +43,13 @@ export function createDirectoryBrowserRequestGuard(): {
 }
 
 /**
- * 服务端目录浏览对话框。
+ * 服务端目录浏览器，可确认当前目录或其中的文件。
  * 通过 fileService.readdir 浏览远程/本地服务器的目录结构，
  * 适用于 web 端无法调用系统原生文件选择器的场景。
  */
 export function DirectoryBrowser({
   services,
+  selectionMode,
   onSelect,
   onCancel,
   onPathChange,
@@ -64,7 +66,6 @@ export function DirectoryBrowser({
     fileService: Pick<IServiceAccessor["fileService"], "readdir">;
     systemService: { info(): Promise<{ homedir: string }> };
   };
-  onSelect: (path: string) => void;
   onCancel: () => void;
   onPathChange?: (path: string) => void;
   initialPath?: string;
@@ -75,9 +76,14 @@ export function DirectoryBrowser({
   selectLabel?: string;
   selecting?: boolean;
   formatError?: (error: unknown) => string;
-}) {
+} & (
+  | { selectionMode?: "directory"; onSelect: (path: string) => void }
+  | { selectionMode: "file"; onSelect: (file: FileEntry) => void }
+)) {
+  const selectFiles = selectionMode === "file";
   const [currentPath, setCurrentPath] = useState("");
-  const [inputPath, setInputPath] = useState("");
+  const [inputPath, setInputPath] = useState(initialPath ?? "");
+  const [selectedFile, setSelectedFile] = useState<FileEntry | null>(null);
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -92,18 +98,19 @@ export function DirectoryBrowser({
   // 同一向导收起后会重建浏览器实例；卸载必须撤销旧请求，不能让迟到结果改写恢复后的目录。
   useEffect(() => {
     let disposed = false;
-    const homeRequestId = requestGuardRef.current.begin();
+    const requestGuard = requestGuardRef.current;
+    const homeRequestId = requestGuard.begin();
     if (initialPath) {
       void navigateTo(initialPath);
     } else {
       void services.systemService
         .info()
         .then((info) => {
-          if (!disposed && requestGuardRef.current.isCurrent(homeRequestId))
+          if (!disposed && requestGuard.isCurrent(homeRequestId))
             void navigateTo(info.homedir);
         })
         .catch((err) => {
-          if (disposed || !requestGuardRef.current.isCurrent(homeRequestId)) return;
+          if (disposed || !requestGuard.isCurrent(homeRequestId)) return;
           logger.error("[DirectoryBrowser] 获取系统信息失败:", err);
           setError(
             formatError?.(err) ?? intl.formatMessage({ id: "directoryBrowser.errorSystem" }),
@@ -113,7 +120,7 @@ export function DirectoryBrowser({
     }
     return () => {
       disposed = true;
-      requestGuardRef.current.begin();
+      requestGuard.begin();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -125,8 +132,14 @@ export function DirectoryBrowser({
     requestedPathRef.current = path;
     const requestId = requestGuardRef.current.begin();
     onNavigationStateChange?.(false);
+    setSelectedFile(null);
     setLoading(true);
     setError("");
+    if (selectFiles && !isAbsoluteFilePath(path)) {
+      setError(intl.formatMessage({ id: "directoryBrowser.absolutePathRequired" }));
+      setLoading(false);
+      return;
+    }
     try {
       const result = await services.fileService.readdir(
         createDirectoryBrowserReadParams(path, nextShowHiddenDirectories),
@@ -134,8 +147,7 @@ export function DirectoryBrowser({
       if (!requestGuardRef.current.isCurrent(requestId)) {
         return;
       }
-      const dirs = filterDirectoryBrowserEntries(result);
-      setEntries(dirs);
+      setEntries(selectFiles ? result : filterDirectoryBrowserEntries(result));
       setCurrentPath(path);
       setInputPath(path);
       onPathChange?.(path);
@@ -174,10 +186,9 @@ export function DirectoryBrowser({
     }
   }, [initialPath, navigationRevision]);
 
+  const parentPath = getContainingDirectoryPath(currentPath);
   const handleGoUp = () => {
-    // 提取父目录路径
-    const parent = currentPath.replace(/\/[^/]+\/?$/, "") || "/";
-    navigateTo(parent);
+    if (parentPath) void navigateTo(parentPath);
   };
 
   const handleInputSubmit = (e: React.FormEvent) => {
@@ -196,13 +207,15 @@ export function DirectoryBrowser({
     }
   };
 
-  const handleSelectCurrentPath = () => {
-    const selectedPath = currentPath.trim();
-    if (!selectedPath || loading || selecting) {
-      return;
+  const canSelect =
+    Boolean(selectFiles ? selectedFile : currentPath.trim()) && !loading && !error && !selecting;
+  const handleConfirm = () => {
+    if (!canSelect) return;
+    if (selectionMode === "file") {
+      if (selectedFile) onSelect(selectedFile);
+    } else {
+      onSelect(currentPath.trim());
     }
-
-    onSelect(selectedPath);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -224,7 +237,24 @@ export function DirectoryBrowser({
         ) : null}
 
         {/* 路径输入 */}
-        <form onSubmit={handleInputSubmit} className="flex flex-col gap-2 sm:flex-row">
+        <form
+          onSubmit={handleInputSubmit}
+          className={
+            selectFiles ? "flex flex-wrap items-center gap-2" : "flex flex-col gap-2 sm:flex-row"
+          }
+        >
+          {selectFiles ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-md"
+              aria-label={intl.formatMessage({ id: "directoryBrowser.goUp" })}
+              disabled={!parentPath}
+              onClick={handleGoUp}
+            >
+              <ArrowUp className="size-4" />
+            </Button>
+          ) : null}
           <Input
             type="text"
             aria-label={intl.formatMessage({
@@ -239,7 +269,7 @@ export function DirectoryBrowser({
             className="h-9 min-w-0 flex-1 font-mono placeholder:font-sans text-ui-base max-md:text-mobile-input-safe"
             autoFocus
           />
-          <div className="flex gap-2 sm:shrink-0">
+          <div className={cn("flex gap-2 sm:shrink-0", selectFiles && "w-full sm:w-auto")}>
             <Button
               type="submit"
               variant="secondary"
@@ -280,8 +310,9 @@ export function DirectoryBrowser({
         )}
       >
         {/* 上级目录 */}
-        {currentPath && currentPath !== "/" ? (
+        {!selectFiles && parentPath ? (
           <button
+            type="button"
             onClick={handleGoUp}
             // 滚动容器是纵向 flex 布局，子项默认允许 shrink；
             // 当目录很多触发滚动时，首行“返回上级”会被压缩导致高度变化。
@@ -298,20 +329,33 @@ export function DirectoryBrowser({
           </div>
         ) : entries.length === 0 ? (
           <div className="p-4 text-center text-ui-base text-foreground-subtle">
-            {intl.formatMessage({ id: "directoryBrowser.noSubdirs" })}
+            {intl.formatMessage({
+              id: selectFiles ? "directoryBrowser.empty" : "directoryBrowser.noSubdirs",
+            })}
           </div>
         ) : (
           entries.map((entry) => {
-            const EntryIcon =
-              getDirectoryBrowserEntryIconKind(entry) === "folder-symlink"
+            const isDirectory = entry.type === "directory";
+            const pressed = !isDirectory && selectedFile?.path === entry.path;
+            const EntryIcon = !isDirectory
+              ? FileIcon
+              : getDirectoryBrowserEntryIconKind(entry) === "folder-symlink"
                 ? FolderSymlinkIcon
                 : FolderIcon;
 
             return (
               <button
+                type="button"
                 key={entry.path}
-                onClick={() => navigateTo(entry.path)}
-                className="flex w-full shrink-0 cursor-pointer items-center gap-2 px-3 py-2 text-left text-ui-base transition hover:bg-hover/50"
+                aria-pressed={isDirectory ? undefined : pressed}
+                onClick={() => {
+                  if (isDirectory) void navigateTo(entry.path);
+                  else setSelectedFile(entry);
+                }}
+                className={cn(
+                  "flex w-full shrink-0 cursor-pointer items-center gap-2 px-3 py-2 text-left text-ui-base transition hover:bg-hover/50",
+                  pressed && "bg-selected",
+                )}
               >
                 <EntryIcon className="size-4 shrink-0 text-foreground-subtle" />
                 <span className="truncate">{entry.name}</span>
@@ -347,10 +391,10 @@ export function DirectoryBrowser({
             selecting !== undefined && "grid",
             selecting && "disabled:opacity-100",
           )}
-          disabled={!currentPath.trim() || loading || Boolean(error) || selecting}
+          disabled={!canSelect}
           aria-busy={selecting}
           data-testid="directory-browser-confirm"
-          onClick={handleSelectCurrentPath}
+          onClick={handleConfirm}
         >
           {/* 原因：父层追加加载行会撑高弹窗且脱离点击位置；复用父层状态，在按钮内反馈。
               两种文案共用网格占位，避免加载时按钮变宽；不新增异步状态或计时器。 */}
@@ -358,7 +402,10 @@ export function DirectoryBrowser({
             className={cn("col-start-1 row-start-1", selecting && "invisible")}
             aria-hidden={selecting || undefined}
           >
-            {selectLabel ?? intl.formatMessage({ id: "directoryBrowser.selectDir" })}
+            {selectLabel ??
+              intl.formatMessage({
+                id: selectFiles ? "directoryBrowser.selectFile" : "directoryBrowser.selectDir",
+              })}
           </span>
           {selecting !== undefined ? (
             <span

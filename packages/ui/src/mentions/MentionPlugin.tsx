@@ -83,6 +83,8 @@ export interface ComposerAdditionMenu {
   open: boolean;
   onClose: () => void;
   attachmentAction?: { onSelect: () => void };
+  onSelectGoal?: () => void;
+  onOpenRemoteFilePicker?: () => void;
 }
 
 interface MentionPluginProps {
@@ -96,7 +98,6 @@ interface MentionPluginProps {
   disabled?: boolean;
   additionMenu?: ComposerAdditionMenu;
   appCommands?: readonly AppSlashCommand[];
-  allowGoal?: boolean;
   onWhiteboardMentionSelected?: (boardId: string) => void | Promise<void>;
 }
 
@@ -198,7 +199,6 @@ export function MentionPlugin({
   disabled = false,
   additionMenu,
   appCommands,
-  allowGoal,
   onWhiteboardMentionSelected,
 }: MentionPluginProps & { provider: ZCodeProvider }) {
   const [editor] = useLexicalComposerContext();
@@ -432,19 +432,8 @@ export function MentionPlugin({
     skillsResult.title,
   ]);
 
-  const firstFileId = panelGroups.find(
-    (group) => group.id === "files" && !group.loading && !group.errorText,
-  )?.items[0]?.id;
-  const attachmentAction = additionMenu?.attachmentAction;
+  const { attachmentAction, onSelectGoal, onOpenRemoteFilePicker } = additionMenu ?? {};
   const showAddActions = selfHostedBuild && isOpen && isContextTrigger && !hasActiveQuery;
-  const showGoal =
-    showAddActions &&
-    allowGoal &&
-    !nativeThreadId &&
-    Boolean(attachmentAction) &&
-    editor
-      .getEditorState()
-      .read(() => $getRoot().getTextContent().trim() === (additionOpen ? "" : "@"));
   const addActions = useMemo(() => {
     if (!showAddActions) return [];
     const project = appCommands?.find((command) => command.value === "project");
@@ -464,29 +453,31 @@ export function MentionPlugin({
       ...(project
         ? [{ ...project, id: "add-project", label: project.label ?? "/project", Icon: FolderOpen }]
         : []),
-      ...(showGoal
+      ...(onSelectGoal
         ? [
             {
               id: "add-goal",
               label: intl.formatMessage({ id: "chat.goalBanner.label" }),
               description: intl.formatMessage({ id: "selfhost.composer.goal" }),
               Icon: GoalIcon,
+              run: onSelectGoal,
             },
           ]
         : []),
       ...(plan ? [{ ...plan, id: "add-plan", label: plan.label ?? "/plan", Icon: Lightbulb }] : []),
-      ...(firstFileId
+      ...(onOpenRemoteFilePicker
         ? [
             {
               id: "add-files",
               label: intl.formatMessage({ id: "selfhost.composer.files" }),
               description: "",
               Icon: FileSearch,
+              run: onOpenRemoteFilePicker,
             },
           ]
         : []),
     ];
-  }, [appCommands, attachmentAction, firstFileId, intl, showAddActions, showGoal]);
+  }, [appCommands, attachmentAction, intl, onOpenRemoteFilePicker, onSelectGoal, showAddActions]);
 
   const panelSections = useMemo<MentionPanelSection[]>(
     () => [
@@ -655,43 +646,31 @@ export function MentionPlugin({
     (index: number) => {
       const option = flatItems[index];
       if (!option || option.disabled) return false;
-      if (option.id === "add-files") {
-        const firstFileIndex = flatItems.findIndex(({ id }) => id === firstFileId);
-        if (firstFileIndex < 0) return false;
-        setSelectedIndex(firstFileIndex);
-        return true;
-      }
-
       const action = addActions.find(({ id }) => id === option.id);
-      const item: MentionItem | undefined =
-        option.id === "add-goal"
-          ? {
-              id: "slash:goal",
-              category: "commands",
-              label: "goal",
-              value: "goal",
-              markdown: "/goal",
-              description: option.description,
-            }
-          : panelGroups.flatMap(({ items }) => items).find(({ id }) => id === option.id);
+      const item = panelGroups.flatMap(({ items }) => items).find(({ id }) => id === option.id);
       const whiteboardId =
         item?.category === "whiteboards" && onWhiteboardMentionSelected ? item.value : null;
       const token = activeTokenRef.current;
-      editor.update(() => {
-        if (action?.run || whiteboardId) {
-          if (!additionOpen) $selectMentionToken(token, [])?.removeText();
-          return;
-        }
-        if (!item) return;
-        const selection = additionOpen
-          ? ($getSelection() ?? $getRoot().selectEnd())
-          : $selectMentionToken(token, [item.label, item.value, item.markdown]);
-        if (!$isRangeSelection(selection)) return;
+      const hasAction = Boolean(action?.run);
+      // 先提交 @ 的移除，避免目标前置或弹窗回调读取带旧触发符的草稿。
+      editor.update(
+        () => {
+          if (hasAction || whiteboardId) {
+            if (!additionOpen) $selectMentionToken(token, [])?.removeText();
+            return;
+          }
+          if (!item) return;
+          const selection = additionOpen
+            ? ($getSelection() ?? $getRoot().selectEnd())
+            : $selectMentionToken(token, [item.label, item.value, item.markdown]);
+          if (!$isRangeSelection(selection)) return;
 
-        const trailingWhitespace = $createTextNode(" ");
-        selection.insertNodes([$createPromptMentionNode(item), trailingWhitespace]);
-        trailingWhitespace.selectEnd();
-      });
+          const trailingWhitespace = $createTextNode(" ");
+          selection.insertNodes([$createPromptMentionNode(item), trailingWhitespace]);
+          trailingWhitespace.selectEnd();
+        },
+        { discrete: hasAction },
+      );
 
       dismissPanel();
       // 焦点在回调前恢复。项目和设置等回调会自行接管焦点。
@@ -711,7 +690,6 @@ export function MentionPlugin({
       additionOpen,
       dismissPanel,
       editor,
-      firstFileId,
       flatItems,
       onWhiteboardMentionSelected,
       panelGroups,

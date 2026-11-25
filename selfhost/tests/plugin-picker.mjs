@@ -147,18 +147,17 @@ async function verify(page, origin) {
       });
     }
     if (url.pathname === "/api/selfhost/workspace" && request?.method === "searchWorkspaceFiles") {
-      return route.fulfill({
-        json: {
-          value: [
-            {
-              name: "fixture.md",
-              path: cwd + "/fixture.md",
-              relativePath: "fixture.md",
-              type: "file",
-            },
-          ],
-        },
-      });
+      return route.fulfill({ json: { value: [] } });
+    }
+    if (url.pathname === "/api/selfhost/workspace" && request?.method === "readdir") {
+      assert.equal(request.hostId, hostId);
+      const { path } = request.args[0];
+      const listing = {
+        [cwd]: [{ name: "docs", path: cwd + "/docs", type: "directory" }],
+        [cwd + "/docs"]: [{ name: "fixture.md", path: cwd + "/docs/fixture.md", type: "file" }],
+      };
+      if (Object.hasOwn(listing, path)) return route.fulfill({ json: { value: listing[path] } });
+      return route.fulfill({ status: 404, json: { message: "Fixture directory not found" } });
     }
     if (url.pathname === "/api/selfhost/plugins") {
       assert.equal(request.operation, "catalog");
@@ -392,13 +391,56 @@ async function verify(page, origin) {
     await revealPickerOption(panel, "plugin:review@local");
   };
   await checkContextMenu(add);
-  const remoteFile = add.getByTestId("prompt-suggestion-option-file:" + cwd + "/fixture.md");
-  await activate(await revealPickerOption(add, "add-files"));
-  await remoteFile.and(page.locator('[aria-selected="true"]')).waitFor();
-  await activate(remoteFile);
-  await add.waitFor({ state: "detached" });
+  const fileDialog = page.getByRole("dialog", { name: "选择远程文件" });
+  const confirmFile = fileDialog.getByRole("button", { name: "选择", exact: true });
+  const openRemoteFiles = async (panel) => {
+    await activate(await revealPickerOption(panel, "add-files"));
+    await panel.waitFor({ state: "detached" });
+    await fileDialog.waitFor();
+  };
+  await openRemoteFiles(add);
+  assert(await confirmFile.isDisabled());
+  await activate(fileDialog.getByRole("button", { name: "docs", exact: true }));
+  await fileDialog.getByRole("button", { name: "fixture.md", exact: true }).waitFor();
+  await activate(fileDialog.getByRole("button", { name: "返回上一级" }));
+  await fileDialog.getByRole("button", { name: "docs", exact: true }).waitFor();
+  await activate(fileDialog.getByRole("button", { name: "取消", exact: true }));
+  await fileDialog.waitFor({ state: "detached" });
+  assert.equal(await editor.innerText(), "保留附件草稿");
+
+  await editor.focus();
+  await page.keyboard.press("End");
+  await page.keyboard.insertText(" @");
+  await openRemoteFiles(at);
+  const directoryPath = fileDialog.getByRole("textbox");
+  await directoryPath.fill(cwd + "/docs");
+  await directoryPath.press("Enter");
+  await activate(fileDialog.getByRole("button", { name: "fixture.md", exact: true }));
+  await activate(confirmFile);
+  await fileDialog.waitFor({ state: "detached" });
   assert((await editor.innerText()).includes("保留附件草稿"));
-  await editor.locator('[data-mention-id="file:' + cwd + '/fixture.md"]').waitFor();
+  assert(!(await editor.innerText()).includes("@"));
+  await editor.locator('[data-mention-id="dropped-file:docs/fixture.md"]').waitFor();
+  assert.equal(submissions.length, 0);
+
+  await activate(pickerButton(page));
+  await activate(await revealPickerOption(add, "add-goal"));
+  const goalChip = editor.locator('[data-mention-id="slash:goal"]');
+  await goalChip.waitFor();
+  assert.match(await editor.innerText(), /保留附件草稿/u);
+  await activate(pickerButton(page));
+  await activate(await revealPickerOption(add, "add-goal"));
+  await add.waitFor({ state: "detached" });
+  assert.equal(await goalChip.count(), 1);
+
+  await editor.press("ControlOrMeta+a");
+  await editor.press("Backspace");
+  await page.keyboard.insertText("@");
+  await activate(await revealPickerOption(at, "add-goal"));
+  await goalChip.waitFor();
+  assert(!(await editor.innerText()).includes("@"));
+  assert.equal(submissions.length, 0);
+
   await editor.press("ControlOrMeta+a");
   await editor.press("Backspace");
   await page.keyboard.insertText("保留附件草稿");

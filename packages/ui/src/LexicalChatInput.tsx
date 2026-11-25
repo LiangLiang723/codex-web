@@ -1902,7 +1902,6 @@ export function LexicalChatInput({
             onWhiteboardMentionSelected={onWhiteboardMentionSelected}
             additionMenu={additionMenu}
             appCommands={appSlashCommands}
-            allowGoal={!excludedSlashCommandNames?.includes("goal")}
           />
         ) : null}
         {extraPlugins}

@@ -16,6 +16,9 @@ import { useOptionalRemoteWorkspaceController } from "@/remote/useRemoteWorkspac
 import { useOptionalTabStore } from "@/store/TabStoreProvider.js";
 import { useRemoteConversationAvailable } from "@/v4/RemoteConversationAvailability.js";
 import { getLocalTtftObserver } from "@/v4/telemetry/local-ttft/contract.js";
+import { DirectoryBrowser } from "@/DirectoryBrowser.js";
+import { buildSlashApplyMentionPayload } from "@/lib/slashApplyMentionPayload.js";
+import { parseV4VisibleSlashCommand } from "@/v4/slashCommands.js";
 import { formatConversationWorkDuration } from "@/v4/conversationWorkDuration.js";
 /**
  * v4 会话 composer（composer parity）。
@@ -50,6 +53,7 @@ import { cn } from "@/components/lib/utils.js";
 import { HighspeedComposerBackground } from "@/highspeed/HighspeedActivationVisual.js";
 import { useHighspeedComposerEntrance } from "@/highspeed/useHighspeedComposerEntrance.js";
 import {
+  type FileEntry,
   type HighspeedCardSnapshot,
   type PlanIdentitySnapshot,
   type ZCodeProvider,
@@ -2050,6 +2054,55 @@ function ConversationComposerImpl({
     [scheduleDraftPersist, updateText],
   );
 
+  const canOpenRemoteFilePicker =
+    selfHostedBuild && Boolean(services && workspacePath) && !disabled && !runtimeBlocked;
+  const remoteFilePickerOpen = canOpenRemoteFilePicker && activeConfigPicker === "remote-file";
+  useEffect(() => {
+    if (!canOpenRemoteFilePicker && activeConfigPicker === "remote-file") {
+      handleConfigPickerOpenChange("remote-file", false);
+    }
+  }, [activeConfigPicker, canOpenRemoteFilePicker, handleConfigPickerOpenChange]);
+  const openRemoteFilePicker = useCallback(() => {
+    handleConfigPickerOpenChange("remote-file", true);
+  }, [handleConfigPickerOpenChange]);
+  const closeRemoteFilePicker = useCallback(() => {
+    handleConfigPickerOpenChange("remote-file", false);
+  }, [handleConfigPickerOpenChange]);
+  const handleSelectRemoteFile = (file: FileEntry) => {
+    if (!remoteFilePickerOpen || file.type !== "file") return;
+    const workspacePrefix = workspacePath.replace(/\/+$/, "") + "/";
+    const relativePath = file.path.startsWith(workspacePrefix)
+      ? file.path.slice(workspacePrefix.length)
+      : file.path;
+    closeRemoteFilePicker();
+    appendWorkspaceFileMentionToComposer({
+      inputApiRef,
+      currentMarkdown: inputApiRef.current?.getMarkdown() ?? textRef.current,
+      payload: { ...file, workspacePath, workspaceIdentity, relativePath },
+      workspacePath,
+      workspaceIdentity,
+      onTextChange: updateText,
+    });
+  };
+  const handleSelectGoal = useCallback(() => {
+    const input = inputApiRef.current;
+    if (!input) return;
+    const currentCommand = parseV4VisibleSlashCommand(input.getMarkdown());
+    if (currentCommand && currentCommand.kind !== "compact") return;
+    if (
+      input.prependMentionIfMissing(
+        buildSlashApplyMentionPayload({
+          id: "slash:goal",
+          trigger: "/",
+          label: "goal",
+          value: "goal",
+          description: intl.formatMessage({ id: "selfhost.composer.goal" }),
+        }),
+      )
+    )
+      handleEditorChange(input.getMarkdown());
+  }, [handleEditorChange, intl]);
+
   const handleEditorFocus = useCallback(() => {
     conversationTelemetry?.recordComposerFocus();
     // 程序性聚焦不算「点击输入框」；标记一次性消费，之后的手动 focus 照常上报。
@@ -3142,6 +3195,12 @@ function ConversationComposerImpl({
           showMentionButton
           topContent={topContentNode}
           attachmentAction={runtimeBlocked ? undefined : attachmentAction}
+          onSelectGoal={
+            selfHostedBuild && !runtimeBlocked && !suppressGoalCommands
+              ? handleSelectGoal
+              : undefined
+          }
+          onOpenRemoteFilePicker={canOpenRemoteFilePicker ? openRemoteFilePicker : undefined}
           inputTestId={TID_V4_COMPOSER_INPUT}
           inputApiRef={inputApiRef}
           promptHistory={promptHistory}
@@ -3175,6 +3234,39 @@ function ConversationComposerImpl({
           </p>
         ) : null}
       </div>
+      {canOpenRemoteFilePicker && services ? (
+        <Dialog
+          open={remoteFilePickerOpen}
+          onOpenChange={(open) => {
+            if (!open) closeRemoteFilePicker();
+          }}
+        >
+          <DialogContent
+            aria-describedby={undefined}
+            className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-xl"
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              if (draftScopeRef.current === draftScopeId) inputApiRef.current?.focus();
+            }}
+          >
+            <DialogTitle className="pr-8 text-ui-lg">
+              {intl.formatMessage({ id: "selfhost.composer.filePickerTitle" })}
+            </DialogTitle>
+            {remoteFilePickerOpen ? (
+              <DirectoryBrowser
+                key={configPickerScopeKey}
+                services={services}
+                selectionMode="file"
+                initialPath={workspacePath}
+                onSelect={handleSelectRemoteFile}
+                onCancel={closeRemoteFilePicker}
+                embedded
+                showSelectionActions
+              />
+            ) : null}
+          </DialogContent>
+        </Dialog>
+      ) : null}
       <ImagePreviewDialog
         initialIndex={attachmentPreviewIndex}
         items={composerMediaPreviewItems}
