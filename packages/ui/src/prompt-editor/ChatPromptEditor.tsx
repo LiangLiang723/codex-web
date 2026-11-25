@@ -66,6 +66,8 @@ export function ChatPromptEditor({
   inputLeadingContent,
   leadingActions,
   attachmentAction,
+  onSelectGoal,
+  onOpenRemoteFilePicker,
   betweenCancelAndSubmitAction,
   submitControl,
   inputTestId,
@@ -130,6 +132,8 @@ export function ChatPromptEditor({
     testId?: string;
     menuItemTestId?: string;
   };
+  onSelectGoal?: () => void;
+  onOpenRemoteFilePicker?: () => void;
   /** 行内编辑专用：固定插在取消与主提交之间的第二动作。 */
   betweenCancelAndSubmitAction?: ReactNode;
   submitControl?: ReactNode;
@@ -399,6 +403,8 @@ export function ChatPromptEditor({
                 open: additionMenuOpen,
                 onClose: closeAdditionMenu,
                 attachmentAction,
+                onSelectGoal,
+                onOpenRemoteFilePicker,
               }
             : undefined
         }
