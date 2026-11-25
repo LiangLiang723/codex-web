@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo } from "react";
 import { create } from "zustand";
 import type { ISettingService } from "@zcode/services";
 import { USER_INSTRUCTIONS_MAX_BYTES } from "@zcode/shared";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import {
   TID_SETTINGS_PERSONALIZATION_CANCEL,
   TID_SETTINGS_PERSONALIZATION_EDITOR,
@@ -144,7 +145,7 @@ export function PersonalizationSection({
 }) {
   // Web 远控不发起任何个性化读写，只给本地桌面端指引（同 WorkspaceFileSearchSection
   // 的无 workspace 分层先例：提前返回，不挂服务解析 hook 链）。
-  if (!isDesktop) {
+  if (!isDesktop && !selfHostedBuild) {
     return <LocalOnlyPersonalizationHint />;
   }
   return <DesktopPersonalizationEditor settingService={settingService} />;
@@ -168,6 +169,7 @@ function DesktopPersonalizationEditor({
   const readState = usePersonalizationDraftStore((state) => state.readState);
   const baseline = usePersonalizationDraftStore((state) => state.baseline);
   const draft = usePersonalizationDraftStore((state) => state.draft);
+  const filePath = usePersonalizationDraftStore((state) => state.filePath);
   const saving = usePersonalizationDraftStore((state) => state.saving);
   const beginLoad = usePersonalizationDraftStore((state) => state.beginLoad);
   const markLoadSuccess = usePersonalizationDraftStore((state) => state.markLoadSuccess);
@@ -199,8 +201,12 @@ function DesktopPersonalizationEditor({
     const generation = usePersonalizationDraftStore.getState().generation;
     beginSave(generation);
     try {
-      await settingService.saveUserInstructions(draft);
+      if (selfHostedBuild && filePath)
+        await settingService.saveUserInstructions(draft, { content: baseline, filePath });
+      else await settingService.saveUserInstructions(draft);
       endSaveSuccess(draft, generation);
+      if (selfHostedBuild && usePersonalizationDraftStore.getState().generation === generation)
+        void load();
       toast(intl.formatMessage({ id: "settings.personalization.saved" }));
     } catch (error) {
       // 失败时草稿保留在模块级 store：即使保存中切走分区（组件已卸载），重进仍可重试。
@@ -208,9 +214,23 @@ function DesktopPersonalizationEditor({
       logger.warn("[PersonalizationSection] 保存个性化指令失败", {
         error: error instanceof Error ? error.message : String(error),
       });
-      toast(intl.formatMessage({ id: "settings.personalization.saveFailed" }));
+      toast(
+        selfHostedBuild && error instanceof Error
+          ? error.message
+          : intl.formatMessage({ id: "settings.personalization.saveFailed" }),
+      );
     }
-  }, [beginSave, draft, endSaveFailure, endSaveSuccess, intl, settingService]);
+  }, [
+    baseline,
+    beginSave,
+    draft,
+    endSaveFailure,
+    endSaveSuccess,
+    filePath,
+    intl,
+    load,
+    settingService,
+  ]);
 
   const draftBytes = useMemo(() => countUtf8Bytes(draft), [draft]);
   const overLimit = draftBytes > USER_INSTRUCTIONS_MAX_BYTES;
@@ -221,8 +241,15 @@ function DesktopPersonalizationEditor({
     // 编辑器直接铺在页面背景上（同参照界面）；指令是自然语言，不用等宽字体。
     <div className="space-y-4">
       <p className="text-ui-base text-foreground-subtle">
-        {intl.formatMessage({ id: "settings.personalization.description" })}
+        {intl.formatMessage({
+          id: selfHostedBuild
+            ? "selfhost.settings.instructions"
+            : "settings.personalization.description",
+        })}
       </p>
+      {selfHostedBuild && filePath ? (
+        <p className="break-all text-ui-sm text-foreground-subtle">{filePath}</p>
+      ) : null}
       {readState === "error" ? (
         <div className="space-y-2">
           <p className="text-ui-base text-foreground-subtle">

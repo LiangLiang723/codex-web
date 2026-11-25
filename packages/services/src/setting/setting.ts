@@ -28,7 +28,10 @@ export interface ISettingService {
    */
   getUserInstructions(): Promise<{ content: string; filePath: string }>;
   /** 原子写入用户自定义指令（个性化）文件，按需创建 `~/.zcode` 目录。 */
-  saveUserInstructions(content: string): Promise<{ filePath: string }>;
+  saveUserInstructions(
+    content: string,
+    expected?: { content: string; filePath: string },
+  ): Promise<{ filePath: string }>;
 }
 
 export const ISettingService = createServiceDescriptor<ISettingService>(ServiceChannels.Setting);

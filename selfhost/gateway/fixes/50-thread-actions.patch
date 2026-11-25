@@ -1,0 +1,232 @@
+diff --git a/server/utils/gateway/config/pinned-thread-events.ts b/server/utils/gateway/config/pinned-thread-events.ts
+--- a/server/utils/gateway/config/pinned-thread-events.ts
++++ b/server/utils/gateway/config/pinned-thread-events.ts
+@@ -1,14 +1,15 @@
+ import { gatewayLog } from "../logging";
+ 
+-type PinnedThreadSubscriber = () => void;
++type CatalogDeletion = { hostId: number; threadId: string };
++type UserConfigSubscriber = (deleted?: CatalogDeletion) => void;
+ 
+ class UserConfigEvents {
+-  private readonly subscribersByUser = new Map<number, Set<PinnedThreadSubscriber>>();
++  private readonly subscribersByUser = new Map<number, Set<UserConfigSubscriber>>();
+ 
+-  publish(userId: number) {
++  publish(userId: number, deleted?: CatalogDeletion) {
+     for (const subscriber of this.subscribersByUser.get(userId) ?? []) {
+       try {
+-        subscriber();
++        subscriber(deleted);
+       } catch (error) {
+         gatewayLog("warn", "gateway", "pinned thread subscriber failed", {
+           error: error instanceof Error ? error.message : String(error),
+@@ -17,8 +18,8 @@
+     }
+   }
+ 
+-  subscribe(userId: number, subscriber: PinnedThreadSubscriber) {
+-    const subscribers = this.subscribersByUser.get(userId) ?? new Set<PinnedThreadSubscriber>();
++  subscribe(userId: number, subscriber: UserConfigSubscriber) {
++    const subscribers = this.subscribersByUser.get(userId) ?? new Set<UserConfigSubscriber>();
+     subscribers.add(subscriber);
+     this.subscribersByUser.set(userId, subscribers);
+     return () => {
+diff --git a/server/utils/gateway/realtime/handlers/auth.ts b/server/utils/gateway/realtime/handlers/auth.ts
+--- a/server/utils/gateway/realtime/handlers/auth.ts
++++ b/server/utils/gateway/realtime/handlers/auth.ts
+@@ -48,8 +48,8 @@
+     notificationUnsubscribe: notificationRealtimeEvents.subscribe(user.id, (notification) => {
+       sendRealtimePeerMessage(peer, { type: "notification.published", notification });
+     }),
+-    catalogUnsubscribe: catalogEvents.subscribe(user.id, () => {
+-      sendRealtimePeerMessage(peer, { type: "config.catalog.changed" });
++    catalogUnsubscribe: catalogEvents.subscribe(user.id, (deleted) => {
++      sendRealtimePeerMessage(peer, { type: "config.catalog.changed", ...(deleted ? { deleted } : {}) });
+     }),
+     pinnedThreadsUnsubscribe: pinnedThreadEvents.subscribe(user.id, () => {
+       sendRealtimePeerMessage(peer, { type: "config.pinnedThreads.changed" });
+diff --git a/server/utils/gateway/runtime/active-main-thread-monitor.ts b/server/utils/gateway/runtime/active-main-thread-monitor.ts
+--- a/server/utils/gateway/runtime/active-main-thread-monitor.ts
++++ b/server/utils/gateway/runtime/active-main-thread-monitor.ts
+@@ -10,6 +10,7 @@
+ } from "~~/shared/runtime/app-server";
+ import { recordFromUnknown } from "~~/shared/utils/records";
+ import { threadIdFromNotification } from "../protocol/thread-payload";
++import { discardSelfhostThread } from "../../selfhost-thread-deletion";
+ import { catalogEvents } from "../config/pinned-thread-events";
+ import { currentGatewayUserId } from "../state/memory";
+ import type { AgentRpcClient } from "../agent/provider-adapter";
+@@ -84,6 +85,11 @@
+     const method = recordFromUnknown(message)?.method;
+     const threadId = threadIdFromNotification(message);
+     if (threadId === null) return;
++
++    if (method === "thread/deleted") {
++      discardSelfhostThread(context.host.id, threadId);
++      return;
++    }
+ 
+     if (method === "thread/started") {
+       const thread = startedThread(message);
+diff --git a/server/utils/gateway/state/remote-thread-cache.ts b/server/utils/gateway/state/remote-thread-cache.ts
+--- a/server/utils/gateway/state/remote-thread-cache.ts
++++ b/server/utils/gateway/state/remote-thread-cache.ts
+@@ -41,6 +41,11 @@
+       .map((entry) => ({ ...entry, hostId }));
+   }
+ 
++  delete(hostId: number, threadId: string) {
++    const remoteKey = remoteHosts.key(hostId);
++    if (remoteKey !== null) this.cache.delete(`${remoteKey}:${threadId}`);
++  }
++
+   deleteForRemote(remoteKey: string) {
+     for (const [key, entry] of this.cache) {
+       if (entry.remoteKey === remoteKey) this.cache.delete(key);
+diff --git a/server/utils/gateway/state/thread-snapshots.ts b/server/utils/gateway/state/thread-snapshots.ts
+--- a/server/utils/gateway/state/thread-snapshots.ts
++++ b/server/utils/gateway/state/thread-snapshots.ts
+@@ -22,6 +22,10 @@
+     snapshots.set(hostId, threadId, snapshot);
+   },
+ 
++  delete(hostId: number, threadId: string) {
++    snapshots.delete(hostId, threadId);
++  },
++
+   deleteForRemote(remoteKey: string) {
+     snapshots.deleteForRemote(remoteKey);
+   },
+diff --git a/server/utils/gateway/state/gateway-events.ts b/server/utils/gateway/state/gateway-events.ts
+--- a/server/utils/gateway/state/gateway-events.ts
++++ b/server/utils/gateway/state/gateway-events.ts
+@@ -25,6 +25,10 @@
+ const replay = new RemoteThreadCache<ThreadReplay>(SERVER_THREAD_CACHE_IDLE_MS);
+ 
+ export const gatewayEventStore = {
++  delete(hostId: number, threadId: string) {
++    replay.delete(hostId, threadId);
++  },
++
+   deleteForRemote(remoteKey: string) {
+     replay.deleteForRemote(remoteKey);
+   },
+diff --git a/server/utils/gateway/storage/database.ts b/server/utils/gateway/storage/database.ts
+--- a/server/utils/gateway/storage/database.ts
++++ b/server/utils/gateway/storage/database.ts
+@@ -78,6 +78,14 @@
+       is_active INTEGER NOT NULL DEFAULT 1,
+       created_at TEXT NOT NULL DEFAULT (datetime('now')),
+       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
++    );
++
++    CREATE TABLE IF NOT EXISTS zcode_thread_unread (
++      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
++      host_key TEXT NOT NULL,
++      thread_id TEXT NOT NULL,
++      unread_at INTEGER NOT NULL,
++      PRIMARY KEY(user_id, host_key, thread_id)
+     );
+ 
+     CREATE TABLE IF NOT EXISTS sessions (
+diff --git a/shared/runtime/realtime/server-message-schema.ts b/shared/runtime/realtime/server-message-schema.ts
+--- a/shared/runtime/realtime/server-message-schema.ts
++++ b/shared/runtime/realtime/server-message-schema.ts
+@@ -475,7 +475,10 @@
+     z
+       .object({ type: z.literal("notification.published"), notification: notificationSchema })
+       .strict(),
+-    z.object({ type: z.literal("config.catalog.changed") }).strict(),
++    z.object({
++      type: z.literal("config.catalog.changed"),
++      deleted: z.object({ hostId: z.number(), threadId: z.string() }).strict().optional(),
++    }).strict(),
+     z.object({ type: z.literal("config.pinnedThreads.changed") }).strict(),
+     z
+       .object({
+diff --git a/shared/types/realtime.ts b/shared/types/realtime.ts
+--- a/shared/types/realtime.ts
++++ b/shared/types/realtime.ts
+@@ -429,6 +429,7 @@
+     }
+   | {
+       type: "config.catalog.changed";
++      deleted?: { hostId: number; threadId: string };
+     }
+   | {
+       type: "thread.runtime.snapshot";
+diff --git a/server/utils/gateway/storage/thread-index.ts b/server/utils/gateway/storage/thread-index.ts
+--- a/server/utils/gateway/storage/thread-index.ts
++++ b/server/utils/gateway/storage/thread-index.ts
+@@ -28,6 +28,11 @@
+     }));
+ }
+ 
++export function deleteThreadMetadata(userId: number, hostId: number, threadId: string) {
++  gatewayDatabase().prepare("DELETE FROM thread_index WHERE user_id=? AND host_id=? AND thread_id=?")
++    .run(userId, hostId, threadId);
++}
++
+ export function persistThreadMetadata(userId: number | null, meta: ThreadMetadataRecord) {
+   if (userId === null) return;
+   gatewayDatabase()
+diff --git a/server/utils/gateway/state/thread-metadata.ts b/server/utils/gateway/state/thread-metadata.ts
+--- a/server/utils/gateway/state/thread-metadata.ts
++++ b/server/utils/gateway/state/thread-metadata.ts
+@@ -1,4 +1,4 @@
+-import { persistThreadMetadata } from "../storage/thread-index";
++import { deleteThreadMetadata, persistThreadMetadata } from "../storage/thread-index";
+ import { currentGatewayMemoryState, currentGatewayUserId, toTimestamp } from "./memory";
+ import { parentThreadIdFromMetadata, subAgentThreadStore } from "./sub-agent-threads";
+ import type { AppServerThread } from "~~/shared/types";
+@@ -8,6 +8,15 @@
+     currentGatewayMemoryState().threadMetadata = currentGatewayMemoryState().threadMetadata.filter(
+       (thread) => hostIds.has(thread.hostId),
+     );
++  },
++
++  delete(hostId: number, threadId: string) {
++    const userId = currentGatewayUserId();
++    if (userId === null) return;
++    deleteThreadMetadata(userId, hostId, threadId);
++    const state = currentGatewayMemoryState();
++    state.threadMetadata = state.threadMetadata.filter((thread) => thread.hostId !== hostId || thread.threadId !== threadId);
++    state.subAgentThreads = state.subAgentThreads.filter((thread) => thread.hostId !== hostId || thread.threadId !== threadId);
+   },
+ 
+   deleteForHost(hostId: number) {
+diff --git a/server/utils/gateway/protocol/gateway-thread.ts b/server/utils/gateway/protocol/gateway-thread.ts
+--- a/server/utils/gateway/protocol/gateway-thread.ts
++++ b/server/utils/gateway/protocol/gateway-thread.ts
+@@ -14,6 +14,6 @@
+     ...thread,
+     hostId,
+     pinned: pinned !== undefined,
+-    title: pinned?.title ?? thread.name,
++    title: thread.name ?? pinned?.title ?? null,
+   };
+ }
+diff --git a/server/api/threads/index.get.ts b/server/api/threads/index.get.ts
+--- a/server/api/threads/index.get.ts
++++ b/server/api/threads/index.get.ts
+@@ -18,6 +18,7 @@
+ import { readSelfhostThreadSummary } from "../../utils/selfhost-thread-summary";
+ import { trimmedOrNull } from "~~/shared/utils/strings";
+ import { gatewayThreadFromAppServer } from "../../utils/gateway/protocol/gateway-thread";
++import { unreadThreadMarkers } from "../../utils/selfhost-thread-organization";
+ 
+ export default defineGatewayEventHandler(async (event) => {
+   const query = await getValidatedQuery(event, (body) => threadListSchema.parse(body));
+@@ -79,9 +80,10 @@
+   );
+   // Directory groups describe Codex conversations, including history from a removed cwd.
+   // Listing them needs no SFTP existence check; actual file operations report their own errors.
++  const unread = unreadThreadMarkers(host, gatewayThreads.map((thread) => thread.id));
+   return {
+     ...page,
+-    data: gatewayThreads,
++    data: gatewayThreads.map((thread) => ({ ...thread, unreadAt: unread.get(thread.id) })),
+     projects,
+   };
+ });

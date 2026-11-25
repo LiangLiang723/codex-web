@@ -1,4 +1,5 @@
 /* oxlint-disable eslint(max-lines) -- settings helper 聚合应用常规、Agent 行为与自动归档设置。 */
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import type {
   AppToolSearchMode,
   IntegratedTerminalShellOption,
@@ -420,23 +421,25 @@ export function GeneralSectionContent({
             </Select>
           }
         />
-        {hasServices ? <ProactiveSuggestionsSetting /> : null}
+        {hasServices && !selfHostedBuild ? <ProactiveSuggestionsSetting /> : null}
       </SettingsGroupCard>
 
       <SettingsGroupCard>
-        <SettingsRow
-          searchId="settings.terminalProfile"
-          label={intl.formatMessage({ id: "settings.terminalProfile" })}
-          description={intl.formatMessage({ id: "settings.terminalProfileDescription" })}
-          control={
-            <Switch
-              checked={terminalInheritSystemProfile}
-              onCheckedChange={(checked) => {
-                void onTerminalInheritSystemProfileChange(checked);
-              }}
-            />
-          }
-        />
+        {!selfHostedBuild ? (
+          <SettingsRow
+            searchId="settings.terminalProfile"
+            label={intl.formatMessage({ id: "settings.terminalProfile" })}
+            description={intl.formatMessage({ id: "settings.terminalProfileDescription" })}
+            control={
+              <Switch
+                checked={terminalInheritSystemProfile}
+                onCheckedChange={(checked) => {
+                  void onTerminalInheritSystemProfileChange(checked);
+                }}
+              />
+            }
+          />
+        ) : null}
         <SettingsRow
           searchId="settings.terminalFontFamily"
           label={intl.formatMessage({ id: "settings.terminalFontFamily" })}
@@ -470,7 +473,7 @@ export function GeneralSectionContent({
             />
           }
         />
-        {showIntegratedTerminalShell ? (
+        {!selfHostedBuild && showIntegratedTerminalShell ? (
           <SettingsRow
             searchId="settings.integratedTerminalShell"
             label={intl.formatMessage({ id: "settings.integratedTerminalShell" })}
@@ -503,113 +506,115 @@ export function GeneralSectionContent({
         ) : null}
       </SettingsGroupCard>
 
-      <SettingsGroupCard>
-        <SettingsRow
-          searchId="settings.httpProxy"
-          label={intl.formatMessage({ id: "settings.httpProxy" })}
-          description={intl.formatMessage({ id: "settings.httpProxyDescription" })}
-          control={
-            <Button
-              type="button"
-              size="lg"
-              disabled={!isHttpProxyDirty}
-              onClick={() => void handleHttpProxySave()}
-            >
-              {intl.formatMessage({ id: "settings.dataBaseDirSave" })}
-            </Button>
-          }
-          detail={
-            <Input
-              size="lg"
-              value={localHttpProxy}
-              placeholder={intl.formatMessage({
-                id: "settings.httpProxyPlaceholder",
-              })}
-              onChange={(event) => {
-                setLocalHttpProxy(event.currentTarget.value);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && isHttpProxyDirty) {
-                  void handleHttpProxySave();
-                }
-              }}
-              className="max-w-[520px] font-mono"
-            />
-          }
-        />
-        {/* No Proxy 与 HTTP 代理共同决定同一出口策略，必须贴在代理地址下面。*/}
-        <SettingsRow
-          searchId="settings.httpProxyNoProxy"
-          label={intl.formatMessage({ id: "settings.httpProxyNoProxy" })}
-          description={intl.formatMessage({
-            id: "settings.httpProxyNoProxyDescription",
-          })}
-          control={
-            <Button
-              type="button"
-              size="lg"
-              disabled={!isHttpProxyNoProxyDirty}
-              onClick={() => void handleHttpProxyNoProxySave()}
-            >
-              {intl.formatMessage({ id: "settings.dataBaseDirSave" })}
-            </Button>
-          }
-          detail={
-            <Input
-              size="lg"
-              value={localHttpProxyNoProxy}
-              placeholder={intl.formatMessage({
-                id: "settings.httpProxyNoProxyPlaceholder",
-              })}
-              onChange={(event) => {
-                setLocalHttpProxyNoProxy(event.currentTarget.value);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && isHttpProxyNoProxyDirty) {
-                  void handleHttpProxyNoProxySave();
-                }
-              }}
-              className="max-w-[520px] font-mono"
-            />
-          }
-        />
-        {/* 自定义 CA 属于 HTTP 代理的同一网络出口策略，必须跟代理输入放在同一卡片里。*/}
-        <SettingsRow
-          searchId="settings.httpProxyCaCertPath"
-          label={intl.formatMessage({ id: "settings.httpProxyCaCertPath" })}
-          description={intl.formatMessage({
-            id: "settings.httpProxyCaCertPathDescription",
-          })}
-          control={
-            <Button
-              type="button"
-              size="lg"
-              disabled={!isHttpProxyCaCertPathDirty}
-              onClick={() => void handleHttpProxyCaCertPathSave()}
-            >
-              {intl.formatMessage({ id: "settings.dataBaseDirSave" })}
-            </Button>
-          }
-          detail={
-            <Input
-              size="lg"
-              value={localHttpProxyCaCertPath}
-              placeholder={intl.formatMessage({
-                id: "settings.httpProxyCaCertPathPlaceholder",
-              })}
-              onChange={(event) => {
-                setLocalHttpProxyCaCertPath(event.currentTarget.value);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && isHttpProxyCaCertPathDirty) {
-                  void handleHttpProxyCaCertPathSave();
-                }
-              }}
-              className="max-w-[520px] font-mono"
-            />
-          }
-        />
-      </SettingsGroupCard>
+      {!selfHostedBuild ? (
+        <SettingsGroupCard>
+          <SettingsRow
+            searchId="settings.httpProxy"
+            label={intl.formatMessage({ id: "settings.httpProxy" })}
+            description={intl.formatMessage({ id: "settings.httpProxyDescription" })}
+            control={
+              <Button
+                type="button"
+                size="lg"
+                disabled={!isHttpProxyDirty}
+                onClick={() => void handleHttpProxySave()}
+              >
+                {intl.formatMessage({ id: "settings.dataBaseDirSave" })}
+              </Button>
+            }
+            detail={
+              <Input
+                size="lg"
+                value={localHttpProxy}
+                placeholder={intl.formatMessage({
+                  id: "settings.httpProxyPlaceholder",
+                })}
+                onChange={(event) => {
+                  setLocalHttpProxy(event.currentTarget.value);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && isHttpProxyDirty) {
+                    void handleHttpProxySave();
+                  }
+                }}
+                className="max-w-[520px] font-mono"
+              />
+            }
+          />
+          {/* No Proxy 与 HTTP 代理共同决定同一出口策略，必须贴在代理地址下面。*/}
+          <SettingsRow
+            searchId="settings.httpProxyNoProxy"
+            label={intl.formatMessage({ id: "settings.httpProxyNoProxy" })}
+            description={intl.formatMessage({
+              id: "settings.httpProxyNoProxyDescription",
+            })}
+            control={
+              <Button
+                type="button"
+                size="lg"
+                disabled={!isHttpProxyNoProxyDirty}
+                onClick={() => void handleHttpProxyNoProxySave()}
+              >
+                {intl.formatMessage({ id: "settings.dataBaseDirSave" })}
+              </Button>
+            }
+            detail={
+              <Input
+                size="lg"
+                value={localHttpProxyNoProxy}
+                placeholder={intl.formatMessage({
+                  id: "settings.httpProxyNoProxyPlaceholder",
+                })}
+                onChange={(event) => {
+                  setLocalHttpProxyNoProxy(event.currentTarget.value);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && isHttpProxyNoProxyDirty) {
+                    void handleHttpProxyNoProxySave();
+                  }
+                }}
+                className="max-w-[520px] font-mono"
+              />
+            }
+          />
+          {/* 自定义 CA 属于 HTTP 代理的同一网络出口策略，必须跟代理输入放在同一卡片里。*/}
+          <SettingsRow
+            searchId="settings.httpProxyCaCertPath"
+            label={intl.formatMessage({ id: "settings.httpProxyCaCertPath" })}
+            description={intl.formatMessage({
+              id: "settings.httpProxyCaCertPathDescription",
+            })}
+            control={
+              <Button
+                type="button"
+                size="lg"
+                disabled={!isHttpProxyCaCertPathDirty}
+                onClick={() => void handleHttpProxyCaCertPathSave()}
+              >
+                {intl.formatMessage({ id: "settings.dataBaseDirSave" })}
+              </Button>
+            }
+            detail={
+              <Input
+                size="lg"
+                value={localHttpProxyCaCertPath}
+                placeholder={intl.formatMessage({
+                  id: "settings.httpProxyCaCertPathPlaceholder",
+                })}
+                onChange={(event) => {
+                  setLocalHttpProxyCaCertPath(event.currentTarget.value);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && isHttpProxyCaCertPathDirty) {
+                    void handleHttpProxyCaCertPathSave();
+                  }
+                }}
+                className="max-w-[520px] font-mono"
+              />
+            }
+          />
+        </SettingsGroupCard>
+      ) : null}
 
       <SettingsGroupCard>
         {isDesktop ? (
@@ -761,38 +766,42 @@ export function GeneralSectionContent({
         ) : null}
       </SettingsGroupCard>
 
-      <SettingsGroupCard>
-        <SettingsRow
-          searchId="settings.dataBaseDir"
-          label={intl.formatMessage({ id: "settings.dataBaseDir" })}
-          description={intl.formatMessage({
-            id: "settings.dataBaseDirDescription",
-          })}
-          control={
-            <DataBaseDirControl
-              dataBaseDir={dataBaseDir}
-              defaultHomeDir={defaultHomeDir}
-              onDataBaseDirChange={onDataBaseDirChange}
-              onSelectDataBaseDir={onSelectDataBaseDir}
+      {!selfHostedBuild ? (
+        <>
+          <SettingsGroupCard>
+            <SettingsRow
+              searchId="settings.dataBaseDir"
+              label={intl.formatMessage({ id: "settings.dataBaseDir" })}
+              description={intl.formatMessage({
+                id: "settings.dataBaseDirDescription",
+              })}
+              control={
+                <DataBaseDirControl
+                  dataBaseDir={dataBaseDir}
+                  defaultHomeDir={defaultHomeDir}
+                  onDataBaseDirChange={onDataBaseDirChange}
+                  onSelectDataBaseDir={onSelectDataBaseDir}
+                />
+              }
             />
-          }
-        />
-      </SettingsGroupCard>
+          </SettingsGroupCard>
 
-      <SettingsGroupCard>
-        <SettingsRow
-          searchId="settings.onboarding"
-          label={intl.formatMessage({ id: "settings.onboarding" })}
-          description={intl.formatMessage({
-            id: "settings.onboardingDescription",
-          })}
-          control={
-            <Button type="button" size="lg" variant="outline" onClick={onOpenOnboardingDialog}>
-              {intl.formatMessage({ id: "settings.onboardingOpen" })}
-            </Button>
-          }
-        />
-      </SettingsGroupCard>
+          <SettingsGroupCard>
+            <SettingsRow
+              searchId="settings.onboarding"
+              label={intl.formatMessage({ id: "settings.onboarding" })}
+              description={intl.formatMessage({
+                id: "settings.onboardingDescription",
+              })}
+              control={
+                <Button type="button" size="lg" variant="outline" onClick={onOpenOnboardingDialog}>
+                  {intl.formatMessage({ id: "settings.onboardingOpen" })}
+                </Button>
+              }
+            />
+          </SettingsGroupCard>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -913,167 +922,173 @@ export function AgentBehaviorSectionContent({
 
   return (
     <div className="space-y-4">
-      <SettingsGroupCard>
-        <SettingsRow
-          searchId="settings.toolSearch"
-          label={intl.formatMessage({ id: "settings.toolSearch" })}
-          description={intl.formatMessage({ id: "settings.toolSearchDescription" })}
-          detail={
-            <p className="text-ui-sm leading-5 text-foreground-subtle">
-              {intl.formatMessage({ id: "settings.toolSearchExperimentalNotice" })}
-            </p>
-          }
-          control={
-            <Select
-              value={toolSearchMode}
-              onValueChange={(value) => {
-                void onToolSearchModeChange(appToolSearchModeSchema.parse(value));
-              }}
-            >
-              <SelectTrigger
-                size="lg"
-                className="w-[260px] min-w-0 justify-between"
-                data-testid={TID_SETTINGS_TOOL_SEARCH_SELECT}
+      {!selfHostedBuild ? (
+        <SettingsGroupCard>
+          <SettingsRow
+            searchId="settings.toolSearch"
+            label={intl.formatMessage({ id: "settings.toolSearch" })}
+            description={intl.formatMessage({ id: "settings.toolSearchDescription" })}
+            detail={
+              <p className="text-ui-sm leading-5 text-foreground-subtle">
+                {intl.formatMessage({ id: "settings.toolSearchExperimentalNotice" })}
+              </p>
+            }
+            control={
+              <Select
+                value={toolSearchMode}
+                onValueChange={(value) => {
+                  void onToolSearchModeChange(appToolSearchModeSchema.parse(value));
+                }}
               >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {appToolSearchModeSchema.options.map((mode) => (
-                  <SelectItem
-                    key={mode}
-                    value={mode}
-                    data-testid={testId(TID_SETTINGS_TOOL_SEARCH_OPTION, mode)}
-                  >
-                    {intl.formatMessage({ id: `settings.toolSearch.${mode}` })}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          }
-        />
-        <SettingsRow
-          searchId="settings.nativeSearchEnhancements"
-          label={intl.formatMessage({
-            id: "settings.nativeSearchEnhancements",
-          })}
-          description={intl.formatMessage({
-            id: "settings.nativeSearchEnhancementsDescription",
-          })}
-          control={
-            <Switch
-              aria-label={intl.formatMessage({
-                id: "settings.nativeSearchEnhancements",
-              })}
-              checked={nativeSearchEnhancementsEnabled}
-              data-testid={TID_SETTINGS_NATIVE_SEARCH_SWITCH}
-              onCheckedChange={(checked) => {
-                void onNativeSearchEnhancementsEnabledChange(checked);
-              }}
-            />
-          }
-        />
-        <SettingsRow
-          searchId="settings.totalTokensReminder"
-          label={intl.formatMessage({ id: "settings.totalTokensReminder" })}
-          description={intl.formatMessage({ id: "settings.totalTokensReminderDescription" })}
-          control={
-            <Switch
-              aria-label={intl.formatMessage({ id: "settings.totalTokensReminder" })}
-              checked={totalTokensReminderEnabled}
-              data-testid={TID_SETTINGS_TOTAL_TOKENS_REMINDER_SWITCH}
-              onCheckedChange={(checked) => {
-                void onTotalTokensReminderEnabledChange(checked);
-              }}
-            />
-          }
-        />
-        <SettingsRow
-          searchId="settings.agentAlwaysBackground"
-          label={intl.formatMessage({ id: "settings.agentAlwaysBackground" })}
-          description={intl.formatMessage({ id: "settings.agentAlwaysBackgroundDescription" })}
-          control={
-            <Switch
-              aria-label={intl.formatMessage({ id: "settings.agentAlwaysBackground" })}
-              checked={agentAlwaysBackgroundEnabled}
-              data-testid={TID_SETTINGS_AGENT_ALWAYS_BACKGROUND_SWITCH}
-              onCheckedChange={(checked) => {
-                void onAgentAlwaysBackgroundEnabledChange(checked);
-              }}
-            />
-          }
-        />
-      </SettingsGroupCard>
+                <SelectTrigger
+                  size="lg"
+                  className="w-[260px] min-w-0 justify-between"
+                  data-testid={TID_SETTINGS_TOOL_SEARCH_SELECT}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {appToolSearchModeSchema.options.map((mode) => (
+                    <SelectItem
+                      key={mode}
+                      value={mode}
+                      data-testid={testId(TID_SETTINGS_TOOL_SEARCH_OPTION, mode)}
+                    >
+                      {intl.formatMessage({ id: `settings.toolSearch.${mode}` })}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
+          <SettingsRow
+            searchId="settings.nativeSearchEnhancements"
+            label={intl.formatMessage({
+              id: "settings.nativeSearchEnhancements",
+            })}
+            description={intl.formatMessage({
+              id: "settings.nativeSearchEnhancementsDescription",
+            })}
+            control={
+              <Switch
+                aria-label={intl.formatMessage({
+                  id: "settings.nativeSearchEnhancements",
+                })}
+                checked={nativeSearchEnhancementsEnabled}
+                data-testid={TID_SETTINGS_NATIVE_SEARCH_SWITCH}
+                onCheckedChange={(checked) => {
+                  void onNativeSearchEnhancementsEnabledChange(checked);
+                }}
+              />
+            }
+          />
+          <SettingsRow
+            searchId="settings.totalTokensReminder"
+            label={intl.formatMessage({ id: "settings.totalTokensReminder" })}
+            description={intl.formatMessage({ id: "settings.totalTokensReminderDescription" })}
+            control={
+              <Switch
+                aria-label={intl.formatMessage({ id: "settings.totalTokensReminder" })}
+                checked={totalTokensReminderEnabled}
+                data-testid={TID_SETTINGS_TOTAL_TOKENS_REMINDER_SWITCH}
+                onCheckedChange={(checked) => {
+                  void onTotalTokensReminderEnabledChange(checked);
+                }}
+              />
+            }
+          />
+          <SettingsRow
+            searchId="settings.agentAlwaysBackground"
+            label={intl.formatMessage({ id: "settings.agentAlwaysBackground" })}
+            description={intl.formatMessage({ id: "settings.agentAlwaysBackgroundDescription" })}
+            control={
+              <Switch
+                aria-label={intl.formatMessage({ id: "settings.agentAlwaysBackground" })}
+                checked={agentAlwaysBackgroundEnabled}
+                data-testid={TID_SETTINGS_AGENT_ALWAYS_BACKGROUND_SWITCH}
+                onCheckedChange={(checked) => {
+                  void onAgentAlwaysBackgroundEnabledChange(checked);
+                }}
+              />
+            }
+          />
+        </SettingsGroupCard>
+      ) : null}
 
       <SettingsGroupCard>
-        <ReplyLanguageSetting value={replyLanguage} />
-        <SettingsRow
-          searchId="settings.zcodeInteractionBehavior"
-          label={intl.formatMessage({ id: "settings.zcodeInteractionBehavior" })}
-          description={intl.formatMessage({
-            id: "settings.zcodeInteractionBehaviorDescription",
-          })}
-          control={
-            <Select
-              value={zcodeInteractionBehavior}
-              onValueChange={(value) => {
-                void onZCodeInteractionBehaviorChange(value as ZCodeInteractionBehavior);
-              }}
-            >
-              <SelectTrigger size="lg" className="w-[260px] min-w-0 justify-between">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ZCODE_INTERACTION_BEHAVIOR_OPTIONS.map((behavior) => (
-                  <SelectItem key={behavior} value={behavior}>
-                    {intl.formatMessage({
-                      id: `settings.zcodeInteractionBehavior.option.${behavior}`,
-                    })}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          }
-        />
-        <SettingsRow
-          searchId="settings.askUserQuestionAutoResolution"
-          label={intl.formatMessage({
-            id: "settings.askUserQuestionAutoResolution",
-          })}
-          description={intl.formatMessage({
-            id: "settings.askUserQuestionAutoResolutionDescription",
-          })}
-          control={
-            <Switch
-              aria-label={intl.formatMessage({
+        {!selfHostedBuild ? (
+          <>
+            <ReplyLanguageSetting value={replyLanguage} />
+            <SettingsRow
+              searchId="settings.zcodeInteractionBehavior"
+              label={intl.formatMessage({ id: "settings.zcodeInteractionBehavior" })}
+              description={intl.formatMessage({
+                id: "settings.zcodeInteractionBehaviorDescription",
+              })}
+              control={
+                <Select
+                  value={zcodeInteractionBehavior}
+                  onValueChange={(value) => {
+                    void onZCodeInteractionBehaviorChange(value as ZCodeInteractionBehavior);
+                  }}
+                >
+                  <SelectTrigger size="lg" className="w-[260px] min-w-0 justify-between">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ZCODE_INTERACTION_BEHAVIOR_OPTIONS.map((behavior) => (
+                      <SelectItem key={behavior} value={behavior}>
+                        {intl.formatMessage({
+                          id: `settings.zcodeInteractionBehavior.option.${behavior}`,
+                        })}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              }
+            />
+            <SettingsRow
+              searchId="settings.askUserQuestionAutoResolution"
+              label={intl.formatMessage({
                 id: "settings.askUserQuestionAutoResolution",
               })}
-              checked={askUserQuestionAutoResolutionEnabled}
-              data-testid={TID_SETTINGS_ASK_USER_QUESTION_AUTO_RESOLUTION_SWITCH}
-              onCheckedChange={(checked) => {
-                void onAskUserQuestionAutoResolutionEnabledChange(checked);
-              }}
+              description={intl.formatMessage({
+                id: "settings.askUserQuestionAutoResolutionDescription",
+              })}
+              control={
+                <Switch
+                  aria-label={intl.formatMessage({
+                    id: "settings.askUserQuestionAutoResolution",
+                  })}
+                  checked={askUserQuestionAutoResolutionEnabled}
+                  data-testid={TID_SETTINGS_ASK_USER_QUESTION_AUTO_RESOLUTION_SWITCH}
+                  onCheckedChange={(checked) => {
+                    void onAskUserQuestionAutoResolutionEnabledChange(checked);
+                  }}
+                />
+              }
             />
-          }
-        />
-        {/* docs/dynamic-workflow/launch.md「The user's choice」：服务端未提供时整行不渲染。 */}
-        {hasServices ? <PluginAutoRecommendationSetting /> : null}
-        {hasServices ? <DynamicWorkflowModeSetting /> : null}
-        <SettingsRow
-          searchId="settings.modelIoFullRetention"
-          label={intl.formatMessage({ id: "settings.modelIoFullRetention" })}
-          description={intl.formatMessage({
-            id: "settings.modelIoFullRetentionDescription",
-          })}
-          control={
-            <Switch
-              aria-label={intl.formatMessage({ id: "settings.modelIoFullRetention" })}
-              checked={modelIoFullRetentionEnabled}
-              onCheckedChange={(checked) => {
-                void onModelIoFullRetentionEnabledChange(checked);
-              }}
+            {/* docs/dynamic-workflow/launch.md「The user's choice」：服务端未提供时整行不渲染。 */}
+            {hasServices ? <PluginAutoRecommendationSetting /> : null}
+            {hasServices ? <DynamicWorkflowModeSetting /> : null}
+            <SettingsRow
+              searchId="settings.modelIoFullRetention"
+              label={intl.formatMessage({ id: "settings.modelIoFullRetention" })}
+              description={intl.formatMessage({
+                id: "settings.modelIoFullRetentionDescription",
+              })}
+              control={
+                <Switch
+                  aria-label={intl.formatMessage({ id: "settings.modelIoFullRetention" })}
+                  checked={modelIoFullRetentionEnabled}
+                  onCheckedChange={(checked) => {
+                    void onModelIoFullRetentionEnabledChange(checked);
+                  }}
+                />
+              }
             />
-          }
-        />
+          </>
+        ) : null}
         <SettingsRow
           searchId="settings.messageStreamShowReasoning"
           label={intl.formatMessage({ id: "settings.messageStreamShowReasoning" })}

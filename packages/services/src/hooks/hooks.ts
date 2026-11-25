@@ -4,6 +4,11 @@ import { ServiceChannels } from "@zcode/shared";
 import { createServiceDescriptor } from "../descriptors.js";
 
 export interface IHooksService {
+  /** Codex App Server owns these declarations and their effective enabled state. */
+  listNativeHooks?(params: { workspacePath: string }): Promise<{
+    hooks: { key: string; eventName: string; sourcePath: string; enabled: boolean }[];
+    diagnostics: string[];
+  }>;
   /**
    * 加载 workspace 的 hooks 配置
    */

@@ -1,5 +1,6 @@
 import { projects } from "./projects.js";
 import { workflows } from "./workflows.js";
+import { userInstructions } from "./user-instructions.js";
 import { turnFileRewind } from "./turn-file-rewind.js";
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
@@ -19,6 +20,7 @@ const services = new Map<string, object>([
   ["file", createFileService()],
   ["git", createGitService()],
   ["workflows", workflows],
+  ["user-instructions", userInstructions],
   ["projects", projects],
   ["turn-file-rewind", turnFileRewind],
   [

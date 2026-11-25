@@ -8,6 +8,7 @@ import { remoteHostLabel } from "@/project-sidebar/RemoteHostSection.js";
 import type { ReactNode } from "react";
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button.js";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -265,6 +266,7 @@ export function ProjectComposerMenu({
       (hostId ? project.hostId === hostId : !availability.get(projectKey(project))?.entryId),
   );
   const canEditProject =
+    !selfHostedBuild &&
     showEditProject &&
     currentProject &&
     !currentProject.legacySingleRoot &&

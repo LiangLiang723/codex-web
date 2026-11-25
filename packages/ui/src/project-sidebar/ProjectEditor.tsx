@@ -45,6 +45,7 @@ import { RemoteProjectList } from "@/project-sidebar/RemoteProjectList.js";
 import type { IRemoteProjectService } from "@/project-sidebar/contract.js";
 import { logger } from "@/logger.js";
 import { remoteHostLabel } from "@/project-sidebar/RemoteHostSection.js";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import {
   resolveRemoteConnectionPresentation,
   type RemoteConnectionStatus,
@@ -140,6 +141,7 @@ export function ProjectEditor({
   const hostId =
     project?.hostId ?? fixedFolder?.hostId ?? host?.id ?? (devices ? selectedDeviceId : undefined);
   const remote = Boolean(hostId && hostId !== "local");
+  const singleRoot = remote || selfHostedBuild;
   const msg = (id: string) => intl.formatMessage({ id: `project.${id}` });
   const [name, setName] = useState(
     project?.name ?? (fixedFolder ? getPathLeaf(fixedFolder.path) : ""),
@@ -207,11 +209,11 @@ export function ProjectEditor({
   };
   const addRoots = (values: string[]) => {
     if (remote && project) return;
-    const next = remote
+    const next = singleRoot
       ? values.filter(Boolean).slice(0, 1)
       : [...new Set([...roots, ...values.filter(Boolean)])];
     setRoots(next);
-    if (remote || !roots.length) setPrimary(next[0] ?? "");
+    if (singleRoot || !roots.length) setPrimary(next[0] ?? "");
     setBrowsing(false);
   };
   const browse = async () => {
@@ -273,7 +275,10 @@ export function ProjectEditor({
         if (canCommit()) onClose();
         return;
       }
-      if (remote && (roots.length !== 1 || (project && project.roots[0]?.rootPath !== roots[0]))) {
+      if (
+        singleRoot &&
+        (roots.length !== 1 || (project && project.roots[0]?.rootPath !== roots[0]))
+      ) {
         throw new Error("project.remote-single-root-required");
       }
       let restoreProject: VirtualProject | undefined;
@@ -699,7 +704,11 @@ export function ProjectEditor({
                     onClick={() => {
                       void save();
                     }}
-                    disabled={busy || (remote && (roots.length !== 1 || legacyDeviceId === hostId))}
+                    disabled={
+                      busy ||
+                      (singleRoot && roots.length !== 1) ||
+                      (remote && legacyDeviceId === hostId)
+                    }
                   >
                     {project ? msg("save") : msg("create")}
                   </Button>

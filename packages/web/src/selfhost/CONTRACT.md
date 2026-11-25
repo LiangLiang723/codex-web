@@ -6,6 +6,10 @@ Web 入口是 index.ts。协议类型位于 contract.ts，运行模块位于本�
 
 项目归属、写锁冲突、历史分页和首轮命名以 [自托管会话规格](../../../../specs/selfhost-codex/README.md) 为准。
 
+自托管的现有 TaskService/Controller 会话删除命令调用远端 `thread/delete`。只有显式确认且目标属于仍挂载的工作区时才提交，执行前读原生状态拒绝正在运行的目标。Codex 拥有历史存在性。中心账号组织服务拥有未读标记与置顶，浏览器从目录与定点查询读取投影。原生删除通知按验证后的 SSH Host 与原生 Thread 处理，切换主机不复用先前的操作或缓存。见[会话操作与设置兼容性](../../../../specs/selfhost-codex/README.md#会话操作与设置兼容性)。
+
+个性化复用 SettingService 的编辑器。Codex 用户目录由已认证 SSH worker 解析，保存携带先前所读内容和实际路径，远端锁内比对并原子写回，浏览器不能指定写入其他文件。
+
 输入图片以已认证的 SSH 主机为上传目标。浏览器的 AttachmentBridge 按 uploadId 持有分片事务，新任务用现有草稿标记接入同一上传队列。Codex 持有已发送消息和历史图片。SessionBridge 查验当前 Thread 后通过该主机的文件服务读取本地图片，或在浏览器内按偏移解码内嵌图片。HTTP(S) 图片复用会话来源的外部打开入口。参见 [输入图片和历史预览](../../../../specs/selfhost-codex/README.md#输入图片和历史预览)。
 
 连接异常以 [连接异常提示](../../../../specs/selfhost-codex/README.md#连接异常提示) 为准。模型恢复和最终失败随当前 Thread 投影，WebSocket 连接和 SSH 主机生命周期随工作区展示。

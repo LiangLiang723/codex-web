@@ -18,6 +18,42 @@ sequenceDiagram
 
 Acceptance includes a real model list and reasoning control, native prompt editor with draft retention, original layout at desktop and phone widths, independent browser login, real model/tool/approval events, history after reconnect, remote Git/files/PTY, host key mismatch, and persistent server configuration. Commercial service endpoints are excluded from the self-host build. The external deployment port is 33723.
 
+## 会话操作与设置兼容性
+
+项目列表、置顶、最近更新、未读和分组从同一网关目录读取原生 Thread。重命名走 `thread/name/set`，归档和恢复走 `thread/archive` 与 `thread/unarchive`。置顶、未读和 Web 分组属于中心登录账号。未读标记按账号、已验证主机身份与原生 Thread ID 保存，清除时比较用户实际看到的标记。复制目录及会话 ID 使用 Web 剪贴板兼容路径。原生 `Thread.path` 存在时提供复制会话记录路径。自托管会话菜单移除桌面文件管理器、ZCode 日志与模型轨迹、厂商反馈和 ZCode 运行时重启。
+
+侧栏右键和手机长按菜单提供「永久删除」，打开确认框并显示会话标题。归档管理的单条和批量删除使用同一原生操作。取消不提交写入，运行中的会话不可删除。网关只向选中的 SSH 主机发送 `thread/delete`，Codex 删除目标会话及其派生的子智能体记录。确认文案说明无法恢复。已独立创建的分支、项目文件及发布的私有分享各有自己的生命周期。删除成功后使该原生 ID 的缓存失效，刷新同一账号的列表并退出被删会话。断线后的列表仍以原生结果为准。远端拒绝时保留会话并展示错误。
+
+自托管设置提供界面语言、主题、界面与终端显示、浏览器内快捷键、原生扩展、MCP 运行状态、钩子目录、归档和私有分享。MCP 使用 `mcpServerStatus/list` 并允许刷新。官方 OAuth 登录还需要能访问 SSH 主机回调地址的授权链路，当前网页显示认证状态。钩子目录通过 `hooks/list` 读取当前 SSH 工作目录的原生配置和错误。ZCode 的 MCP 与钩子写入表单、记忆编辑、浏览器控制、子智能体模板、斜杠命令和专用 Agent 运行参数依赖不同的数据格式或运行时。自托管呈现能够从所选 Codex 主机读取或生效的操作。SSH 项目目录支持单目录登记、导航、建对话和网页排序。旧桌面和原生项目的组织元数据继续由来源持有。侧栏和设置不提供未接通的编辑、置顶、移动会话或删除项目操作。设置不呈现仅由 ZCode 桌面执行的终端启动配置、代理、存储目录、引导和自动归档。
+
+个性化编辑器读取所选 SSH 用户的 `CODEX_HOME`。优先编辑有效的 `AGENTS.override.md`，其余情况编辑 `AGENTS.md`。输入落盘前在同一远端锁内比对已读文件路径和文本，发生外部修改时保留网页草稿并报告冲突。清空覆盖文件后 Codex 读取常规指令。新会话重新加载指令链。见 [Codex 自定义指令](https://learn.chatgpt.com/docs/agent-configuration/agents-md)。
+
+```mermaid
+sequenceDiagram
+    participant W as 桌面或手机 Web
+    participant G as 中心网关
+    participant C as 所选 SSH 主机上的 Codex
+    participant F as SSH 主机上的 Codex 指令文件
+    W->>W: 选择永久删除并确认标题
+    W->>G: 已认证的 Host 和 Thread ID
+    G->>C: thread/read 检查状态，thread/delete
+    C-->>G: 删除结果与 thread/deleted
+    G-->>W: 失效通知，刷新列表及退出目标会话
+    W->>G: 保存指令与已读版本
+    G->>F: SSH worker 持锁比对并写入
+    F-->>G: 保存结果与文件路径
+    G-->>W: 更新指令编辑器
+```
+
+| 场景 | 验收 |
+| --- | --- |
+| SH-TASK-MENU | 桌面右键、移动触屏菜单和分组包含可执行的操作。手机长按菜单绑定按下的会话，普通点击仍打开对话。重命名后置顶标题随原生值更新。标记未读、查看后清除、归档和恢复对同账号的多个客户端生效。 |
+| SH-TASK-DELETE | 独立测试会话覆盖取消、删除当前或归档会话、远端拒绝、重复提交和另一个客户端刷新。验证 App Server `thread/read`、`thread/list` 和 Gateway 的热缓存，另一个会话仍可打开。 |
+| SH-SETTINGS-COMPAT | 用同一 Web 登录打开桌面和手机设置，检查系统、Agent 能力、归档与私有分享。不可执行的控件不出现在导航及搜索中。保留入口对应账号偏好或真实 SSH 主机服务。 |
+| SH-SETTINGS-INSTRUCTIONS | 初次保存常规指令，存在有效覆盖文件，第二个客户端先写入。根据原生文件顺序读写。并发更新有冲突提示。新 Codex 会话加载刚保存的指令。 |
+
+协议基线见 [Codex App Server](https://learn.chatgpt.com/docs/app-server) 与 [Codex 0.170 方法定义](https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/app-server-protocol/schema/typescript/ClientRequest.ts)。
+
 ## SSH 主机上的应用管理
 
 桌面与手机在工作区侧栏提供同一个「扩展」入口。「插件 / 应用 / 技能」是该页面唯一一层能力分类，默认打开当前 SSH 主机的固定已安装插件视图。浏览市场、打开具体插件和添加来源直接到原有 ZCode 商店对应视图，返回后继续管理已安装插件。已安装目录先可操作，搜索、详情和就绪状态取自当前远端；可用条目的「使用」在同一项目创建带引用的可编辑草稿。MCP 继续从设置进入，普通插件设置沿用已有分类标签。

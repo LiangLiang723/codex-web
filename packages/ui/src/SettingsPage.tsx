@@ -92,9 +92,10 @@ import { buildPersonalCodingPlanUsageSource } from "@/lib/codingPlanUsageSources
 import { SubagentsSection } from "@/settings/SubagentsSection.js";
 import { AutomationsSection } from "@/settings/AutomationsSection.js";
 import { SegmentPill } from "@/settings/PluginStoreListView.js";
-import { CodexAppsSection } from "@/settings/codex-apps/index.js";
+import { CodexAppsSection, CodexHostSettings } from "@/settings/codex-apps/index.js";
 import { PluginsSection } from "@/settings/PluginsSection.js";
 import { HooksSection } from "@/settings/HooksSection.js";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { WorkspaceFileSearchSection } from "@/settings/WorkspaceFileSearchSection.js";
 import { MemorySettingsPage } from "@/settings/MemorySettingsSection.js";
 import { PersonalizationSection } from "@/settings/PersonalizationSection.js";
@@ -2124,7 +2125,9 @@ export function SettingsPage({
                             // Source（remoteWorkspaceServiceCollection 注册的是远端 settingService），
                             // 编辑会写错机器；Web 端只显示本地桌面端指引。
                             <PersonalizationSection
-                              settingService={localHostServices.settingService}
+                              settingService={
+                                (selfHostedBuild ? services : localHostServices).settingService
+                              }
                               isDesktop={Boolean(isDesktop)}
                             />
                           ) : activeSection === "memory" ? (
@@ -2156,6 +2159,12 @@ export function SettingsPage({
                                 requestPluginStoreOpen({ returnScopeKey: "user", intent });
                                 onBack?.();
                               }}
+                            />
+                          ) : activeSection === "mcp" && selfHostedBuild ? (
+                            <CodexHostSettings
+                              key={`mcp:${activeWorkspacePath}`}
+                              kind="mcp"
+                              workspacePath={activeWorkspacePath ?? undefined}
                             />
                           ) : activeSection === "mcp" ? (
                             <PluginsSection
@@ -2196,19 +2205,23 @@ export function SettingsPage({
                             <ProjectManagement />
                           ) : activeSection === "archives" ? (
                             <div className="min-w-0 space-y-6">
-                              <TaskAutoArchiveSettings
-                                taskAutoArchiveEnabled={taskAutoArchiveEnabled}
-                                taskAutoArchiveOlderThanDays={taskAutoArchiveOlderThanDays}
-                                onTaskAutoArchiveEnabledChange={handleTaskAutoArchiveEnabledChange}
-                                onTaskAutoArchiveOlderThanDaysChange={
-                                  handleTaskAutoArchiveOlderThanDaysChange
-                                }
-                              />
+                              {!selfHostedBuild ? (
+                                <TaskAutoArchiveSettings
+                                  taskAutoArchiveEnabled={taskAutoArchiveEnabled}
+                                  taskAutoArchiveOlderThanDays={taskAutoArchiveOlderThanDays}
+                                  onTaskAutoArchiveEnabledChange={
+                                    handleTaskAutoArchiveEnabledChange
+                                  }
+                                  onTaskAutoArchiveOlderThanDaysChange={
+                                    handleTaskAutoArchiveOlderThanDaysChange
+                                  }
+                                />
+                              ) : null}
                               <ArchiveManagement />
                             </div>
                           ) : activeSection === "shares" ? (
                             <SettingsShareManagement
-                              signedIn={Boolean(user)}
+                              signedIn={selfHostedBuild || Boolean(user)}
                               onLogin={onLogin}
                               onOpenTask={onOpenTask}
                             />
@@ -2243,6 +2256,12 @@ export function SettingsPage({
                                 requestPluginStoreOpen({ returnScopeKey: "user", intent });
                                 onBack?.();
                               }}
+                            />
+                          ) : activeSection === "hooks" && selfHostedBuild ? (
+                            <CodexHostSettings
+                              key={`hooks:${activeWorkspacePath}`}
+                              kind="hooks"
+                              workspacePath={activeWorkspacePath ?? undefined}
                             />
                           ) : activeSection === "hooks" ? (
                             <HooksSection

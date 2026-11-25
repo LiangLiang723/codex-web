@@ -12,7 +12,9 @@ export async function readSelfhostThreadSummary(host: HostRecord, threadId: stri
   } catch (error) {
     if (
       error instanceof CodexRpcError &&
-      /thread (?:not found|does not exist)|no rollout found for thread/i.test(error.message)
+      /thread (?:not found|does not exist)|no rollout found for thread|^thread not loaded:/i.test(
+        error.message,
+      )
     )
       return null;
     throw error;

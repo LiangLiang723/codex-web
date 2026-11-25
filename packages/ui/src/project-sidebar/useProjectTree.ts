@@ -1,4 +1,6 @@
 import { flushSync } from "react-dom";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
+import { clearBrowserRecentVisitsForTask } from "@/store/browserRecentVisitsStore.js";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type {
   ProjectTree,
@@ -390,12 +392,25 @@ export function useProjectTree(isDesktop = false) {
       ? projectChanges.onDidChange(() => void refresh())
       : services.broadcastService.onMessage((event) => {
           if (event.channel === "state:projects") void refresh();
+          if (
+            selfHostedBuild &&
+            event.channel === "selfhost:thread-deleted" &&
+            accepted.current?.service === service
+          ) {
+            const payload = event.payload as { taskId: string } | undefined;
+            const task = accepted.current?.tree.tasks.find((row) => row.taskId === payload?.taskId);
+            if (task) {
+              const { taskId, workspacePath, workspaceIdentity } = task;
+              clearBrowserRecentVisitsForTask(workspaceIdentity?.trim() || workspacePath, taskId);
+              removeTaskState(workspacePath, taskId, workspaceIdentity);
+            }
+          }
         });
     return () => {
       subscriptions.forEach((subscription) => subscription.dispose());
       broadcast.dispose();
     };
-  }, [scopeKey, services, projectChanges, refresh, registry]);
+  }, [scopeKey, services, service, projectChanges, refresh, registry, removeTaskState]);
   const activity = useWorkspaceSessionsIndexItems(registry ? [] : scopes);
   const lastDisplay = useRef<ProjectTree>(EMPTY);
   const displayedTree = useMemo(() => {

@@ -56,6 +56,20 @@ const HIDDEN_SETTINGS_SECTIONS = new Set<SettingsSectionId>([
   "workspaceFileSearch",
 ]);
 
+const SELFHOST_HIDDEN_SETTINGS_SECTIONS = new Set<SettingsSectionId>([
+  "browser",
+  "computerUse",
+  "dataSync",
+  "memory",
+  "modelProvider",
+  "remoteDevices",
+  "usage",
+  "commands",
+  "subagents",
+  "projects",
+  "migration",
+]);
+
 export interface SettingsSectionIntentEventDetail {
   section: SettingsSectionId;
   pluginTab?: SettingsPluginTabTarget;
@@ -105,7 +119,11 @@ function isSettingsSectionId(value: string): value is SettingsSectionId {
 }
 
 export function isSettingsSectionEnabled(section: SettingsSectionId): boolean {
-  return (section !== "codexApps" || selfHostedBuild) && !HIDDEN_SETTINGS_SECTIONS.has(section);
+  return (
+    (section !== "codexApps" || selfHostedBuild) &&
+    !HIDDEN_SETTINGS_SECTIONS.has(section) &&
+    !(selfHostedBuild && SELFHOST_HIDDEN_SETTINGS_SECTIONS.has(section))
+  );
 }
 
 export function resolveSettingsSection(

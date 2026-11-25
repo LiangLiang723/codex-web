@@ -56,6 +56,8 @@ UI 纠偏：分区复用 WorkspacePurposeSection 和原折叠/顺序偏好；项
 
 归档管理经 index 公开，属于 project-sidebar/ui。RootWorkspaceContent 提供单一项目目录 owner，嵌套 Provider 复用；设置、侧栏、composer 共用树。归档按 Host+projectId 分组，删除容器和未归类不按目录重绑；操作复用模块内 mutation adapter 与现有 Controller/TaskService。页面只保存筛选/分页/确认候选和在途状态，批量部分失败不伪造全部成功。见 `docs/superpowers/specs/2026-09-11-archive-management.md`。
 
+SSH 自托管的项目、分组及置顶任务菜单和归档管理使用同一 Codex 永久删除操作。确认候选固定为已选择的工作区与 Thread。使用 Codex 的会话及其子智能体说明，不套用 ZCode 存储附件扫描文案。共享桌面运行时沿用现有归档删除协议。见[自托管会话操作](../../../../specs/selfhost-codex/README.md#会话操作与设置兼容性)。
+
 项目管理（设置 › 项目）同样经 index 公开、复用同一目录 owner。行、疑似原因、筛选与排序是 `project-management-view.ts` 的纯派生；`useProjectManagement` 只持有在途批次锁与最近一次失败，本地走 `deleteProject` / `restoreProject`，远程只增删本机入口（`removeEntry` / `addEntry`），每批结束只刷新一次树。选择是页面草稿，生效集合取草稿与当前可见可移除行的交集。侧栏更多菜单末尾的「管理项目…」仅桌面端。见 `docs/superpowers/specs/2026-10-24-project-management.md`。
 
 侧栏分区标题与置顶行保留旧字号/缩进，空态由 ProjectTaskRows 统一展示。SortableProjects 持有 dnd-kit 暂态位移，排序只在同 Host/置顶分区内经原 reorderProjects 提交，任务原生拖入仍发 moveTask。

@@ -4,7 +4,7 @@ import type { IChannel, IChannelClient } from "@zcode/rpc";
 import { z } from "zod";
 import { Gateway, type Message, type Project, type RemoteModel } from "./gateway.js";
 import { rec, str, array, num, providerId } from "./threadProjection.js";
-import { extensionRequest } from "./capabilities.js";
+import { codexRequest, extensionRequest } from "./capabilities.js";
 import { createCodexAppsService } from "./codexApps.js";
 import { FileWatches } from "./fileWatches.js";
 import { AttachmentBridge } from "./attachments.js";
@@ -113,6 +113,7 @@ export async function openWorkspace(
   hostId: number,
   cwd: string,
   manage: () => void,
+  onThreadDeleted?: (threadId: string) => void,
 ) {
   // 模型目录可单独失败，文件和可读历史不以 model/list 成功作为工作区挂载条件。
   let preferences = await gateway.request("/api/selfhost/settings", settingsSchema);
@@ -221,6 +222,12 @@ export async function openWorkspace(
     return bridge;
   };
   const bridge = scopedBridge(cwd);
+  let disposed = false;
+  const publishDeletion = (taskId: string) => {
+    for (const scope of bridges.values()) scope.tasks.invalidate(taskId);
+    emit("broadcast", "onMessage", { channel: "selfhost:thread-deleted", payload: { taskId } });
+    onThreadDeleted?.(taskId);
+  };
   let lastList = "";
   let polling = false;
   const refreshIndex = async () => {
@@ -279,6 +286,10 @@ export async function openWorkspace(
         directoryLookup = undefined;
       }
       if (msg.type === "config.catalog.changed") {
+        const deleted = rec(msg.deleted);
+        if (deleted.hostId === hostId && typeof deleted.threadId === "string")
+          publishDeletion(deleted.threadId);
+        else bridge.tasks.invalidate();
         emit("broadcast", "onMessage", { channel: "state:projects", payload: {} });
         void gateway
           .request("/api/selfhost/settings", settingsSchema)
@@ -292,6 +303,38 @@ export async function openWorkspace(
   ];
   async function rpc(channel: string, method: string, args: unknown[]): Promise<unknown> {
     const p = rec(args[0]);
+    if (channel === "hooks" && method === "listNativeHooks") {
+      const path = str(p.workspacePath) || cwd;
+      const reply = await codexRequest(gateway, hostId, "hooks/list", { cwds: [path] });
+      const { data } = z
+        .object({
+          data: z
+            .array(
+              z.object({
+                hooks: z.array(
+                  z.object({
+                    key: z.string(),
+                    eventName: z.string(),
+                    sourcePath: z.string(),
+                    enabled: z.boolean(),
+                  }),
+                ),
+                warnings: z.array(z.string()),
+                errors: z.array(z.object({ path: z.string(), message: z.string() })),
+              }),
+            )
+            .length(1),
+        })
+        .parse(reply);
+      const scope = data[0]!;
+      return {
+        hooks: scope.hooks,
+        diagnostics: [
+          ...scope.warnings,
+          ...scope.errors.map(({ path, message }) => `${path} · ${message}`),
+        ],
+      };
+    }
     if (channel === "coding-plan-subscription" && method === "getDynamicWorkflowClientConfig")
       return { mode: "disabled", enabled: false, source: "default" };
     if (channel === "zcode-agent" && method === "listSavedWorkflowRuns") return { runs: [] };
@@ -382,6 +425,28 @@ export async function openWorkspace(
     }
     if (channel === "setting") {
       if (method === "get") return appSettingsSchema.parse(preferences);
+      if (method === "getUserInstructions" || method === "saveUserInstructions") {
+        if (disposed) throw Error("SSH 工作区已切换，请重新打开设置");
+        const response = await gateway.request(
+          "/api/selfhost/workspace",
+          z.object({
+            value: z.object({
+              content: z.string().optional(),
+              filePath: z.string().startsWith("/"),
+            }),
+          }),
+          "POST",
+          {
+            hostId,
+            channel: "user-instructions",
+            method: method === "getUserInstructions" ? "get" : "save",
+            args,
+          },
+        );
+        if (method === "getUserInstructions" && typeof response.value.content !== "string")
+          throw Error("Codex 指令读取结果无效");
+        return response.value;
+      }
       if (method === "update") {
         preferences = await gateway.request("/api/selfhost/settings", settingsSchema, "PATCH", p);
         emit("setting", "onDidChange", appSettingsSchema.parse(preferences));
@@ -627,12 +692,29 @@ export async function openWorkspace(
         const t = await bridge.tasks.point(str(p.taskId ?? rec(p.address).taskId));
         return t ? bridge.tasks.meta(t) : null;
       }
+      if (method === "getTaskSessionFilePath") {
+        const path = str((await bridge.tasks.point(str(p.taskId)))?.path);
+        return { path: path || null, exists: Boolean(path) };
+      }
       if (
-        ["archiveTask", "unarchiveTask", "renameTask", "setTaskPinned"].includes(method) ||
+        [
+          "archiveTask",
+          "unarchiveTask",
+          "renameTask",
+          "setTaskPinned",
+          "setTaskUnread",
+          "deleteTask",
+        ].includes(method) ||
         (method === "mutateTask" &&
-          ["pin", "archive", "rename"].includes(str(rec(p.mutation).kind)))
+          ["pin", "archive", "rename", "mark-unread", "mark-read", "delete"].includes(
+            str(rec(p.mutation).kind),
+          ))
       ) {
+        if (disposed) throw Error("SSH 工作区已切换，请重新选择会话");
         const outcome = await bridge.tasks.mutate(method, p);
+        if (disposed) return outcome;
+        if (method === "deleteTask" || rec(p.mutation).kind === "delete")
+          publishDeletion(str(p.taskId ?? rec(p.address).taskId));
         emit("broadcast", "onMessage", { channel: "state:projects", payload: {} });
         return outcome;
       }
@@ -698,8 +780,11 @@ export async function openWorkspace(
     },
   };
   return {
-    services: Object.assign(new RemoteServiceAccess(client), {codexAppsService:createCodexAppsService(gateway,hostId)}),
+    services: Object.assign(new RemoteServiceAccess(client), {
+      codexAppsService: createCodexAppsService(gateway, hostId),
+    }),
     dispose() {
+      disposed = true;
       for (const bridge of bridges.values()) bridge.dispose();
       bridges.clear();
       fileWatches.dispose();

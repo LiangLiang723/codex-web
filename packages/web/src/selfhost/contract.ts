@@ -7,6 +7,7 @@ export type OpenRemoteWorkspace = (
   hostId: number,
   cwd: string,
   manage: () => void,
+  onThreadDeleted?: (threadId: string) => void,
 ) => Promise<{
   services: RemoteServiceAccess;
   /** Remove browser subscriptions while leaving the official remote app-server and turns running. */

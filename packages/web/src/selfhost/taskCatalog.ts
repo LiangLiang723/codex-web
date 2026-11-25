@@ -107,6 +107,7 @@ export class NativeThreadCatalog {
       mode: "build",
       provider: "glm",
       status: rec(t.status).type === "active" ? "running" : "completed",
+      unreadAt: typeof t.unreadAt === "number" ? t.unreadAt : undefined,
       archived: t.archived === true,
       pinned: t.pinned === true,
     };
@@ -174,6 +175,7 @@ export class NativeThreadCatalog {
         (t) =>
           (!wanted || wanted.has(str(t.id))) &&
           (kind !== "pinned" || t.pinned === true) &&
+          (kind !== "unread" || typeof t.unreadAt === "number") &&
           ((kind !== "active" && method !== "listActiveTaskIds") ||
             rec(t.status).type === "active"),
       )
@@ -194,7 +196,29 @@ export class NativeThreadCatalog {
     const id = str(p.taskId ?? rec(p.address).taskId);
     if (!id) throw Error("缺少原生会话 ID");
     let archived: boolean | undefined;
-    if (method === "renameTask" || mutation.kind === "rename")
+    if (method === "deleteTask" || mutation.kind === "delete") {
+      await this.gateway.request(
+        "/api/selfhost/thread-state",
+        z.object({ deleted: z.literal(true) }),
+        "POST",
+        { hostId: this.hostId, threadId: id, operation: "delete" },
+      );
+      this.invalidate(id);
+      return null;
+    }
+    if (
+      method === "setTaskUnread" ||
+      mutation.kind === "mark-unread" ||
+      mutation.kind === "mark-read"
+    ) {
+      await this.gateway.request("/api/selfhost/thread-state", z.unknown(), "POST", {
+        hostId: this.hostId,
+        threadId: id,
+        operation: "unread",
+        unread: method === "setTaskUnread" ? p.unread : mutation.kind === "mark-unread",
+        expectedUnreadAt: p.expectedUnreadAt ?? mutation.expectedUnreadAt,
+      });
+    } else if (method === "renameTask" || mutation.kind === "rename")
       await this.gateway.request("/api/threads/rename", z.unknown(), "POST", {
         hostId: this.hostId,
         threadId: id,
@@ -225,9 +249,14 @@ export class NativeThreadCatalog {
       );
     }
     // 写入确认后不能复用旧组织态或标题。旧请求仍可向原调用者完成。
-    this.queryGeneration += 1;
-    this.points.delete(id);
+    this.invalidate(id);
     const t = await this.point(id);
     return t ? this.meta(archived === undefined ? t : { ...t, archived }) : null;
+  }
+
+  invalidate(id?: string) {
+    this.queryGeneration += 1;
+    if (id === undefined) this.points.clear();
+    else this.points.delete(id);
   }
 }

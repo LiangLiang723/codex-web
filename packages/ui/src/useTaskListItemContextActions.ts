@@ -1,4 +1,4 @@
-import type { ZCodeProvider } from "@zcode/shared";
+import type { ZCodeProvider, ZCodeTaskMeta } from "@zcode/shared";
 import { useCallback } from "react";
 import { usePlatform } from "@/hooks/usePlatform.js";
 import { useTaskNativeSessionLogFile } from "@/hooks/useTaskNativeSessionLogFile.js";
@@ -8,6 +8,51 @@ import { useWorkspaceOpenInEditorTarget } from "@/hooks/useWorkspaceOpenInEditor
 import { readLastSelectedEditorId } from "@/lib/editorPreference.js";
 import { sortInstalledEditorsForOpenWith } from "@/lib/openWithEditors.js";
 import { logger } from "@/logger.js";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
+import { writeBrowserClipboardText } from "@/lib/browserEnvironment.js";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
+import { useBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
+import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { toast } from "@/components/ui/toast.js";
+
+export function useSelfhostTaskDeletion() {
+  const { zcodeTaskService } = useBaseWorkspaceServices();
+  const confirm = useConfirmDialog();
+  const { intl } = useZCodeIntl();
+  if (!selfHostedBuild) return undefined;
+
+  return async (task: ZCodeTaskMeta) => {
+    const title = task.title || task.taskId;
+    if (
+      !(await confirm({
+        intent: "selfhost-task-delete",
+        testId: "selfhost-task-delete-confirmation",
+        title: intl.formatMessage({ id: "selfhost.task.deleteTitle" }, { title }),
+        description: intl.formatMessage({ id: "selfhost.task.deleteDescription" }),
+        confirmLabel: intl.formatMessage({ id: "selfhost.task.delete" }),
+        confirmVariant: "destructive",
+      }))
+    )
+      return;
+    try {
+      // 捕获打开菜单时的服务，工作区切换后旧适配器会拒绝继续提交。
+      await zcodeTaskService.deleteTask({
+        taskId: task.taskId,
+        workspacePath: task.workspacePath,
+        workspaceIdentity: task.workspaceIdentity,
+      });
+    } catch (cause) {
+      toast(
+        intl.formatMessage(
+          { id: "selfhost.task.deleteFailed" },
+          {
+            reason: cause instanceof Error ? cause.message : String(cause),
+          },
+        ),
+      );
+    }
+  };
+}
 
 interface TaskPathState {
   loading: boolean;
@@ -98,7 +143,7 @@ export function useTaskListItemContextActions({
     taskId,
     provider ?? null,
     workspaceIdentity,
-    { enabled: loadTaskPaths },
+    { enabled: loadTaskPaths && !selfHostedBuild },
   );
   const providerConfigFile = useWorkspaceProviderConfigFile(
     workspacePath,
@@ -113,7 +158,7 @@ export function useTaskListItemContextActions({
       serviceScope: remoteSessionId ? "base" : "workspace",
       // Bugfix: 任务列表里每个 item 都会挂载右键菜单动作；如果挂载时就读取 provider 配置路径，
       // 远程 workspace 会按任务数量放大 base RPC 和日志。这里改成菜单真正打开时才加载。
-      enabled: loadProviderConfig,
+      enabled: loadProviderConfig && !selfHostedBuild,
     },
   );
 
@@ -124,17 +169,17 @@ export function useTaskListItemContextActions({
       }
 
       try {
-        await navigator.clipboard.writeText(value);
-        logger.info(`[TaskListItem] ${label} 已复制: ${value}`);
+        if (platform.writeClipboardText) await platform.writeClipboardText(value);
+        else await writeBrowserClipboardText(value);
+        logger.info(`[TaskListItem] ${label} 已复制`);
       } catch (error) {
         logger.warn("[TaskListItem] 复制文本失败", {
           label,
-          value,
           error: error instanceof Error ? error.message : String(error),
         });
       }
     },
-    [],
+    [platform],
   );
 
   const handleOpenTaskPathInFileManager = useCallback(async () => {
