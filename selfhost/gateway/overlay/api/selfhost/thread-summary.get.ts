@@ -5,6 +5,7 @@ import { defineGatewayEventHandler } from "../../utils/gateway/http/errors";
 import { requireRecord } from "../../utils/gateway/http/validation/common";
 import { hostStore } from "../../utils/gateway/state/hosts";
 import { readSelfhostThreadSummary } from "../../utils/selfhost-thread-summary";
+import { unreadThreadMarkers } from "../../utils/selfhost-thread-organization";
 
 export default defineGatewayEventHandler(async (event) => {
   const { hostId, threadId } = await getValidatedQuery(event, (query) =>
@@ -14,5 +15,10 @@ export default defineGatewayEventHandler(async (event) => {
   );
   const host = requireRecord(hostStore.getWithSecret(hostId), "Host not found");
   const thread = await readSelfhostThreadSummary(host, threadId);
-  return { thread: thread ? gatewayThreadFromAppServer(hostId, thread) : null };
+  return {
+    thread: thread ? {
+      ...gatewayThreadFromAppServer(hostId, thread),
+      unreadAt: unreadThreadMarkers(host, [threadId]).get(threadId),
+    } : null,
+  };
 });

@@ -1,4 +1,5 @@
 import { remoteHostLabel } from "@/project-sidebar/RemoteHostSection.js";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import type { V4SessionDeletionPreview } from "@zcode/shared/zcode-protocol-v4";
 import { useEffect, useRef, useState } from "react";
 import type { ProjectTask } from "@/project-sidebar/contract.js";
@@ -75,7 +76,25 @@ export function useArchiveManagement() {
       { preview: V4SessionDeletionPreview; remoteSessionId?: string | null }
     >();
     try {
-      if (operation === "delete") {
+      if (operation === "delete" && selfHostedBuild) {
+        if (
+          !(await confirm(
+            {
+              intent: "selfhost-archived-task-delete",
+              title: msg("deleteTitle", { count: candidates.length }),
+              description: [
+                intl.formatMessage({ id: "selfhost.task.deleteDescription" }),
+                ...candidates.map((task) => label(task)),
+              ].join("\n\n"),
+              confirmLabel: msg("deleteCount", { count: candidates.length }),
+              confirmVariant: "destructive",
+              scrollableDescription: true,
+            },
+            operationLifetime.signal,
+          ))
+        )
+          return;
+      } else if (operation === "delete") {
         const willDelete: string[] = [];
         const retained: string[] = [];
         const blocked: string[] = [];
@@ -188,7 +207,9 @@ export function useArchiveManagement() {
         counts.details.push(...blocked);
       }
       for (const task of candidates) {
-        if (operation === "delete" && !previews.has(archiveTaskKey(task))) continue;
+        if (operationLifetime.signal.aborted) return;
+        if (operation === "delete" && !selfHostedBuild && !previews.has(archiveTaskKey(task)))
+          continue;
         if (
           !latest.current.tree.tasks.some(
             (t) => archiveTaskKey(t) === archiveTaskKey(task) && t.archived,
@@ -199,7 +220,9 @@ export function useArchiveManagement() {
           continue;
         }
         try {
-          if (operation === "delete") {
+          if (operation === "delete" && selfHostedBuild) {
+            await mutateProjectTask({ service, controller }, task, { kind: "delete" });
+          } else if (operation === "delete") {
             const approved = previews.get(archiveTaskKey(task));
             if (!approved) continue;
             const result = await permanentlyDeleteProjectTask(
@@ -242,7 +265,9 @@ export function useArchiveManagement() {
           counts.succeeded++;
         } catch (error) {
           counts.failed++;
-          counts.details.push(`${label(task)} — ${msg("incomplete")}`);
+          const detail =
+            selfHostedBuild && error instanceof Error ? error.message : msg("incomplete");
+          counts.details.push(`${label(task)} — ${detail}`);
           logger.error("[archive-management] 任务操作失败", {
             taskId: task.taskId,
             workspaceIdentity: task.workspaceIdentity,

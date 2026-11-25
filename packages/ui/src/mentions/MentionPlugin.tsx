@@ -669,6 +669,7 @@ export function MentionPlugin({
           selection.insertNodes([$createPromptMentionNode(item), trailingWhitespace]);
           trailingWhitespace.selectEnd();
         },
+        // Lexical 的 discrete 只接受 true，普通引用插入沿用默认批处理。
         { discrete: hasAction ? true : undefined },
       );
 

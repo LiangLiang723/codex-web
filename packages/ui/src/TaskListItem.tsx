@@ -39,7 +39,10 @@ import {
 } from "@/v4/taskListRowActivity.js";
 import { TaskListItemContextMenu } from "@/TaskListItemContextMenu.js";
 import { TaskInteractionBadge } from "@/TaskInteractionBadge.js";
-import { useTaskListItemContextActions } from "@/useTaskListItemContextActions.js";
+import {
+  useSelfhostTaskDeletion,
+  useTaskListItemContextActions,
+} from "@/useTaskListItemContextActions.js";
 import { useFeedbackStore } from "@/feedback/feedbackStore.js";
 import { useModelTrajectoryStore } from "@/store/modelTrajectoryStore.js";
 import { buildTaskFeedbackDescription } from "@/lib/taskFeedbackDraft.js";
@@ -599,6 +602,7 @@ export const MemoTaskItem = memo(function TaskListItem({
     <li
       ref={itemRef}
       data-testid={testId(TID_TASK_ITEM, task.taskId)}
+      data-task-id={task.taskId}
       data-task-item-key={taskItemKey}
       data-mobile-active-task={isMobileActive ? "true" : undefined}
       data-archive-confirming-task-id={isArchiveConfirming ? task.taskId : undefined}
@@ -926,6 +930,7 @@ export function TaskListItemContextMenuContent({
   disableTaskActions?: boolean;
   disabledReason?: string;
 }) {
+  const deleteTask = useSelfhostTaskDeletion();
   const workspaceActionsDisabled = useOptionalTabStore(
     (state) =>
       disableTaskActions || isWorkspaceReadOnly(state, task.workspacePath, task.workspaceIdentity),
@@ -1023,6 +1028,12 @@ export function TaskListItemContextMenuContent({
       onArchiveTask={() => {
         onArchiveTask(task.taskId);
       }}
+      onDeleteTask={deleteTask ? () => void deleteTask(task) : undefined}
+      deleteDisabledReason={
+        isTaskListRowRunning(task)
+          ? intl.formatMessage({ id: "archives.reason.running" })
+          : undefined
+      }
       onMarkTaskAsUnread={() => {
         onMarkTaskAsUnread(task.taskId);
       }}

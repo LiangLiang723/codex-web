@@ -338,6 +338,25 @@ nodes:
       - "Codex CLI and App Server own installation and enablement on the selected SSH host. Web actions use full plugin ID or skill path."
       - "Desktop and mobile SSH Web reuse the plugin store and settings UI. The installed reference catalog stays independent of marketplace detail reads."
       - "SSH skill preview reads SKILL.md on the selected host. Skill use, creation and discovery prefill a draft in that workspace."
+  - id: "capability.selfhost-codex-thread-actions"
+    kind: "capability"
+    label: "Self-hosted Codex conversation menu, deletion and archive management"
+    aliases: ["永久删除对话", "会话右键菜单", "Codex 设置兼容性"]
+    docs: ["specs/selfhost-codex/README.md", "selfhost/FEATURE-AUDIT.zh.md"]
+    codeSeeds:
+      - file: "packages/web/src/selfhost/taskCatalog.ts"
+        symbol: "NativeThreadCatalog"
+      - file: "packages/ui/src/useTaskListItemContextActions.ts"
+        symbol: "useSelfhostTaskDeletion"
+      - file: "packages/ui/src/project-sidebar/useArchiveManagement.ts"
+        symbol: "useArchiveManagement"
+      - file: "selfhost/gateway/overlay/utils/selfhost-thread-deletion.ts"
+        symbol: "discardSelfhostThread"
+      - file: "packages/ui/src/settings/codex-apps/CodexHostSettings.tsx"
+        symbol: "CodexHostSettings"
+    invariants:
+      - "Codex owns conversation existence, title and archive state. The Gateway owns account pins and unread markers."
+      - "Permanent deletion requires an explicit confirmation for the selected Host and native Thread ID."
   - id: "capability.selfhost-ssh-workspaces"
     kind: "capability"
     label: "Self-hosted Web SSH workspaces"

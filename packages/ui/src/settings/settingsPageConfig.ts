@@ -246,6 +246,32 @@ export interface SettingsPageConfigOptions {
   isWindowsDesktop?: boolean;
 }
 
+const SELFHOST_HIDDEN_SETTINGS_ROWS = new Set([
+  "settings.taskAutoArchive",
+  "settings.taskAutoArchiveDays",
+  "settings.terminalProfile",
+  "settings.integratedTerminalShell",
+  "settings.httpProxy",
+  "settings.httpProxyNoProxy",
+  "settings.httpProxyCaCertPath",
+  "settings.dataBaseDir",
+  "settings.onboarding",
+  "settings.toolSearch",
+  "settings.nativeSearchEnhancements",
+  "settings.totalTokensReminder",
+  "settings.agentAlwaysBackground",
+  "settings.replyLanguage",
+  "settings.zcodeInteractionBehavior",
+  "settings.askUserQuestionAutoResolution",
+  "settings.modelIoFullRetention",
+  "settings.dynamicWorkflow",
+  "chat.officeSuggestions.setting",
+]);
+
+export function isSettingSearchable(id: string) {
+  return !selfHostedBuild || !SELFHOST_HIDDEN_SETTINGS_ROWS.has(id);
+}
+
 export function createSettingsPageConfig({
   isDesktop = false,
   isMacDesktop = false,
@@ -253,7 +279,6 @@ export function createSettingsPageConfig({
 }: SettingsPageConfigOptions = {}) {
   const showComputerUse = isDesktop || isMacDesktop || isWindowsDesktop;
   const settingsSections = BASE_SETTINGS_SECTIONS.filter((section) => {
-    if (selfHostedBuild && ["remoteDevices","dataSync","usage","modelProvider"].includes(section.id)) return false;
     if (section.id === "computerUse" && !showComputerUse) return false;
     return isSettingsSectionEnabled(section.id);
   });
@@ -295,5 +320,9 @@ export function isSettingsSectionAvailable(
   section: SettingsSectionId,
   isDesktop: boolean,
 ): boolean {
-  return isDesktop || !DESKTOP_ONLY_SETTINGS_SECTIONS.has(section);
+  return (
+    isDesktop ||
+    (selfHostedBuild && section === "shares") ||
+    !DESKTOP_ONLY_SETTINGS_SECTIONS.has(section)
+  );
 }

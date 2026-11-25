@@ -4,9 +4,10 @@ import { once } from "node:events";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
+import { build } from "esbuild";
 import {
   nativeUserInputItems,
   restoreNativeTurnText,
@@ -24,6 +25,7 @@ const pluginName = "fixture-audit";
 const marketplace = "composer-fixture";
 const pluginId = `${pluginName}@${marketplace}`;
 const app = { type: "mention", name: "Fixture App", path: "app://fixture_app" };
+const instructionPhrase = "CODEX_NATIVE_INSTRUCTION_FIXTURE_2A93FE";
 const env = {
   HOME: fixtureHome,
   CODEX_HOME: codexHome,
@@ -67,6 +69,7 @@ async function startAppServer() {
   const appServer = child;
   const pending = new Map();
   const completed = new Map();
+  const deleted = new Set();
   let nextId = 0;
   const lines = createInterface({ input: appServer.stdout });
   lines.on("line", (line) => {
@@ -75,6 +78,10 @@ async function startAppServer() {
     if (value.method === "turn/completed") {
       completed.set(value.params.turn.id, value.params.turn);
       lines.emit("turnCompleted", value.params.turn);
+    }
+    if (value.method === "thread/deleted") {
+      deleted.add(value.params.threadId);
+      lines.emit("threadDeleted");
     }
   });
   const rpc = (method, params) => {
@@ -104,6 +111,10 @@ async function startAppServer() {
   return {
     rpc,
     version: info.userAgent.split(" ")[0],
+    async waitForDeletion(threadId) {
+      const signal = AbortSignal.timeout(15000);
+      while (!deleted.has(threadId)) await once(lines, "threadDeleted", { signal });
+    },
     async waitForTurn(turnId) {
       const signal = AbortSignal.timeout(15000);
       while (!completed.has(turnId)) await once(lines, "turnCompleted", { signal });
@@ -122,6 +133,44 @@ async function stopAppServer() {
 async function writeFixture(path, content) {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, content);
+}
+
+async function writeNativeInstructions() {
+  const bundlePath = join(fixtureHome, "user-instructions.mjs");
+  await build({
+    entryPoints: [resolve(import.meta.dirname, "../worker/user-instructions.ts")],
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    outfile: bundlePath,
+  });
+  const call = async (method, ...args) => {
+    const { stdout } = await promisify(execFile)(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+      import { userInstructions } from ${JSON.stringify(bundlePath)};
+      const [method, args] = JSON.parse(process.argv[1]);
+      console.log(JSON.stringify(await userInstructions[method](...args)));
+    `,
+        JSON.stringify([method, args]),
+      ],
+      { env },
+    );
+    return JSON.parse(stdout);
+  };
+  const initial = await call("get");
+  assert.deepEqual(initial, { content: "", filePath: join(codexHome, "AGENTS.md") });
+  await call("save", "Base instructions", initial);
+  const override = join(codexHome, "AGENTS.override.md");
+  await writeFixture(override, "Old override instructions");
+  const active = await call("get");
+  assert.equal(active.filePath, override);
+  await call("save", instructionPhrase, active);
+  await assert.rejects(call("save", "Stale alternate instructions", active), /Codex 指令已变化/);
+  assert.equal((await call("get")).content, instructionPhrase);
 }
 
 const skillDocument = (phrase) =>
@@ -175,6 +224,7 @@ trust_level = "trusted"
   await run(["plugin", "marketplace", "add", "--json", "--", marketRoot]);
   await run(["plugin", "add", "--json", "--", pluginId]);
 
+  await writeNativeInstructions();
   const active = await startAppServer();
   const installed = await active.rpc("plugin/installed", { cwds: [cwd] });
   assert(
@@ -209,6 +259,7 @@ trust_level = "trusted"
     const prompts = requests.slice(requestCount).map((request) => JSON.stringify(request.input));
     assert(prompts.some((prompt) => prompt.includes(input[0].text) && prompt.includes(phrase)));
     assert(prompts.every((prompt) => !prompt.includes(siblingPhrase)));
+    assert(prompts.some((prompt) => prompt.includes(instructionPhrase)));
     sent.push({ threadId: thread.id, turnId: turn.id, text, input });
   }
 
@@ -226,7 +277,32 @@ trust_level = "trusted"
     }
   }
   console.log(
-    `PASS native composer ${active.version}: explicit skill contents, installed plugin, app mention and cold history`,
+    `PASS native composer ${active.version}: skills, plugin, app mention, user instructions and cold history`,
+  );
+  const [archived, other] = sent.map(({ threadId }) => threadId);
+  await reopened.rpc("thread/archive", { threadId: archived });
+  assert.equal((await reopened.rpc("thread/read", { threadId: archived })).thread.id, archived);
+  await reopened.rpc("thread/delete", { threadId: archived });
+  await reopened.waitForDeletion(archived);
+  await assert.rejects(
+    reopened.rpc("thread/read", { threadId: archived }),
+    /no rollout found|not found|does not exist|thread not loaded/i,
+  );
+  const archivedList = await reopened.rpc("thread/list", { archived: true, modelProviders: [] });
+  assert(!archivedList.data.some(({ id }) => id === archived));
+  assert.equal((await reopened.rpc("thread/read", { threadId: other })).thread.id, other);
+  await reopened.rpc("thread/delete", { threadId: other });
+  await reopened.waitForDeletion(other);
+  await stopAppServer();
+  const afterDeletion = await startAppServer();
+  for (const threadId of [archived, other]) {
+    await assert.rejects(
+      afterDeletion.rpc("thread/read", { threadId }),
+      /no rollout found|not found|does not exist|thread not loaded/i,
+    );
+  }
+  console.log(
+    `PASS native thread/delete ${reopened.version}: archived and active files, notifications, cold read`,
   );
 } finally {
   await stopAppServer();

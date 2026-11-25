@@ -294,7 +294,14 @@ function Workbench({
     let resource: Awaited<ReturnType<typeof openWorkspace>> | undefined;
     setMounted(null);
     if (selectedId !== undefined && identity && cwd) {
-      void openWorkspace(gateway, selectedId, cwd, manage).then(
+      void openWorkspace(gateway, selectedId, cwd, manage, (threadId) => {
+        const current = new URLSearchParams(location.search);
+        if (!active || Number(current.get("host")) !== selectedId || current.get("thread") !== threadId) return;
+        current.delete("thread");
+        navigationVersion.current++;
+        history.replaceState({}, "", location.pathname + "?" + current);
+        setRoute(location.search);
+      }).then(
         (r) => {
           resource = r;
           if (active) setMounted({ gateway, identity, workspace: r });

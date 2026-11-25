@@ -15,6 +15,7 @@ import enUS from "@/i18n/locales/en-US.js";
 import type { SettingsSearchResult } from "@/settings-search/contract.js";
 import {
   isSettingsSectionAvailable,
+  isSettingSearchable,
   type createSettingsPageConfig,
 } from "@/settings/settingsPageConfig.js";
 import {
@@ -51,23 +52,23 @@ export function SettingsSearch({
     () =>
       sections.flatMap((section) => {
         const sectionLabel = intl.formatMessage({ id: section.titleId });
-        const items = SETTINGS_SEARCH_ITEMS.filter((item) => item.section === section.id).map(
-          (item) => ({
-            section: section.id,
-            setting: item.id,
-            label: intl.formatMessage({ id: item.id }),
-            sectionLabel,
-            keys: settingsNavigationSearchKeys([
-              intl.formatMessage({ id: item.id }),
-              enUS[item.id] ?? "",
-            ]),
-            descriptionKeys: [
-              intl.formatMessage({ id: item.description }),
-              enUS[item.description] ?? "",
-            ],
-            visibility: item.visibility,
-          }),
-        );
+        const items = SETTINGS_SEARCH_ITEMS.filter(
+          (item) => item.section === section.id && isSettingSearchable(item.id),
+        ).map((item) => ({
+          section: section.id,
+          setting: item.id,
+          label: intl.formatMessage({ id: item.id }),
+          sectionLabel,
+          keys: settingsNavigationSearchKeys([
+            intl.formatMessage({ id: item.id }),
+            enUS[item.id] ?? "",
+          ]),
+          descriptionKeys: [
+            intl.formatMessage({ id: item.description }),
+            enUS[item.description] ?? "",
+          ],
+          visibility: item.visibility,
+        }));
         return [
           {
             section: section.id,

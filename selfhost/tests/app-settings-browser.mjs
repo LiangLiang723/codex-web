@@ -12,6 +12,21 @@ const model = { id: "model", model: "model", displayName: "Model", isDefault: tr
 async function verify(page, origin) {
   let enabled = true,
     toolEnabled = true;
+  const taskId = "01b8577c-40dd-756a-beec-02952bbfc1a1";
+  const task = {
+    id: taskId,
+    cwd,
+    name: "Deletion fixture",
+    createdAt: 1,
+    updatedAt: 1,
+    status: { type: "idle" },
+    path: `${cwd}/test-rollout.jsonl`,
+  };
+  let deleted = false,
+    rejectDelete = true;
+  const deletionRequests = [];
+  let instructions = "Original Codex instructions";
+  const instructionsPath = `${cwd}/.codex/AGENTS.md`;
   const writes = [];
   const directoryReads = [];
   const app = (id, name, accessible = true) => ({
@@ -33,6 +48,63 @@ async function verify(page, origin) {
     const req = route.request(),
       p = new URL(req.url()).pathname,
       body = req.postDataJSON();
+    if (p === "/api/selfhost/thread-state" && body?.operation === "delete") {
+      deletionRequests.push(body);
+      assert.equal(body.hostId, hostId);
+      assert.equal(body.threadId, taskId);
+      if (rejectDelete)
+        return route.fulfill({ status: 409, json: { message: "Fixture deletion denied" } });
+      deleted = true;
+      return route.fulfill({ json: { deleted: true } });
+    }
+    if (p === "/api/selfhost/workspace" && body?.channel === "user-instructions") {
+      assert.equal(body.hostId, hostId);
+      if (body.method === "get")
+        return route.fulfill({
+          json: { value: { content: instructions, filePath: instructionsPath } },
+        });
+      assert.deepEqual(body.args[1], { content: instructions, filePath: instructionsPath });
+      instructions = body.args[0];
+      return route.fulfill({ json: { value: { filePath: instructionsPath } } });
+    }
+    if (p === "/api/selfhost/capability" && body?.method === "hooks/list") {
+      assert.deepEqual(body.params, { cwds: [cwd] });
+      return route.fulfill({
+        json: {
+          value: {
+            data: [
+              {
+                hooks: [
+                  {
+                    key: "fixture-hook",
+                    eventName: "SessionStart",
+                    sourcePath: `${cwd}/.codex/hooks.json`,
+                    enabled: true,
+                  },
+                ],
+                warnings: [],
+                errors: [],
+              },
+            ],
+          },
+        },
+      });
+    }
+    if (p === "/api/selfhost/capability" && body?.method === "mcpServerStatus/list")
+      return route.fulfill({
+        json: {
+          value: {
+            data: [
+              {
+                name: "fixture-mcp",
+                runtimeStatus: "connected",
+                tools: { find: {} },
+              },
+            ],
+            nextCursor: null,
+          },
+        },
+      });
     if (p === "/api/selfhost/apps") {
       assert.equal(body.hostId, hostId);
       if (body.operation === "installed")
@@ -100,7 +172,11 @@ async function verify(page, origin) {
         ? { items: [workspace], memberships: {} }
         : [workspace],
       "/api/projects": [workspace],
-      "/api/threads": { data: [], nextCursor: null },
+      "/api/threads": {
+        data: !deleted && new URL(req.url()).searchParams.get("archived") !== "true" ? [task] : [],
+        nextCursor: null,
+      },
+      "/api/selfhost/thread-summary": { thread: deleted ? null : task },
       "/api/models": { data: [model], nextCursor: null },
       "/api/selfhost/settings": { locale: "zh-CN" },
       "/api/selfhost/workspace": {
@@ -133,6 +209,46 @@ async function verify(page, origin) {
   await page.goto(new URL("/?" + new URLSearchParams({ host: String(hostId), cwd }), origin).href, {
     waitUntil: "domcontentloaded",
   });
+  const taskRow = page.getByTestId(`task-item-${taskId}`).first();
+  const deleteItem = page.getByTestId("task-permanent-delete");
+  if (page.viewportSize().width < 600) {
+    await taskRow.scrollIntoViewIfNeeded();
+    const rowBox = await taskRow.boundingBox();
+    assert(rowBox);
+    const touch = await page.context().newCDPSession(page);
+    try {
+      await touch.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: [{ x: rowBox.x + 24, y: rowBox.y + rowBox.height / 2 }],
+      });
+      await deleteItem.waitFor({ timeout: 5000 });
+    } finally {
+      await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await touch.detach();
+    }
+  } else await taskRow.click({ button: "right" });
+  await deleteItem.waitFor();
+  for (const label of ["反馈问题", "查看模型调用轨迹"])
+    assert.equal(await page.getByRole("menuitem", { name: label, exact: true }).count(), 0);
+  await deleteItem.click();
+  const deletion = page.getByTestId("selfhost-task-delete-confirmation");
+  await deletion.getByText(/Deletion fixture/).waitFor();
+  assert.equal(deletionRequests.length, 0);
+  await deletion.getByRole("button", { name: /^取消/ }).click();
+  await deletion.waitFor({ state: "hidden" });
+  assert.equal(deletionRequests.length, 0);
+  await taskRow.click({ button: "right" });
+  await deleteItem.click();
+  await deletion.getByTestId("confirm-dialog-confirm").click();
+  await page.getByText(/Fixture deletion denied/).waitFor();
+  assert(await taskRow.isVisible());
+  assert.equal(deletionRequests.length, 1);
+  rejectDelete = false;
+  await taskRow.click({ button: "right" });
+  await deleteItem.click();
+  await deletion.getByTestId("confirm-dialog-confirm").click();
+  await taskRow.waitFor({ state: "detached" });
+  assert.equal(deletionRequests.length, 2);
   const entry = page.getByTestId("plugin-store-sidebar-open");
   await entry.waitFor();
   assert.equal((await entry.innerText()).trim(), "扩展");
@@ -166,6 +282,29 @@ async function verify(page, origin) {
       .click();
   }
   await page.getByTestId("task-settings-button").click();
+  for (const section of ["browser", "memory", "commands", "subagents", "projects"])
+    assert.equal(await page.locator(`[data-settings-section-nav="${section}"]`).count(), 0);
+  assert.equal(await page.locator('[data-settings-search-id="settings.httpProxy"]').count(), 0);
+  await page.locator('[data-settings-section-nav="mcp"]').click();
+  await page
+    .getByTestId("selfhost-settings-mcp")
+    .getByText("fixture-mcp", { exact: true })
+    .waitFor();
+  await page.locator('[data-settings-section-nav="hooks"]').click();
+  await page
+    .getByTestId("selfhost-settings-hooks")
+    .getByText("SessionStart", { exact: true })
+    .waitFor();
+  await page.locator('[data-settings-section-nav="shares"]').click();
+  await page.locator('[data-testid="share-management"][data-state="ready"]').waitFor();
+  await page.locator('[data-settings-section-nav="personalization"]').click();
+  const editor = page.getByTestId("settings-personalization-editor");
+  await page.getByText(instructionsPath, { exact: true }).waitFor();
+  assert.equal(await editor.inputValue(), "Original Codex instructions");
+  await editor.fill("Updated Codex instructions");
+  await page.getByTestId("settings-personalization-save").click();
+  await page.getByText("已保存，新会话生效", { exact: true }).waitFor();
+  assert.equal(instructions, "Updated Codex instructions");
   const appNav = page.locator('[data-settings-section-nav="codexApps"]');
   await appNav.click();
   const row = page.getByTestId("codex-app-drive");

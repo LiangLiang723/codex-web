@@ -1,6 +1,7 @@
 import { PreinstalledToolsDialog } from "@/preinstalled-tools/index.js";
 import { useState } from "react";
 import { DesktopCommandIds } from "@zcode/shared";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import {
   TID_WORKSPACE_HELP_MENU_RESOURCE_MANAGER,
   TID_WORKSPACE_HELP_MENU_TRIGGER,
@@ -46,6 +47,17 @@ export function WorkspaceHelpMenuButton({
    * 是否桌面端。由挂载处注入而不是在组件内嗅探：Web 的 IPlatformService 桩同样实现了
    * executeDesktopCommand（no-op），拿它判定会让 Web 端出现一个点了没反应的「资源管理器」。
    */
+  isDesktop?: boolean;
+}) {
+  if (selfHostedBuild) return null;
+  return <WorkspaceHelpMenu className={className} isDesktop={isDesktop} />;
+}
+
+function WorkspaceHelpMenu({
+  className,
+  isDesktop = false,
+}: {
+  className?: string;
   isDesktop?: boolean;
 }) {
   const { intl } = useZCodeIntl();

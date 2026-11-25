@@ -16,6 +16,7 @@ const request = z
       "memory",
       "output-style",
       "workflows",
+      "user-instructions",
     ]),
     method: z.string().regex(/^[a-z][A-Za-z0-9]{0,80}$/),
     args: z.array(z.unknown()).max(8),

@@ -1,9 +1,12 @@
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
+
 interface TaskActionMenuItemProps {
   children: React.ReactNode;
   "data-testid"?: string;
   disabled?: boolean;
   onSelect?: () => void;
   title?: string;
+  variant?: "default" | "destructive";
 }
 
 interface TaskActionMenuSeparatorProps {
@@ -30,6 +33,8 @@ export function TaskActionMenuContent({
   onTogglePinTask,
   onStartRenameTask,
   onArchiveTask,
+  onDeleteTask,
+  deleteDisabledReason,
   onMarkTaskAsUnread,
   onRestartTask,
   restartPending = false,
@@ -69,6 +74,8 @@ export function TaskActionMenuContent({
   onStartRenameTask: () => void;
   /** 不传则不展示归档项：Header 拿不到实时运行态，归档只在侧栏提供。 */
   onArchiveTask?: () => void;
+  onDeleteTask?: () => void;
+  deleteDisabledReason?: string;
   onMarkTaskAsUnread: () => void;
   onRestartTask?: () => void;
   restartPending?: boolean;
@@ -131,7 +138,7 @@ export function TaskActionMenuContent({
       >
         {intl.formatMessage({ id: "taskList.markAsUnread" })}
       </Item>
-      {onRestartTask ? (
+      {!selfHostedBuild && onRestartTask ? (
         <Item
           data-testid="task-restart"
           disabled={taskTargetActionsDisabled || restartPending}
@@ -141,7 +148,7 @@ export function TaskActionMenuContent({
         </Item>
       ) : null}
       <Separator />
-      {!hideMobileUnsupportedActions ? (
+      {!selfHostedBuild && !hideMobileUnsupportedActions ? (
         <Item
           disabled={disableTaskActions}
           title={disableTaskActions ? disabledReason : undefined}
@@ -161,26 +168,30 @@ export function TaskActionMenuContent({
       >
         {intl.formatMessage({ id: "appHeader.copyPath" })}
       </Item>
-      <Item
-        disabled={taskTargetActionsDisabled || taskSessionFile.loading || !taskSessionFile.path}
-        title={taskTargetActionsDisabled ? disabledReason : undefined}
-        onSelect={onCopyTaskPath}
-      >
-        {intl.formatMessage({ id: "appHeader.copyTaskPath" })}
-      </Item>
-      <Item
-        disabled={
-          taskTargetActionsDisabled ||
-          taskNativeSessionLogFile.loading ||
-          !taskNativeSessionLogFile.path
-        }
-        title={taskTargetActionsDisabled ? disabledReason : undefined}
-        onSelect={onCopyTaskLogPath}
-      >
-        {/* Bugfix: ZCode Agent 的日志路径可能先按运行时约定得出，当前日期文件尚未落盘。
+      {!selfHostedBuild || taskSessionFile.path ? (
+        <Item
+          disabled={taskTargetActionsDisabled || taskSessionFile.loading || !taskSessionFile.path}
+          title={taskTargetActionsDisabled ? disabledReason : undefined}
+          onSelect={onCopyTaskPath}
+        >
+          {intl.formatMessage({ id: "appHeader.copyTaskPath" })}
+        </Item>
+      ) : null}
+      {!selfHostedBuild ? (
+        <Item
+          disabled={
+            taskTargetActionsDisabled ||
+            taskNativeSessionLogFile.loading ||
+            !taskNativeSessionLogFile.path
+          }
+          title={taskTargetActionsDisabled ? disabledReason : undefined}
+          onSelect={onCopyTaskLogPath}
+        >
+          {/* Bugfix: ZCode Agent 的日志路径可能先按运行时约定得出，当前日期文件尚未落盘。
             复制动作只依赖路径字符串，不能把 exists=false 当成不可复制，否则菜单会表现成“不能点”。 */}
-        {intl.formatMessage({ id: "appHeader.copyLogPath" })}
-      </Item>
+          {intl.formatMessage({ id: "appHeader.copyLogPath" })}
+        </Item>
+      ) : null}
       {onCopySessionId ? (
         <Item
           disabled={taskTargetActionsDisabled || !activeSessionId}
@@ -190,7 +201,7 @@ export function TaskActionMenuContent({
           {intl.formatMessage({ id: "appHeader.copySessionId" })}
         </Item>
       ) : null}
-      {!hideMobileUnsupportedActions ? (
+      {!selfHostedBuild && !hideMobileUnsupportedActions ? (
         /* Bugfix: 手机远控运行在浏览器里，无法可靠打开桌面端 provider 配置文件。
            这里只在远控移动端隐藏入口，桌面端仍沿用“路径已知即可前往配置”的能力。 */
         <Item
@@ -207,7 +218,7 @@ export function TaskActionMenuContent({
           </span>
         </Item>
       ) : null}
-      {onViewModelTrajectory ? (
+      {!selfHostedBuild && onViewModelTrajectory ? (
         <>
           <Separator />
           {/* 调用轨迹查看：从 ~/.zcode/cli 的 model-io 还原该 task 的模型请求/响应/工具调用，
@@ -221,13 +232,27 @@ export function TaskActionMenuContent({
           </Item>
         </>
       ) : null}
-      {onOpenTaskFeedback ? (
+      {!selfHostedBuild && onOpenTaskFeedback ? (
         <>
           <Separator />
           <Item disabled={taskTargetActionsDisabled} onSelect={onOpenTaskFeedback}>
             {/* Bugfix: 任务菜单之前只有复制日志/路径，用户遇到任务问题时还要手动回到反馈中心。
                 “反馈问题”不是任务管理动作，单独放在菜单底部更符合兜底求助入口的层级。 */}
             {intl.formatMessage({ id: "taskList.feedback" })}
+          </Item>
+        </>
+      ) : null}
+      {onDeleteTask ? (
+        <>
+          <Separator />
+          <Item
+            data-testid="task-permanent-delete"
+            variant="destructive"
+            disabled={taskTargetActionsDisabled || Boolean(deleteDisabledReason)}
+            title={disabledReason ?? deleteDisabledReason}
+            onSelect={onDeleteTask}
+          >
+            {intl.formatMessage({ id: "selfhost.task.delete" })}
           </Item>
         </>
       ) : null}

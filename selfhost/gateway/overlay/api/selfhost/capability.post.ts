@@ -9,6 +9,7 @@ const methods = z.enum([
   "skills/config/write",
   "plugin/installed",
   "mcpServerStatus/list",
+  "hooks/list",
   "thread/archive",
   "thread/unarchive",
   "thread/name/set",
@@ -37,6 +38,13 @@ export default defineGatewayEventHandler(async (event) => {
     const skill = z.object({ path: z.string().startsWith("/").max(4096), enabled: z.boolean() })
       .strict().parse(params);
     return { value: await threadBroker.selfhostCapability(host, method, skill) };
+  }
+  if (method === "hooks/list") {
+    const workspace = z
+      .object({ cwds: z.tuple([z.string().startsWith("/").max(4096)]) })
+      .strict()
+      .parse(params);
+    return { value: await threadBroker.selfhostCapability(host, method, workspace) };
   }
   return { value: await threadBroker.selfhostCapability(host, method, params) };
 });

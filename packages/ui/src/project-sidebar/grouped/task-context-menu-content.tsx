@@ -1,4 +1,7 @@
 import { SidebarNativeTooltip } from "@/ControlHintTooltip.js";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
+import { useSelfhostTaskDeletion } from "@/useTaskListItemContextActions.js";
+import { isTaskListRowRunning } from "@/v4/taskListRowActivity.js";
 import type { ProjectTask as ZCodeTaskMeta } from "@/project-sidebar/contract.js";
 
 import {
@@ -56,6 +59,10 @@ export function GroupedTaskContextMenuContent({
   /** 归档专属的禁用原因（运行中任务）；其余操作不受影响。 */
   archiveDisabledReason?: string;
 }) {
+  const deleteTask = useSelfhostTaskDeletion();
+  const deleteDisabledReason = isTaskListRowRunning(task)
+    ? intl.formatMessage({ id: "archives.reason.running" })
+    : undefined;
   return (
     <ContextMenuContent className="w-56">
       <ContextMenuSub>
@@ -157,19 +164,21 @@ export function GroupedTaskContextMenuContent({
         </ContextMenuItem>
       </SidebarNativeTooltip>
       <ContextMenuSeparator />
-      <SidebarNativeTooltip>
-        <ContextMenuItem
-          disabled={Boolean(disabledReason)}
-          title={disabledReason}
-          onSelect={() => {
-            if (!disabledReason) {
-              onOpenTaskPathInFileManager();
-            }
-          }}
-        >
-          {fileManagerLabel}
-        </ContextMenuItem>
-      </SidebarNativeTooltip>
+      {!selfHostedBuild ? (
+        <SidebarNativeTooltip>
+          <ContextMenuItem
+            disabled={Boolean(disabledReason)}
+            title={disabledReason}
+            onSelect={() => {
+              if (!disabledReason) {
+                onOpenTaskPathInFileManager();
+              }
+            }}
+          >
+            {fileManagerLabel}
+          </ContextMenuItem>
+        </SidebarNativeTooltip>
+      ) : null}
       <ContextMenuItem
         onSelect={() =>
           onCopyText(intl.formatMessage({ id: "appHeader.copyPath" }), task.workspacePath)
@@ -177,25 +186,29 @@ export function GroupedTaskContextMenuContent({
       >
         {intl.formatMessage({ id: "appHeader.copyPath" })}
       </ContextMenuItem>
-      <ContextMenuItem
-        disabled={taskSessionFile.loading || !taskSessionFile.path}
-        onSelect={() =>
-          onCopyText(intl.formatMessage({ id: "appHeader.copyTaskPath" }), taskSessionFile.path)
-        }
-      >
-        {intl.formatMessage({ id: "appHeader.copyTaskPath" })}
-      </ContextMenuItem>
-      <ContextMenuItem
-        disabled={taskNativeSessionLogFile.loading || !taskNativeSessionLogFile.path}
-        onSelect={() =>
-          onCopyText(
-            intl.formatMessage({ id: "appHeader.copyLogPath" }),
-            taskNativeSessionLogFile.path,
-          )
-        }
-      >
-        {intl.formatMessage({ id: "appHeader.copyLogPath" })}
-      </ContextMenuItem>
+      {!selfHostedBuild || taskSessionFile.path ? (
+        <ContextMenuItem
+          disabled={taskSessionFile.loading || !taskSessionFile.path}
+          onSelect={() =>
+            onCopyText(intl.formatMessage({ id: "appHeader.copyTaskPath" }), taskSessionFile.path)
+          }
+        >
+          {intl.formatMessage({ id: "appHeader.copyTaskPath" })}
+        </ContextMenuItem>
+      ) : null}
+      {!selfHostedBuild ? (
+        <ContextMenuItem
+          disabled={taskNativeSessionLogFile.loading || !taskNativeSessionLogFile.path}
+          onSelect={() =>
+            onCopyText(
+              intl.formatMessage({ id: "appHeader.copyLogPath" }),
+              taskNativeSessionLogFile.path,
+            )
+          }
+        >
+          {intl.formatMessage({ id: "appHeader.copyLogPath" })}
+        </ContextMenuItem>
+      ) : null}
       <ContextMenuItem
         onSelect={() =>
           onCopyText(intl.formatMessage({ id: "appHeader.copySessionId" }), task.taskId)
@@ -203,18 +216,36 @@ export function GroupedTaskContextMenuContent({
       >
         {intl.formatMessage({ id: "appHeader.copySessionId" })}
       </ContextMenuItem>
-      <ContextMenuItem
-        disabled={providerConfigFile.loading || !providerConfigFile.path}
-        onSelect={onOpenProviderConfig}
-      >
-        <span className="truncate">
-          {intl.formatMessage({ id: "appHeader.goToProviderConfig" })}
-        </span>
-      </ContextMenuItem>
-      <ContextMenuSeparator />
-      <ContextMenuItem onSelect={onOpenTaskFeedback}>
-        {intl.formatMessage({ id: "taskList.feedback" })}
-      </ContextMenuItem>
+      {!selfHostedBuild ? (
+        <>
+          <ContextMenuItem
+            disabled={providerConfigFile.loading || !providerConfigFile.path}
+            onSelect={onOpenProviderConfig}
+          >
+            <span className="truncate">
+              {intl.formatMessage({ id: "appHeader.goToProviderConfig" })}
+            </span>
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={onOpenTaskFeedback}>
+            {intl.formatMessage({ id: "taskList.feedback" })}
+          </ContextMenuItem>
+        </>
+      ) : null}
+      {deleteTask ? (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            data-testid="task-permanent-delete"
+            variant="destructive"
+            title={disabledReason ?? deleteDisabledReason}
+            disabled={Boolean(disabledReason ?? deleteDisabledReason)}
+            onSelect={() => void deleteTask(task)}
+          >
+            {intl.formatMessage({ id: "selfhost.task.delete" })}
+          </ContextMenuItem>
+        </>
+      ) : null}
     </ContextMenuContent>
   );
 }

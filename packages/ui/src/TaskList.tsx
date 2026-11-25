@@ -94,6 +94,7 @@ export const TaskList = memo(function TaskList({
   const [pendingArchiveTaskId, setPendingArchiveTaskId] = useState<string | null>(null);
   const [renamingTaskId, setRenamingTaskId] = useState<string | null>(null);
   const [contextMenuTaskId, setContextMenuTaskId] = useState<string | null>(null);
+  const touchContextTask = useRef<string | undefined>(undefined);
   const [renameDraft, setRenameDraft] = useState("");
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const pendingArchiveTaskIdRef = useRef<string | null>(pendingArchiveTaskId);
@@ -463,12 +464,23 @@ export const TaskList = memo(function TaskList({
           ) : (
             <ContextMenu
               onOpenChange={(open) => {
-                if (!open) {
-                  setContextMenuTaskId(null);
-                }
+                if (!open) setContextMenuTaskId(null);
+                else if (touchContextTask.current) handleOpenTaskContextMenu(touchContextTask.current);
               }}
             >
-              <ContextMenuTrigger asChild>
+              <ContextMenuTrigger
+                asChild
+                onPointerDown={(event) => {
+                  // Radix 的触屏长按可以直接打开菜单，未必先触发行的 contextmenu 事件。
+                  // 只记录按下目标，等菜单真正打开后才读取该会话的路径和动作。
+                  touchContextTask.current =
+                    event.pointerType !== "mouse" && event.target instanceof Element
+                      ? event.target.closest<HTMLElement>("[data-task-id]")?.dataset.taskId
+                      : undefined;
+                }}
+                onPointerUp={() => { touchContextTask.current = undefined; }}
+                onPointerCancel={() => { touchContextTask.current = undefined; }}
+              >
                 <ul className="space-y-0.5">{visibleSourceTasks.map(renderTaskItem)}</ul>
               </ContextMenuTrigger>
               {contextMenuTask ? (

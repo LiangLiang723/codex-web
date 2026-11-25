@@ -110,8 +110,20 @@ const gateway = {
     }
     if (u.pathname === "/api/config/pinned-threads") {
       threadRows = threadRows.map((t) =>
-        t.id === (payload.threadId ?? payload.thread?.threadId) ? { ...t, pinned: payload.pinned } : t,
+        t.id === (payload.threadId ?? payload.thread?.threadId)
+          ? { ...t, pinned: payload.pinned }
+          : t,
       );
+      return schema.parse({});
+    }
+    if (u.pathname === "/api/selfhost/thread-state" && payload.operation === "unread") {
+      threadRows = threadRows.map((thread) => {
+        if (thread.id !== payload.threadId) return thread;
+        if (payload.unread) return { ...thread, unreadAt: (thread.unreadAt ?? 1) + 1 };
+        return payload.expectedUnreadAt === thread.unreadAt
+          ? { ...thread, unreadAt: undefined }
+          : thread;
+      });
       return schema.parse({});
     }
     if (u.pathname === "/api/selfhost/capability" && payload?.method === "mcpServerStatus/list") {
@@ -244,6 +256,24 @@ try {
       mutation: { kind: "pin", pinned: false },
     });
     assert.ok(calls.includes("/api/config/pinned-threads"));
+    const address = { workspacePath: "/A", taskId: "a-new" };
+    const firstUnread = await tasks.mutateTask({ address, mutation: { kind: "mark-unread" } });
+    const secondUnread = await tasks.mutateTask({ address, mutation: { kind: "mark-unread" } });
+    assert(firstUnread.unreadAt < secondUnread.unreadAt);
+    const readThroughOldMarker = await tasks.mutateTask({
+      address,
+      mutation: { kind: "mark-read", expectedUnreadAt: firstUnread.unreadAt },
+    });
+    assert.equal(readThroughOldMarker.unreadAt, secondUnread.unreadAt);
+    assert.equal(
+      (
+        await tasks.mutateTask({
+          address,
+          mutation: { kind: "mark-read", expectedUnreadAt: secondUnread.unreadAt },
+        })
+      ).unreadAt,
+      undefined,
+    );
     await verifyNativeCatalogBudget(tasks);
     const view = await modelSelectionService.getView({
       selection: { modelId: "specific", providerId: "glm", options: { reasoningLevel: "high" } },

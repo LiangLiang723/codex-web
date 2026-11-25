@@ -18,6 +18,8 @@ export function TaskListItemContextMenu({
   onTogglePinTask,
   onStartRenameTask,
   onArchiveTask,
+  onDeleteTask,
+  deleteDisabledReason,
   onMarkTaskAsUnread,
   onOpenTaskFeedback,
   onOpenTaskPathInFileManager,
@@ -49,6 +51,8 @@ export function TaskListItemContextMenu({
   onTogglePinTask: () => void;
   onStartRenameTask: () => void;
   onArchiveTask: () => void;
+  onDeleteTask?: () => void;
+  deleteDisabledReason?: string;
   onMarkTaskAsUnread: () => void;
   onOpenTaskFeedback: () => void;
   onOpenTaskPathInFileManager: () => void;
@@ -79,6 +83,8 @@ export function TaskListItemContextMenu({
         onTogglePinTask={onTogglePinTask}
         onStartRenameTask={onStartRenameTask}
         onArchiveTask={onArchiveTask}
+        onDeleteTask={onDeleteTask}
+        deleteDisabledReason={deleteDisabledReason}
         onMarkTaskAsUnread={onMarkTaskAsUnread}
         onOpenTaskFeedback={onOpenTaskFeedback}
         onOpenTaskPathInFileManager={onOpenTaskPathInFileManager}

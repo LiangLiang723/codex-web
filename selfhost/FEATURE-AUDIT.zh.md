@@ -22,6 +22,21 @@
 
 本分支已删除原 Web 入口的厂商设备中继启动、智谱 OAuth 回调页面和 14 份独立商业运营文档。保留 Git 上游历史，可用锁定的 SHA 查阅原文。
 
+## 会话与设置入口核对
+
+| 入口 | 公共 App Server 或工作区能力 | 自托管处理 |
+| --- | --- | --- |
+| 会话重命名、归档、恢复、消息分支 | `thread/name/set`、`thread/archive`、`thread/unarchive`、`thread/fork` | 保留原生操作，置顶会话优先展示远端标题。 |
+| 会话置顶、手动未读、分组 | 中心账号的导航状态，支持 Codex 0.170 | 置顶、未读和分组都由中心账号持有，清除未读时比对客户端实际看到的标记。 |
+| 永久删除 | `thread/delete`、`thread/deleted` | 右键和归档设置经确认后执行，清理该会话的网关缓存与组织元数据。 |
+| 复制与桌面专属会话工具 | `thread/read` 的 `path`、Web 剪贴板、SSH 文件树 | 保留可获取的路径和会话 ID。移除本机文件管理器、ZCode 日志、调用轨迹、反馈和重启入口。 |
+| 项目操作 | SSH 目录登记及浏览。较新 Codex 有项目协议，当前最低版本提供 Thread 目录信息。 | 保留目录登记、目录浏览、会话创建和网页排序。隐去对旧桌面与原生项目无法写回的控件。 |
+| MCP 和钩子 | `mcpServerStatus/list`、`hooks/list` | 提供当前主机状态、钩子目录和刷新。OAuth 需要远端回调链路，写入由远端原生配置负责。 |
+| 一般设置及 Agent 行为 | 网页界面、通知、终端字体与消息展示由 Web 消费 | 隐去终端启动配置、代理、数据目录、引导、ZCode Agent 特有参数及其搜索结果。 |
+| 数据与扩展 | App、插件、技能、归档和私有分享已有服务。Codex 从 SSH 用户目录加载个性化指令。 | 私有分享管理使用中心登录态。个性化读取和保存原生指令文件。ZCode 的自动归档、模型供应商、记忆模板、浏览器控制和桌面设置入口退场。 |
+
+会话、应用与状态的协议依据是 [官方 App Server 文档](https://learn.chatgpt.com/docs/app-server) 和 [Codex 0.170 原生方法定义](https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/app-server-protocol/schema/typescript/ClientRequest.ts)。验收场景见[会话操作与设置兼容性](../specs/selfhost-codex/README.md#会话操作与设置兼容性)。
+
 
 ## 真实环境验收
 

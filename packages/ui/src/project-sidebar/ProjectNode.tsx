@@ -1,5 +1,6 @@
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { CSS } from "@dnd-kit/utilities";
 import { Collapsible } from "@/components/ui/collapsible.js";
 import { ProjectNodeContent, type ProjectNodeProps } from "@/project-sidebar/ProjectNodeContent.js";
@@ -12,7 +13,8 @@ export function ProjectNode(props: ProjectNodeProps) {
   const { project, expanded, onExpandedChange, onMove } = props;
   const { isWebRemoteControl = false } = useContext(ProjectTaskListContext);
   const online = props.availability?.online ?? true;
-  const editable = online && !project.legacySingleRoot;
+  // SSH 目录可以来自原生 Codex 或旧桌面，ZCode 的编辑命令无法写回它们。
+  const editable = online && !project.legacySingleRoot && !selfHostedBuild;
   const [sessionDropOver, setSessionDropOver] = useState(false);
   const dragDepth = useRef(0);
   const sessionDropTarget = editable && sessionDropOver;
