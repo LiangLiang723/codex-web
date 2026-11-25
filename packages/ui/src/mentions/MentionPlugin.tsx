@@ -669,7 +669,7 @@ export function MentionPlugin({
           selection.insertNodes([$createPromptMentionNode(item), trailingWhitespace]);
           trailingWhitespace.selectEnd();
         },
-        { discrete: hasAction },
+        { discrete: hasAction ? true : undefined },
       );
 
       dismissPanel();
