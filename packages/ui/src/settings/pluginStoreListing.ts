@@ -26,6 +26,8 @@ import { isExtensionEngineCompatible } from "@zcode/shared/extension-host";
 import { DEFAULT_MARKETPLACE_ID } from "@/settings/recommendedPlugins.js";
 import { pluginSearchMatches } from "@/settings/pluginSearch.js";
 
+export const CODEX_PLUGIN_DIRECTORY_URL = "https://chatgpt.com/plugins";
+
 export {
   formatCanonicalPluginName,
   resolveLocalizedText,
@@ -75,6 +77,10 @@ export interface StorePluginItem {
   installedMeta?: ZCodeInstalledPluginSummary;
 }
 
+export function canUseNativePlugin(item: StorePluginItem): boolean {
+  return item.installed && item.info?.enabled === true && item.info.nativePolicyBlocked !== true;
+}
+
 // 市场和右侧推荐共用按插件的忙碌判定，避免安装一个插件时禁用整个推荐列表。
 export function isItemBusy(
   item: StorePluginItem,
@@ -116,11 +122,15 @@ export function isExtensionIncompatible(
   return range !== undefined && !isExtensionEngineCompatible(range);
 }
 
-/** 未安装条目要先更新 ZCode 才能装。卡片、详情页按钮与 handleInstall 共用这一个判断。 */
+/** 卡片、详情和示例提示词入口都要遵守目录的安装策略。 */
 export function isStoreItemInstallBlocked(
-  item: Pick<StorePluginItem, "installed" | "restorable" | "listing">,
+  item: Pick<StorePluginItem, "installed" | "restorable" | "listing" | "summary">,
 ): boolean {
-  return !item.installed && !item.restorable && isExtensionIncompatible(item.listing);
+  return (
+    !item.installed &&
+    !item.restorable &&
+    (item.summary?.installPolicy === "NOT_AVAILABLE" || isExtensionIncompatible(item.listing))
+  );
 }
 
 /**

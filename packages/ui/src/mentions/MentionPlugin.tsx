@@ -4,6 +4,7 @@ import type { ZCodeProvider } from "@zcode/shared";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { createPortal } from "react-dom";
 import { PaletteIcon } from "lucide-react";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import {
   $createTextNode,
   BLUR_COMMAND,
@@ -24,7 +25,7 @@ import {
 } from "../lib/promptInputTriggers.js";
 import {
   ContextMentionOptionContent,
-  SkillMentionOptionContent,
+  AppOrSkillMentionOptionContent,
 } from "@/mentions/components/ContextMentionOptionContent.js";
 import { PluginMentionOptionContent } from "@/mentions/components/PluginMentionOptionContent.js";
 import {
@@ -50,7 +51,10 @@ import {
   useExtensionMentionGroups,
 } from "@/extension-slots/index.js";
 import { useFileMentionProvider } from "./providers/fileMentionProvider.js";
-import { usePluginsMentionProvider } from "./providers/pluginsMentionProvider.js";
+import {
+  useCodexAppsMentionProvider,
+  usePluginsMentionProvider,
+} from "./providers/pluginsMentionProvider.js";
 import { useSessionsMentionProvider } from "./providers/sessionsMentionProvider.js";
 import { useSkillsMentionProvider } from "./providers/skillsMentionProvider.js";
 import { useWhiteboardMentionProvider } from "./providers/whiteboardMentionProvider.js";
@@ -69,6 +73,8 @@ interface MentionPluginProps {
   workspaceIdentity?: string;
   /** 已有 Session 的 id；null/undefined = 新建草稿。决定 Plugins 分组的 catalog authority。 */
   sessionId?: string | null;
+  /** 自托管 Codex 的实际 Thread，草稿预热目录不传此值。 */
+  nativeThreadId?: string | null;
   disabled?: boolean;
   onWhiteboardMentionSelected?: (boardId: string) => void | Promise<void>;
 }
@@ -146,6 +152,7 @@ export function MentionPlugin({
   workspacePath,
   workspaceIdentity,
   sessionId,
+  nativeThreadId,
   provider,
   container,
   disabled = false,
@@ -179,6 +186,13 @@ export function MentionPlugin({
   const isContextTrigger = activeTrigger?.trigger === "@";
   const isSessionTrigger = activeTrigger?.trigger === "#";
   const isSkillTrigger = activeTrigger?.trigger === "$";
+  const appsResult = useCodexAppsMentionProvider(
+    workspacePath,
+    workspaceIdentity,
+    nativeThreadId ?? null,
+    deferredActiveQuery,
+    isOpen && isSkillTrigger,
+  );
 
   // 修复说明：之前把 @ 面板拆成了两层，导致用户输入 query 后还要再确认一次，
   // 实际感受像“按回车之后才开始搜”。现在改成单层分组面板，query 一变化就直接展示各分组结果。
@@ -303,8 +317,20 @@ export function MentionPlugin({
       },
     } satisfies Record<MentionPanelGroupId, MentionResultGroup<MentionItem>>;
 
-    // @ 的类别顺序与 $ 单分组保持原契约；# 的项目分组来自当前 Host 查询结果。
-    // 插件分组只在 @ 面板，排在内置分组之后。
+    // Codex 的 $ 同时保留两组状态，应用目录为空时也要展示设置入口的指引。
+    if (selfHostedBuild && activeTrigger?.trigger === "$") {
+      return [
+        groupsById.skills,
+        {
+          id: "apps",
+          title: appsResult.title,
+          items: appsResult.items,
+          loading: appsResult.loading,
+          errorText: appsResult.error?.message ?? null,
+          emptyText: appsResult.emptyText,
+        },
+      ];
+    }
     return buildVisibleMentionGroups([
       ...getMentionPanelGroupOrder(activeTrigger?.trigger).map((groupId) => groupsById[groupId]),
       ...(activeTrigger?.trigger === "@" ? extensionGroups : []),
@@ -317,6 +343,11 @@ export function MentionPlugin({
     fileResult.loading,
     fileResult.title,
     activeTrigger?.trigger,
+    appsResult.emptyText,
+    appsResult.error,
+    appsResult.items,
+    appsResult.loading,
+    appsResult.title,
     pluginsResult.emptyText,
     pluginsResult.error,
     pluginsResult.items,
@@ -360,8 +391,8 @@ export function MentionPlugin({
           content:
             item.category === "files" ? (
               <ContextMentionOptionContent item={item} workspacePath={workspacePath} />
-            ) : item.category === "skills" ? (
-              <SkillMentionOptionContent item={item} />
+            ) : item.category === "skills" || item.category === "apps" ? (
+              <AppOrSkillMentionOptionContent item={item} />
             ) : item.category === "whiteboards" ? (
               <span className="min-w-0 flex flex-1 items-center gap-2">
                 <PaletteIcon className="size-3.5 shrink-0 text-foreground" />

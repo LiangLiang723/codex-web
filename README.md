@@ -70,7 +70,7 @@ sh selfhost/update.sh --no-build
 - 插件、Skills 和 MCP 通过选中主机的 Codex 接口读取。输入框使用 `plugin/installed` 加载已安装插件，浏览插件市场时再查询市场目录。支持工作流文件的读取、元数据编辑、移动和删除。ZCode 的动态工作流脚本运行器尚未接入 Codex。自动化界面可保存任务，由中心调度器发起 Codex Thread 和 Turn。
 - 私有分享保存选定轮次的用户和助手文本，使用同一中心账号查看、撤销或删除。文本分享省略图片附件和工具输出。
 
-在「设置 → Agent 能力」打开「应用」「插件」或「技能」，管理当前 SSH 主机上的 Codex。应用可查看连接入口、有效开关、工具列表和当前可调用状态。插件使用 ZCode 的商店和已安装列表，技能按所在项目与原生路径启停。应用的外部授权在 Codex 提供的页面完成。[官方 App Server 文档](https://learn.chatgpt.com/docs/app-server)
+在工作区侧栏打开「扩展」，可查看当前 SSH 主机的插件、应用与技能。已安装的条目优先显示。点「使用」会在对应项目打开可编辑的聊天草稿；在已有对话里，可从输入框的加号选择。插件安装沿用 ZCode 商店，应用授权使用 Codex 返回的官方页面，技能详情可打开远端的 `SKILL.md`。「设置 → Agent 能力」也保留三个管理入口。[官方 App Server 文档](https://learn.chatgpt.com/docs/app-server)
 
 ## 远程执行链路
 
@@ -78,7 +78,7 @@ sh selfhost/update.sh --no-build
 
 如果同一台 Mac 上桌面回复很快，Web 却反复显示模型重连，检查 SSH 启动的 Codex daemon 是否继承该主机已有的 `HTTPS_PROXY`。代理环境在进程启动时读取。确认该 daemon 没有运行中的轮次后，从能访问已有代理的环境执行 `codex app-server daemon restart`，再用同模型、同推理强度复测首字和完成耗时。
 
-普通输入会裁去首尾空白，作为原生 `text` 输入发送。模型、推理强度、推理摘要、权限和 Plan 模式走独立协议字段，Web 的协作模式设置传入 `developer_instructions: null`。用户主动选择的代码批注、网页元素等上下文按 ZCode 输入框规则序列化，图片作为原生图片输入发送。普通文件上传后，其远端路径写入用户输入。选中的 Skills 和插件随原生结构化输入提交。Codex 自带的模式指令和项目指令由远端 CLI 加载。
+普通输入会裁去首尾空白，作为原生 `text` 输入发送。模型、推理强度、推理摘要、权限和 Plan 模式走独立协议字段，Web 的协作模式设置传入 `developer_instructions: null`。用户主动选择的代码批注、网页元素等上下文按 ZCode 输入框规则序列化，图片作为原生图片输入发送。普通文件上传后，其远端路径写入用户输入。选中的应用和插件按原生 `mention` 提交，技能按 `skill` 提交并保留远端文件路径。Codex 自带的模式指令和项目指令由远端 CLI 加载。
 
 ## 直接在 Linux 运行
 

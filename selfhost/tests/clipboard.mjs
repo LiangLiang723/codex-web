@@ -65,21 +65,27 @@ const genericFailure = "复制失败，请检查剪贴板权限后重试。";
 const tableFailure = "复制表格失败，请检查剪贴板权限后重试。";
 
 async function fixture(page, base, mode) {
-  const origin = mode === "lan-http" ? "http://clipboard-fixture.test" : new URL(base).origin;
+  const address = new URL(base);
+  if (mode === "lan-http") address.hostname = "clipboard-fixture.test";
+  const origin = address.origin;
   await page.route(`${base}clipboard-test-seed`, (route) =>
     route.fulfill({ contentType: "text/html", body: "Clipboard test setup" }),
   );
   await page.goto(`${base}clipboard-test-seed`);
   await page.evaluate((text) => navigator.clipboard.writeText(text), beforeCopy);
-  await page.route(`${origin}/**`, async (route) => {
-    const url = new URL(route.request().url());
-    const response = await route.fetch({ url: new URL(url.pathname + url.search, base).href });
-    const headers = response.headers();
-    if (mode === "denied" && route.request().isNavigationRequest()) {
-      headers["permissions-policy"] = "clipboard-write=()";
-    }
-    await route.fulfill({ response, headers });
-  });
+  // 代理每个静态模块时，关闭上一场景会中断迟到的请求。只为受限页面的文档设置权限头。
+  if (mode === "denied") {
+    await page.route(
+      (url) => url.origin === origin && url.pathname === "/",
+      async (route) => {
+        const response = await route.fetch();
+        await route.fulfill({
+          response,
+          headers: { ...response.headers(), "permissions-policy": "clipboard-write=()" },
+        });
+      },
+    );
+  }
   await page.route(`${origin}/api/**`, (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -251,6 +257,8 @@ async function verify(browser, base, width, mode) {
   try {
     const page = await context.newPage();
     page.setDefaultTimeout(10000);
+    // 并行验收时，本地预览也可能花十几秒加载未缓存的脚本。
+    page.setDefaultNavigationTimeout(30000);
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     const verifyAction = (action) =>
@@ -262,7 +270,11 @@ async function verify(browser, base, width, mode) {
     const origin = await fixture(page, base, mode);
     const url = new URL("/", origin);
     url.search = new URLSearchParams({ host: String(hostId), cwd, thread: thread.id });
-    await page.goto(url.href);
+    const response = await page.goto(url.href);
+    assert(
+      response?.ok(),
+      `${mode} (${width}px) fixture document returned HTTP ${response?.status()}`,
+    );
     assert.deepEqual(
       await page.evaluate(() => [isSecureContext, typeof navigator.clipboard?.writeText]),
       mode === "lan-http" ? [false, "undefined"] : [true, "function"],
@@ -286,6 +298,8 @@ async function verify(browser, base, width, mode) {
       activate: async (menuItem) => {
         await openLinkMenu(page, link, menuItem, mobile);
         await (mobile ? menuItem.tap() : menuItem.click());
+        // 菜单退场时会恢复原焦点，卸载后再聚焦验收用的粘贴输入框。
+        await page.locator('[data-slot="context-menu-content"]').waitFor({ state: "detached" });
       },
     });
     if (!mobile) {
@@ -373,11 +387,19 @@ try {
       },
     ],
   });
-  server = await preview({ ...config, preview: { host: "127.0.0.1", port: 0 } });
+  server = await preview({
+    ...config,
+    preview: { host: "127.0.0.1", port: 0, allowedHosts: ["clipboard-fixture.test"] },
+  });
   // Chromium Headless Shell 使用进程内剪贴板，复制和粘贴不会接触系统剪贴板。
   browser = await chromium.launch({
     headless: true,
     executablePath: process.env.SELFHOST_CLIPBOARD_HEADLESS_SHELL,
+    // Headless Shell 会沿用系统代理，显式指定直连才能让测试域名到达预览端口。
+    args: [
+      "--host-resolver-rules=MAP clipboard-fixture.test 127.0.0.1",
+      "--proxy-server=direct://",
+    ],
   });
   const base = server.resolvedUrls.local[0];
   for (const width of [1480, 390])

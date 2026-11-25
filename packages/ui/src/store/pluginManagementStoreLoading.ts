@@ -2,8 +2,10 @@ import type { IPluginManagementService } from "@zcode/services";
 import {
   remoteHostIdFromWorkspaceIdentity,
   parseRemoteWorkspaceIdentity,
+  type ZCodePluginsOverviewResult,
   type ZCodePluginScope,
 } from "@zcode/shared";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { logger } from "@/logger.js";
 import type { PluginManagementState } from "@/store/pluginManagementStore.js";
 
@@ -20,9 +22,21 @@ export function buildWorkspaceKey(
 }
 
 // 只共享同服务、同身份、同配置投影的在途查询；每个视图仍独立写回和保存错误态。
-const loadsByService = new WeakMap<
-  IPluginManagementService,
-  Map<string, { task: Promise<Partial<PluginManagementState>>; revision: number }>
+type CatalogSource = "configured" | "account";
+const catalogSources: readonly CatalogSource[] = ["configured", "account"];
+type CatalogStatus = { status: "loading" | "loaded" } | { status: "error"; message: string };
+export type NativeCatalogStatus = Record<CatalogSource, CatalogStatus>;
+type CatalogSnapshots = Partial<Record<CatalogSource, ZCodePluginsOverviewResult>>;
+type CatalogRead = { source: CatalogSource; task: Promise<ZCodePluginsOverviewResult> };
+type PluginLoad = {
+  task: Promise<Partial<PluginManagementState>>;
+  catalogs: CatalogRead[];
+  revision: number;
+};
+const loadsByService = new WeakMap<IPluginManagementService, Map<string, PluginLoad>>();
+const nativeLoadByStore = new WeakMap<
+  () => PluginManagementState,
+  { key: string; snapshots: CatalogSnapshots }
 >();
 export interface PluginManagementChange {
   owner?: () => PluginManagementState;
@@ -197,32 +211,184 @@ export async function loadInto(
   );
   const loadKey = `${workspaceKey}\0${params.configScope ?? "effective"}`;
   const existing = inFlightLoads.get(loadKey);
+  const needsFreshLoad =
+    params.fresh || (params.background && (existing?.revision ?? revision) < revision);
   // 变更前启动的查询不能充当变更后的刷新；同一轮通知的新查询仍可共用。
-  if (existing && (params.fresh || (params.background && existing.revision < revision))) {
+  if (existing && needsFreshLoad && !selfHostedBuild) {
     await existing.task;
     return loadInto(set, get, { ...params, fresh: false });
   }
-  const request = existing ?? { task: runLoadInto({ ...params, workspaceKey }), revision };
+  const request = (needsFreshLoad ? undefined : existing) ?? {
+    task: runLoadInto({ ...params, workspaceKey }),
+    catalogs: selfHostedBuild
+      ? catalogSources.map((source) => ({
+          source,
+          task: params.pluginService.getPluginsOverview({
+            ...pluginView(params),
+            codexCatalogSource: source,
+          }),
+        }))
+      : [],
+    revision,
+  };
   inFlightLoads.set(loadKey, request);
-  try {
-    const result = await request.task;
+  const isCurrent = () => {
     const current = get();
-    if (
-      current.workspacePath !== params.workspacePath ||
-      current.workspaceIdentity !== params.workspaceIdentity ||
-      current.authorityKey !== params.authorityKey ||
-      current.configScope !== params.configScope
-    )
-      return;
+    return (
+      current.workspacePath === params.workspacePath &&
+      current.workspaceIdentity === params.workspaceIdentity &&
+      current.authorityKey === params.authorityKey &&
+      current.configScope === params.configScope
+    );
+  };
+  const publish = (result: Partial<PluginManagementState>) => {
+    if (!isCurrent()) return;
+    const current = get();
     // 其它视图的成功操作只刷新数据，不能抹掉本视图尚未处理的操作错误。
     set(
       params.background && current.error
         ? { ...result, error: current.error, lastFailedPluginId: current.lastFailedPluginId }
         : result,
     );
-  } finally {
+  };
+  const release = () => {
     if (inFlightLoads.get(loadKey) === request) inFlightLoads.delete(loadKey);
+  };
+  if (selfHostedBuild) {
+    const key = `${loadKey}\0${params.workspacePath}`;
+    const previous = nativeLoadByStore.get(get);
+    const projection = { key, snapshots: previous?.key === key ? { ...previous.snapshots } : {} };
+    nativeLoadByStore.set(get, projection);
+    const catalogs = new Map<CatalogSource, PromiseSettledResult<ZCodePluginsOverviewResult>>();
+    const ownsProjection = () => nativeLoadByStore.get(get) === projection && isCurrent();
+    let installed: Awaited<typeof request.task> | undefined;
+    if (ownsProjection())
+      set({
+        nativeCatalogStatus: { configured: { status: "loading" }, account: { status: "loading" } },
+      });
+    const publishCatalog = (initial: boolean) => {
+      if (!installed || !ownsProjection()) return;
+      const catalog = projectNativeCatalog(installed, projection.snapshots, catalogs);
+      if (initial) {
+        publish({
+          ...installed,
+          ...catalog,
+          describeCache: invalidateChangedNativeDetails(get(), installed),
+        });
+      } else set(catalog);
+    };
+    const reads = request.catalogs.map(({ source, task }) =>
+      task
+        .then(
+          (value) => {
+            catalogs.set(source, { status: "fulfilled", value });
+            const failed = new Set(
+              value.marketplaces.filter((market) => market.refreshFailure).map(({ id }) => id),
+            );
+            const previousItems = projection.snapshots[source]?.availablePlugins ?? [];
+            // 部分市场失败时，只保留失败来源的旧目录，成功来源使用本次读到的完整结果。
+            projection.snapshots[source] = {
+              ...value,
+              availablePlugins: [
+                ...value.availablePlugins,
+                ...previousItems.filter(({ marketplace }) => failed.has(marketplace)),
+              ],
+            };
+          },
+          (reason: unknown) => catalogs.set(source, { status: "rejected", reason }),
+        )
+        .then(() => publishCatalog(false)),
+    );
+    // 配置写入和已安装管理只等有效状态。未完成的市场随后按当前工作区的查询世代回填。
+    void Promise.allSettled([request.task, ...reads]).then(release);
+    installed = await request.task;
+    publishCatalog(true);
+    return;
   }
+  try {
+    publish(await request.task);
+  } finally {
+    release();
+  }
+}
+
+function pluginView(params: PluginLoadParams) {
+  return {
+    workspacePath: params.workspacePath,
+    ...(params.workspaceIdentity ? { workspaceIdentity: params.workspaceIdentity } : {}),
+    ...(params.configScope ? { configScope: params.configScope } : {}),
+  };
+}
+
+function projectNativeCatalog(
+  installed: Partial<PluginManagementState>,
+  snapshots: CatalogSnapshots,
+  catalogs: Map<CatalogSource, PromiseSettledResult<ZCodePluginsOverviewResult>>,
+): Partial<PluginManagementState> {
+  const markets = new Map((installed.marketplaces ?? []).map((item) => [item.id, item]));
+  const available = new Map((installed.availablePlugins ?? []).map((item) => [item.id, item]));
+  const installedIds = new Set([
+    ...(installed.plugins ?? []).map(({ id }) => id),
+    ...(installed.installedPlugins ?? []).map(({ id }) => id),
+  ]);
+  const nativeCatalogStatus: NativeCatalogStatus = {
+    configured: { status: "loading" },
+    account: { status: "loading" },
+  };
+  for (const source of catalogSources) {
+    const result = catalogs.get(source);
+    const snapshot = snapshots[source];
+    for (const item of snapshot?.marketplaces ?? []) {
+      const native = markets.get(item.id);
+      markets.set(item.id, { ...item, name: native?.name ?? item.name });
+    }
+    for (const item of snapshot?.availablePlugins ?? []) {
+      const native = available.get(item.id);
+      // 目录与 App Server 的快照可能出自不同时间。安装及启用态由已安装读取裁决。
+      available.set(item.id, {
+        ...item,
+        ...native,
+        installPolicy: item.installPolicy ?? native?.installPolicy,
+        installed: installed.marketplaceAvailabilityKnown
+          ? installedIds.has(item.id)
+          : item.installed,
+      });
+    }
+    if (result?.status === "rejected") {
+      nativeCatalogStatus[source] = { status: "error", message: toMessage(result.reason) };
+    } else if (result?.status === "fulfilled") {
+      const message = result.value.diagnostics.map((diagnostic) => diagnostic.message).join("\n");
+      nativeCatalogStatus[source] = message ? { status: "error", message } : { status: "loaded" };
+    }
+  }
+  const counts = new Map<string, number>();
+  for (const item of available.values())
+    counts.set(item.marketplace, (counts.get(item.marketplace) ?? 0) + 1);
+  return {
+    marketplaces: [...markets.values()].map((market) => ({
+      ...market,
+      pluginCount: counts.get(market.id) ?? 0,
+    })),
+    availablePlugins: [...available.values()],
+    marketplaceAvailabilityKnown: nativeCatalogStatus.configured.status === "loaded",
+    nativeCatalogStatus,
+  };
+}
+
+function invalidateChangedNativeDetails(
+  previous: PluginManagementState,
+  installed: Partial<PluginManagementState>,
+): PluginManagementState["describeCache"] {
+  const before = new Map(previous.installedPlugins.map((plugin) => [plugin.id, plugin]));
+  const after = new Map(installed.installedPlugins?.map((plugin) => [plugin.id, plugin]));
+  // 候选详情不含安装后才发现的技能，安装态或启用态变化时必须重新读取。
+  return Object.fromEntries(
+    Object.entries(previous.describeCache).filter(([id]) => {
+      const old = before.get(id);
+      const next = after.get(id);
+      return old?.version === next?.version && old?.enabled === next?.enabled;
+    }),
+  );
 }
 
 async function runLoadInto(
@@ -230,15 +396,10 @@ async function runLoadInto(
 ): Promise<Partial<PluginManagementState>> {
   // 列表的单插件协议错误曾丢弃成功目录；分别收口，失败接口不在这里重复请求。
   const [listResult, overviewResult] = await Promise.allSettled([
-    params.pluginService.listPlugins({
-      workspacePath: params.workspacePath,
-      ...(params.workspaceIdentity ? { workspaceIdentity: params.workspaceIdentity } : {}),
-      ...(params.configScope ? { configScope: params.configScope } : {}),
-    }),
+    params.pluginService.listPlugins(pluginView(params)),
     params.pluginService.getPluginsOverview({
-      workspacePath: params.workspacePath,
-      ...(params.workspaceIdentity ? { workspaceIdentity: params.workspaceIdentity } : {}),
-      ...(params.configScope ? { configScope: params.configScope } : {}),
+      ...pluginView(params),
+      ...(selfHostedBuild ? { codexCatalogSource: "installed" as const } : {}),
     }),
   ]);
   const errors: string[] = [];

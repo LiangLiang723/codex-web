@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { ArrowLeft, LoaderCircle } from "lucide-react";
 import { type WebRemoteControlMobileNavigationIntent } from "@zcode/shared";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
+import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 import { Button } from "@/components/ui/button.js";
 import { WebRemoteControlThemeMenu } from "@/WebRemoteControlThemeMenu.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
@@ -97,6 +99,14 @@ export function WebRemoteControlMobileShell({
   webRemoteControlTerminalTransportState?: WebRemoteControlTerminalTransportState;
 }) {
   const { intl } = useZCodeIntl();
+  const preparedDraftRequest = useZCodeSessionStore((state) => {
+    if (!selfHostedBuild || !isMobileViewport || !activeWorkspacePath || activeTaskId) return null;
+    const request = state.getWorkspaceState(
+      activeWorkspacePath,
+      activeWorkspaceIdentity,
+    ).composerTextInsertRequest;
+    return request?.mention ? request.requestId : null;
+  });
   const [currentPage, setCurrentPage] = useState<WebRemoteControlMobilePage>(() =>
     resolveInitialWebRemoteControlMobilePage(initialNavigationIntent),
   );
@@ -123,6 +133,11 @@ export function WebRemoteControlMobileShell({
     // 初始意图只随导航变化消费；断点恢复不能重放旧 chat 意图，覆盖用户已经返回的 Home。
     if (initialNavigationIntent === "chat") setCurrentPage("chat");
   }, [initialNavigationIntent]);
+
+  useEffect(() => {
+    // 设置和扩展页可从任务列表直接进入。Root 确认当前项目的引用草稿后，手机才有可挂载的输入框。
+    if (preparedDraftRequest !== null && taskViewEnabled) navigateToChat();
+  }, [preparedDraftRequest, taskViewEnabled, navigateToChat]);
 
   useLayoutEffect(() => {
     if (isMobileViewport && currentPage === "chat") recordMobileChatHistory();

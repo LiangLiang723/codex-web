@@ -9,7 +9,7 @@ import { useStore } from "zustand";
 import { useOptionalTabStore } from "@/store/TabStoreProvider.js";
 import { isWorkspaceTab } from "@/store/tabStore.js";
 import { marketingNavigation, finishMarketingNavigation } from "@/lib/marketingNavigation.js";
-import { ArrowLeft, RefreshCw, Store } from "lucide-react";
+import { ArrowLeft, ExternalLink, RefreshCw, Store } from "lucide-react";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { Button } from "@/components/ui/button.js";
 import { toast } from "@/components/ui/toast.js";
@@ -31,7 +31,12 @@ import {
   PluginWarningList,
 } from "@/settings/InstalledPluginManagement.js";
 import { AddMarketplaceSourceDialog } from "@/settings/AddMarketplaceSourceDialog.js";
-import { PluginStoreListView, type PluginStoreSegment } from "@/settings/PluginStoreListView.js";
+import {
+  PluginStoreListView,
+  SegmentPill,
+  type PluginStoreSegment,
+} from "@/settings/PluginStoreListView.js";
+import { CodexAppsSection } from "@/settings/codex-apps/index.js";
 import {
   PluginStoreAdvancedSection,
   PluginStoreDetailView,
@@ -40,6 +45,7 @@ import { PluginStoreSourcesDialog } from "@/settings/PluginStoreSourcesDialog.js
 import type { PluginStoreActions } from "@/settings/PluginStoreCard.js";
 import {
   buildStoreItems,
+  CODEX_PLUGIN_DIRECTORY_URL,
   canUpdatePluginItem,
   hasInstallableUpdate,
   isPluginVisibleForLoginRegion,
@@ -57,7 +63,10 @@ import { useZCodeStore } from "@/store/StoreProvider.js";
 import { PluginUninstallConfirmDialog } from "@/settings/PluginUninstallConfirmDialog.js";
 import { usePluginUninstall } from "@/settings/usePluginUninstall.js";
 import { claimMarketplaceAutoRefresh } from "@/settings/officialMarketplaceAutoRefresh.js";
-import { consumePluginStoreOpenTarget } from "@/lib/pluginStoreNavigation.js";
+import {
+  consumePluginStoreOpenTarget,
+  type PluginStoreOpenTarget,
+} from "@/lib/pluginStoreNavigation.js";
 import { SettingsBreadcrumbReporter } from "@/settings/SettingsHeaderBreadcrumb.js";
 import {
   buildPluginStoreTryMention,
@@ -78,9 +87,89 @@ interface PluginStorePageProps {
   paneId?: string;
   onOpenDraftUi?: (request: DraftPluginUiOpenRequest) => void;
   onBack?: () => void;
+  initialTarget?: PluginStoreOpenTarget | null;
 }
 
 type PluginStoreView = "store" | "detail" | "manage";
+
+type ExtensionView =
+  | { section: "plugins" | "apps" | "skills" }
+  | { section: "market"; target: PluginStoreOpenTarget | null };
+
+export function WorkspaceExtensionsPage(props: PluginStorePageProps) {
+  return selfHostedBuild ? <CodexWorkspaceExtensions {...props} /> : <PluginStorePage {...props} />;
+}
+
+function CodexWorkspaceExtensions(props: PluginStorePageProps) {
+  const { intl } = useZCodeIntl();
+  // 侧栏先看已安装项。来自其他入口的明确市场、来源和插件详情请求保留原始目标。
+  const [view, setView] = useState<ExtensionView>(() => {
+    const target = consumePluginStoreOpenTarget();
+    return target && !target.section
+      ? { section: "market", target }
+      : { section: target?.section ?? "plugins" };
+  });
+  return (
+    <section className="space-y-4" data-testid="workspace-extensions">
+      <nav
+        aria-label={intl.formatMessage({ id: "workspace.extensions" })}
+        className="flex flex-wrap items-center gap-1"
+      >
+        {props.onBack && (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={intl.formatMessage({ id: "project.back" })}
+            onClick={props.onBack}
+          >
+            <ArrowLeft className="size-4" />
+          </Button>
+        )}
+        {(
+          [
+            ["plugins", "settings.plugin.tab.plugins"],
+            ["apps", "settings.codexApps.title"],
+            ["skills", "settings.skills.title"],
+          ] as const
+        ).map(([section, id]) => (
+          <SegmentPill
+            key={section}
+            active={
+              view.section === section || (section === "plugins" && view.section === "market")
+            }
+            label={intl.formatMessage({ id })}
+            testId={`workspace-extensions-${section}`}
+            onClick={() => setView({ section })}
+          />
+        ))}
+      </nav>
+      {view.section === "market" ? (
+        <PluginStorePage
+          {...props}
+          initialTarget={view.target}
+          onBack={() => setView({ section: "plugins" })}
+        />
+      ) : view.section === "apps" ? (
+        <CodexAppsSection onCreateTask={props.onCreateTask} />
+      ) : (
+        <PluginsSection
+          key={view.section}
+          mode={view.section === "skills" ? "skill" : "market"}
+          isDesktop={props.isDesktop}
+          isWebRemoteControl={props.isWebRemoteControl}
+          isMacDesktop={props.isMacDesktop}
+          isWindowsDesktop={props.isWindowsDesktop}
+          workspacePath={props.workspacePath}
+          workspaceIdentity={props.workspaceIdentity}
+          onCreateTask={props.onCreateTask}
+          onOpenPluginStore={(_scope, intent) =>
+            setView({ section: "market", target: intent ? { intent } : null })
+          }
+        />
+      )}
+    </section>
+  );
+}
 
 export function PluginStorePage({
   isDesktop = false,
@@ -96,6 +185,7 @@ export function PluginStorePage({
   paneId,
   onOpenDraftUi,
   onBack,
+  initialTarget,
 }: PluginStorePageProps) {
   const platform = usePlatform();
   const { intl, locale } = useZCodeIntl();
@@ -128,6 +218,7 @@ export function PluginStorePage({
   const installedPlugins = usePluginManagementStore((state) => state.installedPlugins);
   const restorableBuiltins = usePluginManagementStore((state) => state.restorableBuiltins);
   const loading = usePluginManagementStore((state) => state.loading);
+  const nativeCatalogStatus = usePluginManagementStore((state) => state.nativeCatalogStatus);
   const loadedWorkspacePath = usePluginManagementStore((state) => state.workspacePath);
   const loadedWorkspaceIdentity = usePluginManagementStore((state) => state.workspaceIdentity);
   const error = usePluginManagementStore((state) => state.error);
@@ -171,7 +262,7 @@ export function PluginStorePage({
   // 返回列表页时恢复进入详情前的滚动位置（设置页 main 容器滚动）。
   const storeScrollTopRef = useRef(0);
   const [initialNavigationTarget] = useState(() =>
-    embedded ? null : consumePluginStoreOpenTarget(),
+    embedded ? null : initialTarget === undefined ? consumePluginStoreOpenTarget() : initialTarget,
   );
   const initialNavigationTargetRef = useRef(initialNavigationTarget);
   useEffect(() => {
@@ -328,6 +419,7 @@ export function PluginStorePage({
   ]);
   // 插件自身 warning 诊断（如声明的技能路径扫描为空）：详情高级区展示，避免静默失败。
   const detailPluginInfo = detailItem?.info;
+  const detailDescription = detailItem ? describeCache[detailItem.id] : undefined;
   const detailPluginWarnings = detailPluginInfo
     ? pluginDiagnostics.filter(
         (diagnostic) =>
@@ -337,14 +429,20 @@ export function PluginStorePage({
 
   // 详情页数据补齐：无运行时信息的条目（未安装候选）按需 describe，拿组件清单 + manifest 回退字段。
   useEffect(() => {
-    if (view !== "detail" || !detailItem || (detailItem.info && !selfHostedBuild)) return;
+    if (
+      view !== "detail" ||
+      !detailItem ||
+      (detailItem.info && !selfHostedBuild) ||
+      detailDescription
+    )
+      return;
     void describePlugin(
       detailItem.id,
       detailItem.name,
       detailItem.marketplace,
       pluginManagementService,
     );
-  }, [describePlugin, detailItem, pluginManagementService, view]);
+  }, [describePlugin, detailDescription, detailItem, pluginManagementService, view]);
 
   // 详情条目消失（卸载可恢复内置后 restorable 记录被移除等）时回到列表，避免空详情。
   useEffect(() => {
@@ -545,7 +643,9 @@ export function PluginStorePage({
               )
           : undefined,
       onSetEnabled: (pluginId, enabled) => {
-        void setEnabled(pluginId, enabled, operationService, "user");
+        void setEnabled(pluginId, enabled, operationService, "user").then((succeeded) => {
+          if (succeeded && selfHostedBuild) return refreshAfterPluginChange();
+        });
       },
       onInstall: (item) => void handleInstall(item),
       onUninstall: uninstall.requestUninstall,
@@ -561,6 +661,7 @@ export function PluginStorePage({
       uninstall.requestUninstall,
       pluginUi,
       operationService,
+      refreshAfterPluginChange,
       setEnabled,
       togglingPluginId,
       embedded,
@@ -752,7 +853,7 @@ export function PluginStorePage({
         <PluginStoreDetailView
           item={detailItem}
           actions={actions}
-          describeEntry={describeCache[detailItem.id]}
+          describeEntry={detailDescription}
           onRetryDescribe={() =>
             void describePlugin(
               detailItem.id,
@@ -820,6 +921,70 @@ export function PluginStorePage({
         />
       ) : null}
       <div hidden={view !== "store"}>
+        {selfHostedBuild && nativeCatalogStatus ? (
+          <div className="space-y-2">
+            {nativeCatalogStatus.configured.status !== "loaded" ? (
+              <div className="mb-3 text-ui-base text-foreground-subtle" role="status">
+                {nativeCatalogStatus.configured.status === "error" ? (
+                  <>
+                    <p>
+                      {intl.formatMessage({ id: "settings.plugins.codexConfiguredCatalogFailed" })}
+                    </p>
+                    <p className="break-words">{nativeCatalogStatus.configured.message}</p>
+                  </>
+                ) : (
+                  intl.formatMessage({ id: "settings.plugins.codexConfiguredCatalogLoading" })
+                )}
+              </div>
+            ) : null}
+            {nativeCatalogStatus.account.status !== "loaded" ? (
+              <div
+                className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-3 py-2"
+                data-testid="plugin-store-account-catalog"
+                data-status={nativeCatalogStatus.account.status}
+              >
+                <div role="status" className="min-w-0 text-ui-base text-foreground-subtle">
+                  {nativeCatalogStatus.account.status === "error" ? (
+                    <>
+                      <p>
+                        {intl.formatMessage({ id: "settings.plugins.codexAccountCatalogFailed" })}
+                      </p>
+                      <p className="break-words text-ui-sm">
+                        {nativeCatalogStatus.account.message}
+                      </p>
+                    </>
+                  ) : (
+                    intl.formatMessage({ id: "settings.plugins.codexAccountCatalogLoading" })
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {nativeCatalogStatus.account.status === "error" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      data-testid="plugin-store-account-retry"
+                      onClick={() => void handleRefresh()}
+                    >
+                      {intl.formatMessage({ id: "settings.plugins.marketplace.componentsRetry" })}
+                    </Button>
+                  ) : null}
+                  <Button asChild variant="outline" size="sm">
+                    <a
+                      data-testid="plugin-store-codex-directory"
+                      href={CODEX_PLUGIN_DIRECTORY_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <ExternalLink className="size-3" aria-hidden="true" />
+                      {intl.formatMessage({ id: "settings.plugins.codexDirectory" })}
+                    </a>
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <PluginStoreListView
           order={storeOrder}
           items={items}
@@ -827,6 +992,8 @@ export function PluginStorePage({
           actions={actions}
           loading={
             loading ||
+            nativeCatalogStatus?.configured.status === "loading" ||
+            nativeCatalogStatus?.account.status === "loading" ||
             activeOperations.some((operation) => operation.id.startsWith("marketplace:update:"))
           }
           query={query}
@@ -896,6 +1063,14 @@ export function PluginStorePage({
       <PluginStoreSourcesDialog
         open={sourcesOpen}
         onOpenChange={setSourcesOpen}
+        onAddSource={
+          selfHostedBuild
+            ? () => {
+                setSourcesOpen(false);
+                setAddSourceOpen(true);
+              }
+            : undefined
+        }
         marketplaces={marketplaces}
         error={selfHostedBuild ? error : undefined}
         onUpdateMarketplace={(marketplace) => void updateMarketplace(marketplace, operationService)}

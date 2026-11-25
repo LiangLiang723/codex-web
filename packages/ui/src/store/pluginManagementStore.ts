@@ -18,6 +18,7 @@ import {
   subscribePluginManagementChanges,
   isPluginManagementChangeRelevant,
   notifyPluginManagementChange,
+  type NativeCatalogStatus,
 } from "@/store/pluginManagementStoreLoading.js";
 import { setPluginEnabledOptimistically } from "@/store/pluginManagementStoreEnabled.js";
 
@@ -46,6 +47,7 @@ export interface PluginManagementState {
   restorableBuiltins: ZCodeAvailablePluginSummary[];
   diagnostics: ZCodePluginDiagnostic[];
   loading: boolean;
+  nativeCatalogStatus: NativeCatalogStatus | null;
   error: string | null;
   /**
    * 最近一次失败操作的归属插件：带 pluginId 的操作（如 setEnabled）失败写该
@@ -154,6 +156,7 @@ export const createPluginManagementStore = (initialService?: IPluginManagementSe
     restorableBuiltins: [],
     diagnostics: [],
     loading: false,
+    nativeCatalogStatus: null,
     error: null,
     lastFailedPluginId: null,
     togglingPluginId: null,
@@ -209,6 +212,7 @@ export const createPluginManagementStore = (initialService?: IPluginManagementSe
               installedPlugins: [],
               restorableBuiltins: [],
               diagnostics: [],
+              nativeCatalogStatus: null,
               describeCache: {},
             }
           : {}),

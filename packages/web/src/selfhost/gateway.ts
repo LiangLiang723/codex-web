@@ -227,6 +227,12 @@ export class Gateway {
     await this.connect();
     this.socket!.send(JSON.stringify(message));
   }
+  sendOnReadyConnection(message: Message) {
+    const socket = this.socket;
+    if (this.closed || this.dialing || socket?.readyState !== WebSocket.OPEN)
+      throw new Error("The authenticated Gateway connection is unavailable");
+    socket.send(JSON.stringify(message));
+  }
   async call(type: string, args: Message = {}, requestId = wireId()): Promise<Message> {
     await this.connect();
     return new Promise((resolve, reject) => {

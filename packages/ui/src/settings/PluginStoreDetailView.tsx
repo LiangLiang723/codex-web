@@ -46,9 +46,11 @@ import {
 } from "@/settings/PluginStoreCard.js";
 import {
   isItemBusy,
+  canUseNativePlugin,
   isStoreItemInstallBlocked,
   isTrustedImageUrl,
   isUiPluginItem,
+  CODEX_PLUGIN_DIRECTORY_URL,
   KNOWN_CATEGORY_LABEL_IDS,
   resolveItemDescription,
   resolveStoreCategory,
@@ -138,6 +140,8 @@ export function PluginStoreDetailView({
   ).filter((group): group is PluginComponentDisplayGroup => group !== undefined);
   const componentsLoading = !runtimeInfo && (describeEntry?.status ?? "loading") === "loading";
   const componentsFailed = !runtimeInfo && describeEntry?.status === "error";
+  const useDisabled = selfHostedBuild && item.installed && !canUseNativePlugin(item);
+  const installBlockedByPolicy = item.summary?.installPolicy === "NOT_AVAILABLE";
 
   return (
     <div className="space-y-8" data-testid="plugin-store-detail" data-plugin-id={item.id}>
@@ -177,6 +181,7 @@ export function PluginStoreDetailView({
                     size="lg"
                     data-testid="plugin-store-try-now"
                     data-plugin-id={item.id}
+                    disabled={useDisabled}
                     onClick={() => onUsePrompt(item, "")}
                   >
                     <MessagesSquare className="size-3.5" aria-hidden="true" />
@@ -194,9 +199,28 @@ export function PluginStoreDetailView({
         {selfHostedBuild ? (
           <p className="text-ui-base text-foreground-subtle">{item.marketplace}</p>
         ) : null}
-        {item.info?.source === "codex-account" ? (
-          <p className="text-ui-base text-foreground-subtle">
-            {intl.formatMessage({ id: "settings.plugins.codexAccountManaged" })}
+        {item.info?.nativeUninstallRequiresAccount ? (
+          <div className="flex flex-wrap items-center gap-2 text-ui-base text-foreground-subtle">
+            <p>{intl.formatMessage({ id: "settings.plugins.codexAccountManaged" })}</p>
+            <Button asChild variant="outline" size="sm">
+              <a
+                data-testid="plugin-store-codex-directory"
+                href={CODEX_PLUGIN_DIRECTORY_URL}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <ExternalLink className="size-3" aria-hidden="true" />
+                {intl.formatMessage({ id: "settings.plugins.codexDirectory" })}
+              </a>
+            </Button>
+          </div>
+        ) : null}
+        {item.info?.nativePolicyBlocked ? (
+          <p
+            className="text-ui-base text-foreground-subtle"
+            data-testid="plugin-store-codex-policy-blocked"
+          >
+            {intl.formatMessage({ id: "settings.plugins.codexPolicyBlocked" })}
           </p>
         ) : null}
         {description ? (
@@ -216,12 +240,20 @@ export function PluginStoreDetailView({
         ) : null}
         {isStoreItemInstallBlocked(item) ? (
           <p
-            data-testid="plugin-store-extension-incompatible"
+            data-testid={
+              installBlockedByPolicy
+                ? "plugin-store-codex-install-policy"
+                : "plugin-store-extension-incompatible"
+            }
             data-plugin-id={item.id}
             className="flex items-center gap-1.5 text-ui-base text-warning"
           >
             <TriangleAlert className="size-3.5 shrink-0" aria-hidden="true" />
-            {intl.formatMessage({ id: "settings.plugins.store.extension.incompatibleHint" })}
+            {intl.formatMessage({
+              id: installBlockedByPolicy
+                ? "settings.plugins.codexInstallPolicy"
+                : "settings.plugins.store.extension.incompatibleHint",
+            })}
           </p>
         ) : null}
       </div>
@@ -233,6 +265,7 @@ export function PluginStoreDetailView({
           displayName={displayName}
           examplePrompts={examplePrompts}
           heroImage={heroImage}
+          promptsDisabled={useDisabled || isStoreItemInstallBlocked(item)}
           onUsePrompt={onUsePrompt}
         />
       ) : null}
@@ -314,12 +347,14 @@ function HeroSection({
   displayName,
   examplePrompts,
   heroImage,
+  promptsDisabled,
   onUsePrompt,
 }: {
   item: StorePluginItem;
   displayName: string;
   examplePrompts: string[];
   heroImage: string | undefined;
+  promptsDisabled: boolean;
   onUsePrompt: (item: StorePluginItem, prompt: string) => void;
 }) {
   const { intl } = useZCodeIntl();
@@ -334,6 +369,7 @@ function HeroSection({
         type="button"
         data-testid="plugin-store-example-prompt"
         data-plugin-id={item.id}
+        disabled={promptsDisabled}
         // 彩色 Hero 上统一使用参考图的深色半透明胶囊，不随底图有无切换为普通卡片。
         className="group/prompt flex w-fit max-w-2xl items-center gap-2.5 rounded-3xl bg-black/75 px-3.5 py-2.5 text-left text-ui-base text-white shadow-lg backdrop-blur-md transition-colors hover:bg-black/85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
         onClick={() => onUsePrompt(item, prompt)}

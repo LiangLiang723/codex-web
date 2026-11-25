@@ -9,6 +9,7 @@ import {
   Server,
 } from "lucide-react";
 import { Fragment, useState } from "react";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { testId } from "@zcode/shared/test-ids";
 import { Button } from "@/components/ui/button.js";
 import {
@@ -26,6 +27,7 @@ import {
 import { InputGroup, InputGroupAddon } from "@/components/ui/input-group.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { getContainingDirectoryPath, getPathLeaf } from "@/lib/path.js";
+import { getWorkspaceKey } from "@/lib/workspaceKey.js";
 import {
   useSettingsScopeDevice,
   LOCAL_USER_SCOPE_KEY,
@@ -36,6 +38,7 @@ import {
   type SettingsScopeGroup,
   type SettingsScopeOption,
 } from "@/settings-scope/index.js";
+import { useOptionalTabStore } from "@/store/TabStoreProvider.js";
 import type { ConfigWorkspaceTarget } from "@/workspace-config-catalog/index.js";
 
 export { getPluginWorkspaceKey, isPluginScopeWorkspaceConnected };
@@ -95,9 +98,20 @@ function DeviceScopeMenu({
       ],
     },
   ];
+  // 自托管工作台按已验证的 SSH 主机装配服务与项目目录，对应 Scope 的单一本机组。
+  // 该组的项目直接放在首层，省去打开设备项目子菜单的一次点击。
+  const inlineSshProjects =
+    selfHostedBuild && groups?.length === 1 && groups[0]?.device.kind === "local";
+  const activeWorkspaceKey = useOptionalTabStore((state) =>
+    inlineSshProjects && state.activeWorkspacePath
+      ? getWorkspaceKey(state.activeWorkspacePath, state.activeWorkspaceIdentity)
+      : null,
+  );
   const deviceName = (device: SettingsScopeDevice) =>
     device.kind === "local"
-      ? intl.formatMessage({ id: "settings.scope.localDevice" })
+      ? intl.formatMessage({
+          id: selfHostedBuild ? "settings.scope.sshDevice" : "settings.scope.localDevice",
+        })
       : device.name || intl.formatMessage({ id: "settings.machine.unknownRemote" });
   const userLabel = intl.formatMessage({ id: "settings.plugin.scope.user" });
   const selectedGroup = menuGroups.find((group) =>
@@ -147,6 +161,17 @@ function DeviceScopeMenu({
             const userOption = group.options.find((option) => option.kind === "user");
             const projects = group.options.filter((option) => option.kind === "workspace");
             const selectedProject = projects.find((option) => option.key === selectedScopeKey);
+            const activeProject = projects.find((option) => option.key === activeWorkspaceKey);
+            const projectList = (
+              <ScopeProjectList
+                projects={
+                  activeProject
+                    ? [activeProject, ...projects.filter((option) => option !== activeProject)]
+                    : projects
+                }
+                workspaceOptionTestIdPrefix={workspaceOptionTestIdPrefix}
+              />
+            );
             const userTestId =
               group.device.kind === "local" || !groups
                 ? userOptionTestId
@@ -175,42 +200,44 @@ function DeviceScopeMenu({
                     </span>
                   </DropdownMenuRadioItem>
                 ) : null}
-                {projects.length > 0 ? (
-                  // 项目一多（实测 40+），平铺会把后面的设备挤到很远；第一层只留每台设备的入口
-                  // （docs/issues/data-sync/19-scope-menu-project-submenu.md）。
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger
-                      data-scope-projects-trigger="true"
-                      data-scope-device={groupId}
-                    >
-                      <Folders className="size-4" aria-hidden="true" />
-                      <span className="flex-1 shrink-0 text-ui-base font-medium text-foreground">
-                        {intl.formatMessage({ id: "settings.scope.projects" })}
-                      </span>
-                      {selectedProject ? (
-                        <span className="flex min-w-0 items-center gap-1 text-ui-sm text-foreground-subtle">
-                          <span className="truncate">{selectedProject.target?.label}</span>
-                          <Check
-                            className="size-4 text-foreground"
-                            aria-hidden="true"
-                            data-scope-projects-selected="true"
-                          />
+                {projects.length > 0 &&
+                  (inlineSshProjects ? (
+                    projectList
+                  ) : (
+                    // 项目一多（实测 40+），平铺会把后面的设备挤到很远；第一层只留每台设备的入口
+                    // （docs/issues/data-sync/19-scope-menu-project-submenu.md）。
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger
+                        data-scope-projects-trigger="true"
+                        data-scope-device={groupId}
+                      >
+                        <Folders className="size-4" aria-hidden="true" />
+                        <span className="flex-1 shrink-0 text-ui-base font-medium text-foreground">
+                          {intl.formatMessage({ id: "settings.scope.projects" })}
                         </span>
-                      ) : (
-                        <span className="text-ui-sm text-foreground-subtle">{projects.length}</span>
-                      )}
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent
-                      // 窄窗口下两侧都放不下 w-64：最小宽度也不超过可用宽度，子菜单变窄但不出屏幕。
-                      className="flex w-64 min-w-[min(8rem,var(--radix-dropdown-menu-content-available-width))] max-w-(--radix-dropdown-menu-content-available-width) flex-col p-0"
-                    >
-                      <ScopeProjectList
-                        projects={projects}
-                        workspaceOptionTestIdPrefix={workspaceOptionTestIdPrefix}
-                      />
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                ) : null}
+                        {selectedProject ? (
+                          <span className="flex min-w-0 items-center gap-1 text-ui-sm text-foreground-subtle">
+                            <span className="truncate">{selectedProject.target?.label}</span>
+                            <Check
+                              className="size-4 text-foreground"
+                              aria-hidden="true"
+                              data-scope-projects-selected="true"
+                            />
+                          </span>
+                        ) : (
+                          <span className="text-ui-sm text-foreground-subtle">
+                            {projects.length}
+                          </span>
+                        )}
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent
+                        // 窄窗口下两侧都放不下 w-64：最小宽度也不超过可用宽度，子菜单变窄但不出屏幕。
+                        className="flex w-64 min-w-[min(8rem,var(--radix-dropdown-menu-content-available-width))] max-w-(--radix-dropdown-menu-content-available-width) flex-col p-0"
+                      >
+                        {projectList}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  ))}
               </Fragment>
             );
           })}
@@ -222,7 +249,7 @@ function DeviceScopeMenu({
 
 const PROJECT_SEARCH_THRESHOLD = 8;
 
-/** 子菜单内容：关闭子菜单时随之卸载，搜索词不会带到下次打开。 */
+/** 项目列表随其菜单关闭后卸载，搜索词不会带到下次打开。 */
 function ScopeProjectList({
   projects,
   workspaceOptionTestIdPrefix,

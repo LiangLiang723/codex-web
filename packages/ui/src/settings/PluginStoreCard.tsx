@@ -24,8 +24,10 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { PluginStoreAvatar } from "@/settings/PluginStoreAvatar.js";
 import {
   canUpdatePluginItem,
+  canUseNativePlugin,
   isItemBusy,
   isStoreItemInstallBlocked,
+  CODEX_PLUGIN_DIRECTORY_URL,
   isUiPluginItem,
   resolveItemDescription,
   resolveItemDisplayName,
@@ -37,6 +39,7 @@ import { runUserAction } from "@/lib/userActionTelemetry.js";
 export interface PluginStoreActions {
   onOpenDetail: (pluginId: string) => void;
   onOpenUi?: (item: StorePluginItem) => void;
+  onUsePlugin?: (item: StorePluginItem) => void;
   /** 安装或恢复（restorable 内置插件走 restoreBuiltin，其余走 install）。 */
   onInstall: (item: StorePluginItem) => void;
   onUninstall: (pluginId: string) => void;
@@ -167,12 +170,11 @@ export function PluginStoreItemMenu({
   const { intl } = useZCodeIntl();
   const enabled = item.info?.enabled ?? false;
   const busy = isItemBusy(item, actions);
-  const managedByAccount = item.info?.source === "codex-account";
+  const uninstallRequiresAccount = item.info?.nativeUninstallRequiresAccount === true;
   const canToggleEnabled =
     showEnabledAction &&
     Boolean(item.info && actions.onSetEnabled) &&
-    !isWorkspaceTrustPending(item) &&
-    !managedByAccount;
+    !isWorkspaceTrustPending(item);
   // 分隔线不应跟随 item.installed 无条件渲染；启停/更新/恢复配置都不出现时，
   // 菜单只剩「卸载」一项，上方却留下一条孤立横线。分隔线只在卸载前确有其他操作项时才有意义。
   const hasActionsBeforeUninstall = canToggleEnabled;
@@ -201,16 +203,11 @@ export function PluginStoreItemMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
-        {managedByAccount ? (
-          <DropdownMenuItem disabled>
-            {intl.formatMessage({ id: "settings.plugins.codexAccountManaged" })}
-          </DropdownMenuItem>
-        ) : null}
         {canToggleEnabled ? (
           <DropdownMenuItem
             data-testid="plugin-store-menu-enabled"
             data-plugin-id={item.id}
-            disabled={busy}
+            disabled={busy || item.info?.nativePolicyBlocked === true}
             onSelect={() => actions.onSetEnabled?.(item.id, !enabled)}
           >
             <Power className="size-4" aria-hidden="true" />
@@ -222,16 +219,29 @@ export function PluginStoreItemMenu({
         {item.installed ? (
           <>
             {hasActionsBeforeUninstall ? <DropdownMenuSeparator /> : null}
-            <DropdownMenuItem
-              data-testid="plugin-store-menu-uninstall"
-              data-plugin-id={item.id}
-              variant="destructive"
-              disabled={busy}
-              onSelect={() => actions.onUninstall(item.id)}
-            >
-              <Trash2 className="size-4" aria-hidden="true" />
-              {intl.formatMessage({ id: "settings.plugins.detail.uninstall" })}
-            </DropdownMenuItem>
+            {uninstallRequiresAccount ? (
+              <DropdownMenuItem asChild>
+                <a
+                  data-testid="plugin-store-codex-directory"
+                  href={CODEX_PLUGIN_DIRECTORY_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {intl.formatMessage({ id: "settings.plugins.codexDirectory" })}
+                </a>
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem
+                data-testid="plugin-store-menu-uninstall"
+                data-plugin-id={item.id}
+                variant="destructive"
+                disabled={busy}
+                onSelect={() => actions.onUninstall(item.id)}
+              >
+                <Trash2 className="size-4" aria-hidden="true" />
+                {intl.formatMessage({ id: "settings.plugins.detail.uninstall" })}
+              </DropdownMenuItem>
+            )}
           </>
         ) : null}
       </DropdownMenuContent>
@@ -252,18 +262,23 @@ export function PluginStoreInstallButton({
   const { intl } = useZCodeIntl();
   // 目录最新版要求更高的插件 API 版本（plugin-publishing.md §4.3）：同一位置换成不能点的提示按钮。
   if (isStoreItemInstallBlocked(item)) {
+    const blockedByPolicy = item.summary?.installPolicy === "NOT_AVAILABLE";
     return (
       <Button
         type="button"
         data-testid="plugin-store-install"
         data-plugin-id={item.id}
-        data-install-blocked="requires-update"
+        data-install-blocked={blockedByPolicy ? "policy" : "requires-update"}
         variant="secondary"
         size={size}
         className="rounded-full"
         disabled
       >
-        {intl.formatMessage({ id: "settings.plugins.store.extension.requiresUpdate" })}
+        {intl.formatMessage({
+          id: blockedByPolicy
+            ? "settings.plugins.codexInstallUnavailable"
+            : "settings.plugins.store.extension.requiresUpdate",
+        })}
       </Button>
     );
   }
@@ -417,6 +432,7 @@ export function PluginStoreCard({
   const { intl } = useZCodeIntl();
   const displayName = resolveItemDisplayName(item, locale);
   const description = resolveItemDescription(item, locale);
+  const useLabel = intl.formatMessage({ id: "settings.plugins.codexUse" });
   // 卡片整行统一进入详情；打开 UI 只走会话右侧市场提供的「打开」按钮。
   const open = () => actions.onOpenDetail(item.id);
   return (
@@ -470,6 +486,22 @@ export function PluginStoreCard({
       <div className="flex shrink-0 items-center gap-1.5">
         {item.installed ? (
           <>
+            {management && actions.onUsePlugin && canUseNativePlugin(item) ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="plugin-settings-use"
+                aria-label={`${useLabel} ${displayName}`}
+                disabled={isItemBusy(item, actions)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  actions.onUsePlugin?.(item);
+                }}
+              >
+                {useLabel}
+              </Button>
+            ) : null}
             <PluginStoreTrustButton item={item} actions={actions} size="default" />
             <PluginStoreOpenUiButton item={item} actions={actions} size="default" />
             <PluginStoreUpdateButton item={item} actions={actions} size="default" />
@@ -484,7 +516,7 @@ export function PluginStoreCard({
             {/* 启停中的加载提示只由「…」菜单按钮承担（isItemBusy 含 togglingPluginId）。
                 这里曾另放一个独立 LoaderCircle，点开关时卡片处于 hover/focus-within，菜单按钮显形，
                 同一状态并排出现两个 spinner。开关自身保留 disabled + aria-busy。 */}
-            {item.info && item.info.source !== "codex-account" && actions.onSetEnabled ? (
+            {item.info && actions.onSetEnabled ? (
               <Switch
                 className="after:-inset-x-2"
                 data-testid={
@@ -493,7 +525,11 @@ export function PluginStoreCard({
                 data-plugin-id={item.id}
                 checked={item.info.enabled}
                 // 待信任时 Agent 已强制停用，开关只表达「不会运行」，不能操作。
-                disabled={isItemBusy(item, actions) || isWorkspaceTrustPending(item)}
+                disabled={
+                  isItemBusy(item, actions) ||
+                  isWorkspaceTrustPending(item) ||
+                  item.info.nativePolicyBlocked === true
+                }
                 aria-busy={actions.togglingPluginId === item.id}
                 aria-label={intl.formatMessage(
                   {

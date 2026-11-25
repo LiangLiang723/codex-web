@@ -2135,7 +2135,9 @@ export function SettingsPage({
                               workspaceDisplayNames={memoryWorkspaceDisplayNames}
                             />
                           ) : activeSection === "codexApps" ? (
-                            <CodexAppsSection/>
+                            <CodexAppsSection
+                              onCreateTask={activeWorkspacePath ? onCreateTask : undefined}
+                            />
                           ) : activeSection === "plugin" ? (
                             <PluginsSection
                               key={`plugin:${settingsSectionNavigationVersion}`}

@@ -1,3 +1,5 @@
+import type { CodexApp } from "@zcode/shared";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import type { MentionItem } from "./mentionTypes.js";
 
 const LINK_MENTION_MARKDOWN_PATTERN =
@@ -11,6 +13,11 @@ function escapeMarkdownLabel(label: string): string {
 
 function escapeMarkdownDestination(destination: string): string {
   return destination.replaceAll("\\", "\\\\").replaceAll(">", "\\>");
+}
+
+function escapeNativeMentionDestination(destination: string): string {
+  const escaped = escapeMarkdownDestination(destination);
+  return /[\s()<>]/u.test(destination) ? "<" + escaped + ">" : escaped;
 }
 
 function unescapeMarkdownText(text: string): string {
@@ -72,7 +79,12 @@ export function buildSkillMentionMarkdown(label: string, skillPath?: string): st
     return `$${label}`;
   }
 
-  return `[${escapeMarkdownLabel(`$${label}`)}](${escapeMarkdownDestination(normalizeMarkdownDestination(skillPath))})`;
+  const path = normalizeMarkdownDestination(skillPath);
+  // SSH 上的项目路径可能带括号，裸写会让引用在第一个右括号提前结束。
+  const destination = selfHostedBuild
+    ? escapeNativeMentionDestination(path)
+    : escapeMarkdownDestination(path);
+  return `[${escapeMarkdownLabel(`$${label}`)}](${destination})`;
 }
 
 export function buildSubagentMentionMarkdown(label: string): string {
@@ -101,6 +113,21 @@ export function buildElementMentionMarkdown(label: string, referenceId: string):
 // `[@Label](plugin://stable-id)`。身份只在 destination；label 仅用于展示。
 export function buildPluginMentionMarkdown(label: string, pluginId: string): string {
   return `[${escapeMarkdownLabel(`@${label}`)}](plugin://${escapeMarkdownDestination(pluginId)})`;
+}
+
+export function buildCodexAppMention(
+  app: Pick<CodexApp, "id" | "name" | "description">,
+): MentionItem {
+  const path = escapeNativeMentionDestination("app://" + app.id);
+  return {
+    id: "app:" + app.id,
+    category: "apps",
+    value: app.id,
+    label: app.name,
+    description: app.description ?? "",
+    keywords: [app.id, app.name.replaceAll(" ", "-")],
+    markdown: `[${escapeMarkdownLabel(`$${app.name}`)}](${path})`,
+  };
 }
 
 export function buildMentionMarkdown(
@@ -147,6 +174,7 @@ type MentionTextPart =
   | { type: "command"; label: string }
   | { type: "subagent"; label: string }
   | { type: "session"; label: string }
+  | { type: "app"; label: string; appId: string }
   | { type: "plugin"; label: string; pluginId?: string }
   | { type: "element"; label: string };
 
@@ -241,6 +269,12 @@ export function parseMentionMarkdown(content: string): MentionTextPart[] {
       parts.push({ type: "session", label: label.startsWith("#") ? label.slice(1) : label });
     } else if (destination.startsWith(ELEMENT_MENTION_SCHEME)) {
       parts.push({ type: "element", label: label.startsWith("@") ? label.slice(1) : label });
+    } else if (destination.startsWith("app://") && label.startsWith("$")) {
+      parts.push({
+        type: "app",
+        label: label.slice(1),
+        appId: unescapeMarkdownText(destination.slice("app://".length)),
+      });
     } else if (destination.startsWith("plugin://")) {
       // Plugin 引用链接绝不能落入 file 分支或被当外链处理；
       // 发送后曾只保留 label，消息层失去 stable ID，只能固定显示兜底图标。

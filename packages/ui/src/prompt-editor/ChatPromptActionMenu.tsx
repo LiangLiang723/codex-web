@@ -1,7 +1,7 @@
 import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import {
   ContextMentionOptionContent,
-  SkillMentionOptionContent,
+  AppOrSkillMentionOptionContent,
 } from "@/mentions/components/ContextMentionOptionContent.js";
 import { useFileMentionProvider } from "@/mentions/providers/fileMentionProvider.js";
 import { useSessionsMentionProvider } from "@/mentions/providers/sessionsMentionProvider.js";
@@ -13,7 +13,7 @@ import { getSessionMentionWorkspaceScope } from "@/mentions/mentionPanelRouting.
 import { useChatViewActiveTaskProvider } from "@/v4/activeTaskProvider.js";
 import { useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { EditorState } from "lexical";
-import { GoalIcon, Info, PaperclipIcon, PlusIcon, Workflow } from "lucide-react";
+import { GoalIcon, Info, PaperclipIcon, PlusIcon, SettingsIcon, Workflow } from "lucide-react";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { Button } from "@/components/ui/button.js";
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover.js";
@@ -22,9 +22,17 @@ import { useSlashCommands } from "@/hooks/useSlashCommands.js";
 import { normalizeSlashCommandValue } from "@/slashCommandHelpers.js";
 import type { LexicalChatInputHandle } from "@/LexicalChatInput.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
-import { MentionPanel, type MentionPanelSection } from "@/mentions/components/MentionPanel.js";
+import {
+  MentionPanel,
+  visibleMentionPanelOptions,
+  type MentionPanelSection,
+} from "@/mentions/components/MentionPanel.js";
+import { requestPluginStoreOpen } from "@/lib/pluginStoreNavigation.js";
 import { PluginMentionOptionContent } from "@/mentions/components/PluginMentionOptionContent.js";
-import { usePluginsMentionProvider } from "@/mentions/providers/pluginsMentionProvider.js";
+import {
+  useCodexAppsMentionProvider,
+  usePluginsMentionProvider,
+} from "@/mentions/providers/pluginsMentionProvider.js";
 import { useSkillsMentionProvider } from "@/mentions/providers/skillsMentionProvider.js";
 
 /**
@@ -36,6 +44,14 @@ const QUICK_COMMANDS = {
   workflow: { id: "add-workflow", labelId: "chat.composer.addWorkflow", Icon: Workflow },
 } as const;
 type QuickCommand = keyof typeof QUICK_COMMANDS;
+
+const EXTENSION_SECTIONS = ["apps", "skills", "plugins"] as const;
+type ExtensionSection = (typeof EXTENSION_SECTIONS)[number];
+const MANAGE_LABELS: Record<ExtensionSection, string> = {
+  apps: "chat.composer.manageApps",
+  skills: "chat.composer.manageSkills",
+  plugins: "chat.composer.managePlugins",
+};
 
 export function ChatPromptActionMenu({
   actionMenuTitle,
@@ -92,13 +108,21 @@ export function ChatPromptActionMenu({
     intl.formatMessage({ id: "chat.mention.plugins.title" }),
   );
   const provider = useChatViewActiveTaskProvider(sessionId, workspacePath, workspaceIdentity);
+  const showNativeExtensions = selfHostedBuild && showPlugins;
+  const apps = useCodexAppsMentionProvider(
+    workspacePath,
+    workspaceIdentity,
+    sessionId,
+    "",
+    showNativeExtensions && open && !disabled,
+  );
   const skills = useSkillsMentionProvider(
     workspacePath,
     workspaceIdentity,
     sessionId,
     provider,
     "",
-    selfHostedBuild && open && !disabled && showPlugins,
+    showNativeExtensions && open && !disabled,
     false,
     intl.formatMessage({ id: "chat.mention.skills.empty" }),
     intl.formatMessage({ id: "chat.mention.skills.title" }),
@@ -133,16 +157,25 @@ export function ChatPromptActionMenu({
     })),
   );
   const mentionItems = [
-    ...plugins.items,
+    ...apps.items,
     ...skills.items,
+    ...plugins.items,
     ...contextGroups.flatMap((group) => group.items),
   ];
-  const attachmentCount = attachmentAction ? 1 : 0;
-  const options = [
-    ...(attachmentAction ? [{ disabled: false }] : []),
-    ...quickCommands.map(() => ({ disabled: false })),
-    ...mentionItems,
-  ];
+  const manageOption = (section: ExtensionSection) => {
+    const label = intl.formatMessage({ id: MANAGE_LABELS[section] });
+    return {
+      id: `manage-${section}`,
+      label,
+      description: "",
+      content: (
+        <>
+          <SettingsIcon aria-hidden="true" className="size-4 shrink-0" />
+          <span className="truncate text-ui-base font-medium">{label}</span>
+        </>
+      ),
+    };
+  };
   const sections: MentionPanelSection[] = [
     {
       id: "add",
@@ -186,6 +219,25 @@ export function ChatPromptActionMenu({
         }),
       ],
     },
+    ...(showNativeExtensions
+      ? [
+          { id: "apps" as const, ...apps },
+          { id: "skills" as const, ...skills },
+        ].map((group) => ({
+          id: group.id,
+          title: group.title,
+          emptyText: group.emptyText,
+          loading: group.loading,
+          loadingText: intl.formatMessage({ id: "chat.mention.category.loading" }),
+          errorText: group.error?.message,
+          footerOption: manageOption(group.id),
+          options: group.items.map((item) => ({
+            ...item,
+            label: item.displayLabel ?? item.label,
+            content: <AppOrSkillMentionOptionContent item={item} />,
+          })),
+        }))
+      : []),
     {
       id: "plugins",
       title: plugins.title,
@@ -193,28 +245,13 @@ export function ChatPromptActionMenu({
       loading: plugins.loading,
       loadingText: intl.formatMessage({ id: "chat.mention.category.loading" }),
       errorText: plugins.error?.message,
+      footerOption: showNativeExtensions ? manageOption("plugins") : undefined,
       options: plugins.items.map((item) => ({
         ...item,
         label: item.displayLabel ?? item.label,
         content: <PluginMentionOptionContent item={item} />,
       })),
     },
-    ...(selfHostedBuild && showPlugins
-      ? [
-          {
-            id: "skills",
-            title: skills.title,
-            emptyText: skills.emptyText,
-            loading: skills.loading,
-            loadingText: intl.formatMessage({ id: "chat.mention.category.loading" }),
-            errorText: skills.error?.message,
-            options: skills.items.map((item) => ({
-              ...item,
-              content: <SkillMentionOptionContent item={item} />,
-            })),
-          },
-        ]
-      : []),
     ...contextGroups.map((group) => ({
       id: group.id,
       title: group.title,
@@ -229,14 +266,24 @@ export function ChatPromptActionMenu({
     })),
   ].filter((section) => section.id !== "add" || section.options.length > 0);
 
+  // 加载或失败时普通候选会暂时隐藏，键盘索引必须跟可点击的行使用同一顺序。
+  const options = sections.flatMap(visibleMentionPanelOptions);
   const selectOption = (index: number) => {
-    if (disabled || !options[index] || options[index].disabled) return;
+    const option = options[index];
+    if (disabled || !option || option.disabled) return;
     setOpen(false);
-    if (attachmentAction && index === 0) {
-      attachmentAction.onSelect();
+    if (option.id === "attach-files") {
+      attachmentAction?.onSelect();
       return;
     }
-    const command = quickCommands[index - attachmentCount];
+    const managementSection = EXTENSION_SECTIONS.find(
+      (section) => option.id === `manage-${section}`,
+    );
+    if (showNativeExtensions && managementSection) {
+      requestPluginStoreOpen({ section: managementSection });
+      return;
+    }
+    const command = quickCommands.find((key) => QUICK_COMMANDS[key].id === option.id);
     const item = command
       ? buildSlashApplyMentionPayload({
           id: `slash:${command}`,
@@ -245,7 +292,7 @@ export function ChatPromptActionMenu({
           label: `/${command}`,
           description: "",
         })
-      : mentionItems[index - attachmentCount - quickCommands.length];
+      : mentionItems.find((mention) => mention.id === option.id);
     if (!item) return;
     restoreEditorFocusRef.current = true;
     inputApiRef.current?.insertMention(item, selectionStateRef.current);
@@ -347,7 +394,12 @@ export function ChatPromptActionMenu({
                 [
                   ["@", "chat.composer.contextShortcut"],
                   ["/", "chat.composer.capabilityShortcut"],
-                  ["$", "chat.composer.skillShortcut"],
+                  [
+                    "$",
+                    showNativeExtensions
+                      ? "chat.composer.appSkillShortcut"
+                      : "chat.composer.skillShortcut",
+                  ],
                 ] as const
               ).map(([trigger, id]) => (
                 <div key={trigger} className="flex shrink-0 items-center gap-1.5">

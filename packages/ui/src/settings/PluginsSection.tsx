@@ -376,6 +376,14 @@ function PluginList({
             ? "settings.plugins.toggle.enabled"
             : "settings.plugins.toggle.disabled";
       toast(intl.formatMessage({ id: messageId }, { plugin: pluginLabel }));
+      if (selfHostedBuild && target) {
+        await invalidateDeferredDraftSessionForRuntimeChange({
+          workspacePath: target.workspacePath,
+          workspaceIdentity: target.workspaceIdentity,
+          logScope: "plugins",
+          reason: "settings-plugin-enabled",
+        });
+      }
     },
     [
       configScope,
@@ -386,6 +394,7 @@ function PluginList({
       plugins,
       setEnabled,
       storeItemById,
+      target,
       usePluginManagementStore,
     ],
   );
@@ -559,6 +568,7 @@ function PluginList({
       )
     : [];
   const selectedStoreItem = selectedPluginId ? storeItemById.get(selectedPluginId) : undefined;
+  const selectedDescription = selectedPluginId ? pluginDescriptions[selectedPluginId] : undefined;
   const closeDetail = useCallback(() => {
     setSelectedPluginId(null);
     onDetailOpenChange?.(false);
@@ -569,6 +579,22 @@ function PluginList({
   useEffect(() => {
     if (selectedPluginId && !selectedPlugin) closeDetail();
   }, [closeDetail, selectedPlugin, selectedPluginId]);
+  useEffect(() => {
+    if (!selfHostedBuild || !storeMatchesTarget || !selectedStoreItem || selectedDescription)
+      return;
+    void describePlugin(
+      selectedStoreItem.id,
+      selectedStoreItem.name,
+      selectedStoreItem.marketplace,
+      pluginManagementService,
+    );
+  }, [
+    describePlugin,
+    pluginManagementService,
+    selectedDescription,
+    selectedStoreItem,
+    storeMatchesTarget,
+  ]);
   const setPluginOptionDraft = (
     pluginId: string,
     key: string,
@@ -615,15 +641,23 @@ function PluginList({
       return next;
     });
   };
+  const handleUsePrompt = useCallback(
+    (item: StorePluginItem, prompt: string) => {
+      onCreateTask?.({
+        initialPrompt: buildPluginStoreTryPrompt({ item, locale, prompt }),
+        initialPromptMention: buildPluginStoreTryMention({ item, locale }),
+      });
+    },
+    [locale, onCreateTask],
+  );
   const actions: PluginStoreActions = useMemo(
     () => ({
       onOpenDetail: (pluginId) => {
         setSelectedPluginId(pluginId);
         onDetailOpenChange?.(true);
-        const item = storeItemById.get(pluginId);
-        if (selfHostedBuild && item)
-          void describePlugin(item.id, item.name, item.marketplace, pluginManagementService);
       },
+      onUsePlugin:
+        selfHostedBuild && onCreateTask ? (item) => handleUsePrompt(item, "") : undefined,
       onOpenUi: onOpenUi
         ? (item) =>
             onOpenUi(
@@ -654,11 +688,12 @@ function PluginList({
     }),
     [
       configScope,
-      describePlugin,
       handleResetPluginConfig,
       handleTrustWorkspacePlugin,
       handleSetEnabled,
       handleUpdatePlugin,
+      handleUsePrompt,
+      onCreateTask,
       onDetailOpenChange,
       onOpenPluginStore,
       activeOperations,
@@ -667,7 +702,6 @@ function PluginList({
       onOpenUi,
       target,
       setEnabled,
-      storeItemById,
       pluginManagementService,
       confirmEnable,
       locale,
@@ -769,7 +803,7 @@ function PluginList({
         <PluginStoreDetailView
           item={selectedStoreItem}
           actions={actions}
-          describeEntry={selfHostedBuild ? pluginDescriptions[selectedStoreItem.id] : undefined}
+          describeEntry={selfHostedBuild ? selectedDescription : undefined}
           onRetryDescribe={() => {
             if (selfHostedBuild)
               void describePlugin(
@@ -780,20 +814,7 @@ function PluginList({
                 true,
               );
           }}
-          onUsePrompt={(item, prompt) => {
-            if (!onCreateTask) return;
-            onCreateTask({
-              initialPrompt: buildPluginStoreTryPrompt({
-                item,
-                locale,
-                prompt,
-              }),
-              initialPromptMention: buildPluginStoreTryMention({
-                item,
-                locale,
-              }),
-            });
-          }}
+          onUsePrompt={handleUsePrompt}
           advanced={
             selectedPlugin.packageStatus === "missing" ? undefined : (
               <PluginStoreAdvancedSection>
@@ -1448,6 +1469,11 @@ export function PluginsSection({
               {blockedNotice ??
                 (target ? (
                   <SkillsSection
+                    key={
+                      selfHostedBuild
+                        ? `${selectedScopeKey}\0${selectedTargetKey}\0${userScopeAuthorityKey ?? ""}`
+                        : undefined
+                    }
                     workspacePath={target.workspacePath}
                     workspaceIdentity={target.workspaceIdentity}
                     remoteSessionId={target.remoteSessionId}

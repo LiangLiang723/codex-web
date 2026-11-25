@@ -176,6 +176,7 @@ export function useRootPlatformEffects({
         // 的 app 冷启动必须进入草稿，不能让 renderer-local last-session/group/pane
         // 抢回历史会话；同一 renderer reload 则保留当前 session 续流资格。
         startDraftInWorkspace(initialWorkspaceAbsPath, initialWorkspaceIdentity, draftIntent);
+        initialTaskDraft?.onComplete?.();
       }
     }
     // Dock 最近项目会通过 initialWorkspaceAbsPath 直达工作区。

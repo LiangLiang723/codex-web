@@ -324,17 +324,20 @@ nodes:
     kind: "capability"
     label: "Native Codex plugins and skills in self-hosted SSH Web settings"
     aliases: ["SSH 插件市场", "Codex 技能管理", "自托管插件启停"]
-    docs: ["specs/selfhost-codex/README.md"]
+    docs: ["specs/selfhost-codex/README.md", "specs/selfhost-codex/skills.md"]
     codeSeeds:
       - file: "packages/web/src/selfhost/nativePluginManagement.ts"
         symbol: "nativePluginManagement"
       - file: "packages/web/src/selfhost/capabilities.ts"
         symbol: "extensionRequest"
+      - file: "packages/ui/src/settings/SkillsSection.tsx"
+        symbol: "SkillsSection"
       - file: "selfhost/gateway/overlay/utils/selfhost-native-plugins.ts"
         symbol: "manageNativePlugins"
     invariants:
       - "Codex CLI and App Server own installation and enablement on the selected SSH host. Web actions use full plugin ID or skill path."
       - "Desktop and mobile SSH Web reuse the plugin store and settings UI. The installed reference catalog stays independent of marketplace detail reads."
+      - "SSH skill preview reads SKILL.md on the selected host. Skill use, creation and discovery prefill a draft in that workspace."
   - id: "capability.referrals-embedded"
     kind: "capability"
     label: "Rewards center embedded website"

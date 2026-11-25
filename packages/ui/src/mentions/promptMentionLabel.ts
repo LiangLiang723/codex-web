@@ -29,7 +29,7 @@ export function normalizePromptMentionDisplayLabel(
   const markdownLabel = extractPromptMentionMarkdownLabel(label);
   let displayLabel = markdownLabel ?? label;
 
-  if (category === "skills" && displayLabel.startsWith("$")) {
+  if ((category === "skills" || category === "apps") && displayLabel.startsWith("$")) {
     displayLabel = displayLabel.slice(1);
   } else if (category === "sessions" && displayLabel.startsWith("#")) {
     displayLabel = displayLabel.slice(1);

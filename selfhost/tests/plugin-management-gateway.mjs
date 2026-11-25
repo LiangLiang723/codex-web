@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { build } from "esbuild";
 
@@ -14,6 +16,7 @@ const env = { ...process.env, CODEX_HOME: join(cwd, "codex-home") };
 for (const key of ["OPENAI_API_KEY", "CODEX_API_KEY", "CHATGPT_AUTH_TOKEN"]) delete env[key];
 const binary = process.env.SELFHOST_PLUGIN_CODEX_BIN ?? "codex";
 const nativeChanges = [];
+const cliCommands = [];
 const host = { id: 7 };
 let appServer;
 
@@ -44,12 +47,16 @@ try {
   assert.equal(initialize.codexHome, env.CODEX_HOME);
   appServer.stdin.write('{"method":"initialized"}\n');
   globalThis.pluginGatewayFixture = {
-    async command(target, command) {
+    async command(target, command, options) {
       assert.equal(target, host);
+      cliCommands.push({ command, timeout: options.timeoutMs });
       try {
         return {
           code: 0,
-          ...(await exec("/bin/sh", ["-c", command], { env: { ...env, CODEX_BIN: binary } })),
+          ...(await exec("/bin/sh", ["-c", command], {
+            env: { ...env, CODEX_BIN: binary },
+            timeout: options.timeoutMs,
+          })),
         };
       } catch (error) {
         return { code: error.code, stdout: error.stdout, stderr: error.stderr };
@@ -57,7 +64,7 @@ try {
     },
     rpc(target, method, params) {
       assert.equal(target, host);
-      if (method === "config/value/write") nativeChanges.push(params);
+      if (method === "config/batchWrite") nativeChanges.push(params);
       return rpc(method, params);
     },
     async openRemoteFile(target, file) {
@@ -112,13 +119,20 @@ try {
       host,
       nativePluginRequestSchema.parse({ operation, hostId: host.id, cwd, ...params }),
     );
+  const pluginSkills = async () => {
+    const result = await rpc("skills/list", { cwds: [cwd] });
+    return result.data[0].skills.filter((skill) => skill.pluginId).map((skill) => skill.pluginId);
+  };
+  assert.deepEqual(await pluginSkills(), []);
 
   for (const marketplace of ["fixture-first", "fixture-second"]) {
     // Paths with spaces and shell punctuation are literal SSH argv values.
     const root = join(cwd, `${marketplace} ' & spaces`);
     const manifest = join(root, "plugins/review/.codex-plugin");
+    const skill = join(root, "plugins/review/skills/sample");
     await mkdir(join(root, ".agents/plugins"), { recursive: true });
     await mkdir(manifest, { recursive: true });
+    await mkdir(skill, { recursive: true });
     await writeFile(
       join(root, ".agents/plugins/marketplace.json"),
       JSON.stringify({
@@ -132,21 +146,50 @@ try {
         name: "review",
         description: marketplace,
         version: "1.0.0",
+        skills: "./skills",
         interface: { displayName: "Review" },
       }),
     );
-    await invoke("marketplaceAdd", { source: root });
+    await writeFile(
+      join(skill, "SKILL.md"),
+      `---\nname: sample\ndescription: Skill from ${marketplace}.\n---\nReview the fixture.\n`,
+    );
+    let source = root;
+    if (marketplace === "fixture-second") {
+      const git = (...args) => exec("git", args, { cwd: root, env });
+      await git("init", "--quiet");
+      await git("add", ".");
+      await git(
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "commit",
+        "--quiet",
+        "--no-gpg-sign",
+        "-m",
+        "Marketplace fixture",
+      );
+      // 只在此测试子进程将 HTTPS Git 市场指向可控的本地仓库。
+      source = "https://fixture.invalid/review-market.git";
+      env.GIT_CONFIG_COUNT = "1";
+      env.GIT_CONFIG_KEY_0 = `url.${pathToFileURL(root).href}.insteadOf`;
+      env.GIT_CONFIG_VALUE_0 = source;
+    }
+    await invoke("marketplaceAdd", { source });
     await invoke("install", { pluginId: `review@${marketplace}` });
   }
   const first = "review@fixture-first";
   const second = "review@fixture-second";
   const states = async () => {
-    const { entries } = await invoke("catalog");
+    const { entries } = await invoke("catalog", { source: "configured" });
     return Object.fromEntries(
       entries.map((entry) => [entry.pluginId, [entry.installed, entry.enabled]]),
     );
   };
   assert.deepEqual(await states(), { [first]: [true, true], [second]: [true, true] });
+  assert.deepEqual((await pluginSkills()).sort(), [first, second]);
+  const beforeOpeningInstalled = cliCommands.length;
   assert.equal(
     (await invoke("describe", { pluginId: first })).manifest.description,
     "fixture-first",
@@ -155,13 +198,31 @@ try {
     (await invoke("describe", { pluginId: second })).manifest.description,
     "fixture-second",
   );
+  assert.equal(
+    cliCommands.length,
+    beforeOpeningInstalled,
+    "Installed details must never wait for the marketplace",
+  );
   await invoke("setEnabled", { pluginId: second, enabled: false });
   assert.deepEqual(nativeChanges, [
-    { keyPath: 'plugins."review@fixture-second".enabled', value: false, mergeStrategy: "replace" },
+    {
+      edits: [
+        {
+          keyPath: 'plugins."review@fixture-second".enabled',
+          value: false,
+          mergeStrategy: "replace",
+        },
+      ],
+      reloadUserConfig: true,
+    },
   ]);
   assert.deepEqual(await states(), { [first]: [true, true], [second]: [true, false] });
+  assert.deepEqual(await pluginSkills(), [first]);
+  await invoke("setEnabled", { pluginId: second, enabled: true });
+  assert.deepEqual((await pluginSkills()).sort(), [first, second]);
   await invoke("uninstall", { pluginId: second });
   assert.deepEqual(await states(), { [first]: [true, true], [second]: [false, false] });
+  assert.deepEqual(await pluginSkills(), [first]);
   await invoke("marketplaceRemove", { marketplace: "fixture-second" });
   assert.deepEqual(await states(), { [first]: [true, true] });
   assert(
@@ -198,6 +259,10 @@ try {
     `Native plugin and skill management passed with ${initialize.userAgent.split(" ")[1]}`,
   );
 } finally {
-  appServer?.kill();
-  await rm(cwd, { recursive: true, force: true });
+  if (appServer?.exitCode === null && appServer.signalCode === null) {
+    const closed = once(appServer, "close");
+    appServer.kill();
+    await closed;
+  }
+  await rm(cwd, { recursive: true, force: true, maxRetries: 6 });
 }

@@ -6,13 +6,23 @@ import type { AppDetailsProps } from "./contract.js";
 import { ArrowLeft, Cable, ExternalLink, RefreshCw } from "lucide-react";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useServices } from "@/hooks/useServices.js";
+import type { CreateTaskRequest } from "@/app-shell/types.js";
+import { buildCodexAppMention } from "@/mentions/mentionMarkdown.js";
+import { SegmentPill } from "../PluginStoreListView.js";
 import { Button } from "@/components/ui/button.js";
 import { Switch } from "@/components/ui/switch.js";
-import { PluginStoreAvatar } from "../PluginStoreAvatar.js";
+import { PluginIcon } from "@/components/PluginIcon.js";
 import { SettingsSearchInput } from "../SettingsSearchInput.js";
 import { SettingsResourceGroupHeader, SettingsResourceList } from "../SettingsResourceGroup.js";
 
 type DetailsState = { data: CodexAppDetails | null; busy: boolean; issue: string };
+function mayUseApp(app: CodexApp) {
+  return (
+    app.callable === true ||
+    // 只有缺少运行快照的旧协议才按可访问和启用推断。已知未安装的目录项不能预填。
+    (app.installed === null && app.callable === null && app.accessible === true && app.enabled === true)
+  );
+}
 function errorText(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -39,7 +49,14 @@ function useAppDetails(service: ICodexAppsService, id: string) {
   return { ...state, refresh };
 }
 
-function AppDetails({ app, service, back, refreshApps, openingConnection }: AppDetailsProps) {
+function AppDetails({
+  app,
+  service,
+  back,
+  refreshApps,
+  openingConnection,
+  startDraft,
+}: AppDetailsProps) {
   const { intl } = useZCodeIntl();
   const t = (id: string) => intl.formatMessage({ id });
   const { data, busy, issue, refresh } = useAppDetails(service, app.id);
@@ -63,7 +80,7 @@ function AppDetails({ app, service, back, refreshApps, openingConnection }: AppD
   const status = (value: boolean | null, yes: string, no: string) =>
     t("settings.codexApps." + (value === null ? "unknown" : value ? yes : no));
   const facts = [
-    ["account", status(app.accessible, "accessible", "inaccessible")],
+    ["account", status(app.accessible ?? data?.accessible ?? null, "accessible", "inaccessible")],
     ["installation", status(app.installed, "installed", "notInstalled")],
     ["configuration", status(app.enabled, "enabled", "disabled")],
     ["runtime", status(app.callable, "callable", "notCallable")],
@@ -75,9 +92,18 @@ function AppDetails({ app, service, back, refreshApps, openingConnection }: AppD
         {t("settings.codexApps.back")}
       </Button>
       <div className="space-y-1">
-        <h3 className="break-words text-lg font-semibold">{app.name}</h3>
-        {app.description && (
-          <p className="break-words text-ui-sm text-foreground-muted">{app.description}</p>
+        <h3 className="flex items-center gap-2 break-words text-lg font-semibold">
+          <PluginIcon
+            src={data?.iconUrl ?? app.iconUrl ?? undefined}
+            className="size-9"
+            fallbackIcon={<Cable className="size-4" />}
+          />
+          {data?.name || app.name}
+        </h3>
+        {(data?.description || app.description) && (
+          <p className="break-words text-ui-sm text-foreground-muted">
+            {data?.description || app.description}
+          </p>
         )}
         {plugins.length > 0 && (
           <p className="text-ui-sm text-foreground-muted">
@@ -93,6 +119,11 @@ function AppDetails({ app, service, back, refreshApps, openingConnection }: AppD
           </div>
         ))}
       </dl>
+      {startDraft && mayUseApp(app) && (
+        <Button onClick={() => startDraft({ ...app, name: data?.name || app.name })}>
+          {t("settings.codexApps.useInChat")}
+        </Button>
+      )}
       {connectUrl && (
         <a
           className="inline-flex items-center gap-1 text-ui-base text-primary underline"
@@ -110,9 +141,9 @@ function AppDetails({ app, service, back, refreshApps, openingConnection }: AppD
           {notice}
         </p>
       )}
-      {issue && (
+      {(issue || data?.configIssue) && (
         <div role="alert">
-          {issue}{" "}
+          {issue || data?.configIssue}{" "}
           <Button variant="ghost" onClick={() => void refresh()}>
             {t("common.retry")}
           </Button>
@@ -155,7 +186,7 @@ function AppDetails({ app, service, back, refreshApps, openingConnection }: AppD
             {tool.enabled !== null && (
               <Switch
                 checked={tool.enabled}
-                disabled={pending !== null || busy}
+                disabled={pending !== null || busy || tool.configurable === false}
                 aria-label={tool.title || tool.name}
                 onCheckedChange={(value) => void change(tool.name, value)}
               />
@@ -167,10 +198,16 @@ function AppDetails({ app, service, back, refreshApps, openingConnection }: AppD
   );
 }
 
-function AppManager({ service }: { service: ICodexAppsService }) {
+interface CollectionProps {
+  service: ICodexAppsService;
+  installedOnly: boolean;
+  onScopeChange: (installed: boolean) => void;
+  startDraft?: (app: CodexApp) => void;
+}
+function AppManager({ service, installedOnly, onScopeChange, startDraft }: CollectionProps) {
   const { intl } = useZCodeIntl();
   const t = (id: string) => intl.formatMessage({ id });
-  const { data, busy, issue, refresh, more } = useCodexAppsDirectory(service);
+  const { data, busy, issue, refresh, more } = useCodexAppsDirectory(service, installedOnly);
   const [query, setQuery] = useState(""),
     [limit, setLimit] = useState(50);
   const [active, setActive] = useState<string | null>(null),
@@ -210,10 +247,11 @@ function AppManager({ service }: { service: ICodexAppsService }) {
       );
   }, [data, query]);
   useEffect(() => {
-    if (!active && query.trim() && rows.length < limit && data?.nextCursor && !busy && !issue) {
+    // 命中后交回用户选择；旧条件会继续把五千余项目录翻完，导致开关一直忙碌。
+    if (!active && query.trim() && rows.length === 0 && data?.nextCursor && !busy && !issue) {
       void more();
     }
-  }, [active, query, rows.length, limit, data?.nextCursor, busy, issue, more]);
+  }, [active, query, rows.length, data?.nextCursor, busy, issue, more]);
   const change = async (app: CodexApp, on: boolean) => {
     setPending(app.id);
     setNotice("");
@@ -241,11 +279,26 @@ function AppManager({ service }: { service: ICodexAppsService }) {
         back={() => setActive(null)}
         refreshApps={() => refresh(true)}
         openingConnection={openingConnection}
+        startDraft={data?.runtimeIssue ? undefined : startDraft}
       />
     );
   return (
     <div className="min-w-0 space-y-3" data-testid="codex-app-settings">
       <div className="flex flex-wrap items-center gap-2">
+        <div className="flex gap-1">
+          <SegmentPill
+            active={installedOnly}
+            onClick={() => onScopeChange(true)}
+            testId="codex-apps-installed"
+            label={t("settings.codexApps.installed")}
+          />
+          <SegmentPill
+            active={!installedOnly}
+            onClick={() => onScopeChange(false)}
+            testId="codex-apps-browse"
+            label={t("settings.codexApps.browse")}
+          />
+        </div>
         <SettingsSearchInput
           containerClassName="min-w-32 flex-1"
           aria-label={t("settings.codexApps.search")}
@@ -275,9 +328,31 @@ function AppManager({ service }: { service: ICodexAppsService }) {
           {notice}
         </p>
       )}
-      {data && !rows.length && !busy && !data.nextCursor && (
+      {data?.emptyReason && !busy && (
+        <div className="space-y-2 rounded-xl bg-surface p-4" role="status">
+          <p>
+            {t(
+              data.emptyReason === "disabled"
+                ? "settings.codexApps.featureDisabled"
+                : "settings.codexApps.loginRequired",
+            )}
+          </p>
+          <code className="select-all text-ui-sm">
+            {data.emptyReason === "disabled"
+              ? "codex features enable apps"
+              : "codex login --device-auth"}
+          </code>
+        </div>
+      )}
+      {data && !data.emptyReason && !rows.length && !busy && !data.nextCursor && (
         <p className="py-6 text-center text-ui-sm text-foreground-muted">
-          {t(query ? "settings.codexApps.noMatches" : "settings.codexApps.empty")}
+          {t(
+            query
+              ? "settings.codexApps.noMatches"
+              : installedOnly
+                ? "settings.codexApps.emptyInstalled"
+                : "settings.codexApps.empty",
+          )}
         </p>
       )}
       <SettingsResourceList
@@ -294,8 +369,8 @@ function AppManager({ service }: { service: ICodexAppsService }) {
           ].filter(Boolean);
           return (
             <div data-testid={`codex-app-${app.id}`} className="flex items-center gap-3 px-4 py-3">
-              <PluginStoreAvatar
-                item={{ name: app.name }}
+              <PluginIcon
+                src={app.iconUrl ?? undefined}
                 fallbackIcon={<Cable className="size-4" />}
                 className="size-8 shrink-0"
               />
@@ -311,6 +386,19 @@ function AppManager({ service }: { service: ICodexAppsService }) {
                   {flags.join(" · ") || app.description}
                 </div>
               </div>
+              {startDraft && !data?.runtimeIssue && mayUseApp(app) && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  aria-label={intl.formatMessage(
+                    { id: "settings.codexApps.useApp" },
+                    { app: app.name },
+                  )}
+                  onClick={() => startDraft(app)}
+                >
+                  {t("settings.codexApps.use")}
+                </Button>
+              )}
               {canConfigure && app.enabled !== null ? (
                 <Switch
                   checked={app.enabled}
@@ -349,7 +437,26 @@ function AppManager({ service }: { service: ICodexAppsService }) {
   );
 }
 
-export function CodexAppsSection() {
+export function CodexAppsSection({
+  onCreateTask,
+}: {
+  onCreateTask?: (request?: CreateTaskRequest) => void;
+}) {
   const { codexAppsService } = useServices();
-  return codexAppsService ? <AppManager service={codexAppsService} /> : null;
+  const [installedOnly, setInstalledOnly] = useState(true);
+  const startDraft =
+    onCreateTask &&
+    ((app: CodexApp) => {
+      const mention = buildCodexAppMention(app);
+      onCreateTask({ initialPrompt: `${mention.markdown} `, initialPromptMention: mention });
+    });
+  return codexAppsService ? (
+    <AppManager
+      key={String(installedOnly)}
+      service={codexAppsService}
+      installedOnly={installedOnly}
+      onScopeChange={setInstalledOnly}
+      startDraft={startDraft}
+    />
+  ) : null;
 }

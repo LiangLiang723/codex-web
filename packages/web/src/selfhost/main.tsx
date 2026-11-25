@@ -1,5 +1,13 @@
 import "./bootstrap.js";
-import { useCallback, useEffect, useMemo, useState, useRef, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useRef,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { createRoot } from "react-dom/client";
 import { Root, ZCodeIntlProvider, useZCodeIntl, AppErrorBoundary, Button } from "@zcode/ui";
 import { Input } from "@zcode/ui/input";
@@ -11,14 +19,25 @@ import { projectThread, str } from "./threadProjection.js";
 import { AccountSettings } from "./AccountSettings.js";
 import { Catalog, HostForm } from "./Catalog.js";
 import { Gateway, type Host, type Project } from "./gateway.js";
+import { HostMfaDialog, useHostConnections } from "./HostConnection.js";
 import { openWorkspace } from "./services.js";
 import "../styles.css";
 
 const tokenKey = "selfhost.auth";
-const hostConnectionEvent = z.object({
-  hostId: z.number(),
-  status: z.enum(["connecting", "connected", "failed", "mfaRequired"]),
-});
+type WorkspaceDraft = NonNullable<Parameters<typeof Root>[0]["initialTaskDraft"]>;
+type DraftHandoff = { identity: string; draft: WorkspaceDraft };
+function workspaceKey(host: Host, cwd: string) {
+  return JSON.stringify([
+    host.id,
+    host.createdAt,
+    host.sshHost,
+    host.port,
+    host.username,
+    host.proxyUrl,
+    host.hostKeyFingerprint,
+    cwd,
+  ]);
+}
 const hostConnectionMessages = {
   connecting: "selfhost.network.sshConnecting",
   failed: "selfhost.network.sshFailed",
@@ -80,7 +99,13 @@ function Workbench({
   account: () => void;
 }) {
   const { intl } = useZCodeIntl();
-  const [catalog, setCatalog] = useState<{ hosts: Host[]; projects: Project[] } | null>(null);
+  const [catalogSnapshot, setCatalogSnapshot] = useState<{
+    gateway: Gateway;
+    hosts: Host[];
+    projects: Project[];
+  } | null>(null);
+  // 切换登录后，新主机挑战不能和上一账号目录中的同号主机匹配。
+  const catalog = catalogSnapshot?.gateway === gateway ? catalogSnapshot : null;
   const [editingId, setEditingId] = useState<number | null>(null);
   const [route, setRoute] = useState(location.search);
   const [mobile, setMobile] = useState(() => matchMedia("(max-width: 767px)").matches);
@@ -96,11 +121,15 @@ function Workbench({
     workspace: Awaited<ReturnType<typeof openWorkspace>>;
   } | null>(null);
   const [catalogIssue, setCatalogIssue] = useState("");
+  const [draftHandoff, setDraftHandoff] = useState<DraftHandoff | null>(null);
+  const navigationVersion = useRef(0);
   const [error, setError] = useState("");
   const [webReconnecting, setWebReconnecting] = useState(false);
-  const [hostConnections, setHostConnections] = useState<
-    Record<number, keyof typeof hostConnectionMessages | "connected">
-  >({});
+  const {
+    connections: hostConnections,
+    connect: connectHost,
+    respond: respondToMfa,
+  } = useHostConnections(gateway);
   const query = new URLSearchParams(route),
     hostId = Number(query.get("host")),
     cwd = query.get("cwd") ?? "",
@@ -110,18 +139,7 @@ function Workbench({
     selectedName = host?.name,
     selectedAvatar = host?.avatar;
   // 切换同目录的另一台 SSH 主机时，旧服务会存活到 effect cleanup；渲染前必须校验归属。
-  const identity =
-    host &&
-    JSON.stringify([
-      host.id,
-      host.createdAt,
-      host.sshHost,
-      host.port,
-      host.username,
-      host.proxyUrl,
-      host.hostKeyFingerprint,
-      cwd,
-    ]);
+  const identity = host && workspaceKey(host, cwd);
   const opened =
     mounted?.gateway === gateway && mounted.identity === identity ? mounted.workspace : null;
   const { current: catalogReads } = useRef({ generation: 0 });
@@ -130,7 +148,7 @@ function Workbench({
     try {
       const next = await gateway.config();
       if (version === catalogReads.generation) {
-        setCatalog(next);
+        setCatalogSnapshot({ gateway, ...next });
         setCatalogIssue("");
       }
     } catch (cause) {
@@ -139,13 +157,54 @@ function Workbench({
       throw cause;
     }
   }, [gateway, catalogReads]);
-  const navigate = useCallback((params: URLSearchParams) => {
+  const navigate = useCallback((params: URLSearchParams, handoff: DraftHandoff | null = null) => {
+    navigationVersion.current++;
+    setDraftHandoff(handoff);
     const search = params.toString();
     history.pushState({}, "", location.pathname + (search ? "?" + search : ""));
     setRoute(location.search);
     setEditingId(null);
     setError("");
   }, []);
+  const openProjectDraft = async (request: WorkspaceDraft) => {
+    const target = request.targetWorkspace;
+    if (
+      !host ||
+      !target ||
+      target.workspaceIdentity ||
+      (target.hostId && target.hostId !== "local" && target.hostId !== String(host.id))
+    ) {
+      throw Error(intl.formatMessage({ id: "project.primaryRootUnavailable" }));
+    }
+    const version = navigationVersion.current;
+    const { hosts, projects } = await gateway.config();
+    if (version !== navigationVersion.current || request.isCurrent?.() === false) return;
+    const verified = hosts.find((item) => item.id === host.id);
+    const project = projects.find(
+      (item) =>
+        item.hostId === host.id &&
+        (item.remotePath === target.workspacePath ||
+          item.roots?.includes(target.workspacePath) ||
+          item.aliases?.includes(target.workspacePath)),
+    );
+    if (!verified || workspaceKey(verified, cwd) !== identity || !project)
+      throw Error(intl.formatMessage({ id: "project.primaryRootUnavailable" }));
+    const path = target.workspacePath;
+    // 草稿只交给对应路由新建的服务；旧工作区的输入框和 native Thread 均不能接收。
+    const draft: WorkspaceDraft = {
+      ...request,
+      projectId: project.id ?? project.remotePath,
+      taskGroupId: request.taskGroupId ?? null,
+      onComplete: () => {
+        setDraftHandoff((pending) => (pending?.draft === draft ? null : pending));
+        request.onComplete?.();
+      },
+    };
+    navigate(new URLSearchParams({ host: String(host.id), cwd: path }), {
+      identity: workspaceKey(verified, path),
+      draft,
+    });
+  };
   const manage = useCallback(() => navigate(new URLSearchParams({ manage: "1" })), [navigate]);
   const select = useCallback(
     (h: Host, path: string) => {
@@ -183,7 +242,11 @@ function Workbench({
     };
   }, [route, catalog, gateway, navigate]);
   useEffect(() => {
-    const pop = () => setRoute(location.search);
+    const pop = () => {
+      navigationVersion.current++;
+      setDraftHandoff(null);
+      setRoute(location.search);
+    };
     window.addEventListener("popstate", pop);
     return () => {
       window.removeEventListener("popstate", pop);
@@ -195,19 +258,10 @@ function Workbench({
       if (m.type === "config.catalog.changed") void refresh().catch(() => {});
       else if (m.type === "disconnected") {
         setWebReconnecting(true);
-        setHostConnections({});
       } else if (m.type === "ready") {
         setWebReconnecting(false);
         void refresh().catch(() => {});
         void gateway.send({ type: "host.lifecycle.subscribe" }).catch(() => {});
-      } else if (m.type === "host.lifecycle") {
-        const parsed = hostConnectionEvent.safeParse(m.event);
-        if (parsed.success) {
-          const { hostId, status } = parsed.data;
-          setHostConnections((current) =>
-            current[hostId] === status ? current : { ...current, [hostId]: status },
-          );
-        }
       }
     });
     // 已打开的工作区应在实时连接恢复时继续使用原会话。
@@ -263,22 +317,61 @@ function Workbench({
     }),
     [selectedId, selectedName, selectedAvatar, navigate, manage, account, logout],
   );
-  const sshStatus = host && hostConnections[host.id];
+  const sshConnection = host && hostConnections[host.id];
+  const sshStatus = sshConnection?.status;
   const noticeMessage = webReconnecting
     ? intl.formatMessage({ id: "selfhost.network.webReconnecting" })
     : host && sshStatus && sshStatus !== "connected"
       ? intl.formatMessage({ id: hostConnectionMessages[sshStatus] }, { host: host.name })
       : catalogIssue || null;
   const connectionNotice = noticeMessage && (
-    <div
-      className="pointer-events-none fixed inset-x-3 top-[max(0.5rem,env(safe-area-inset-top))] z-40 mx-auto w-fit max-w-[calc(100%_-_1.5rem)] rounded-lg border border-border bg-popover px-3 py-2 text-ui-sm text-popover-foreground shadow-sm"
-      role="status"
-    >
-      {noticeMessage}
+    <div className="pointer-events-none fixed inset-x-3 top-[max(0.5rem,env(safe-area-inset-top))] z-40 mx-auto flex w-fit max-w-[calc(100%_-_1.5rem)] flex-wrap items-center gap-2 rounded-lg border border-border bg-popover px-3 py-2 text-ui-sm text-popover-foreground shadow-sm">
+      <div className="min-w-0 break-words" role="status">
+        <p>{noticeMessage}</p>
+        {sshConnection?.sendFailed ? (
+          <p>{intl.formatMessage({ id: "selfhost.network.sshActionFailed" })}</p>
+        ) : null}
+      </div>
+      {host &&
+      cwd &&
+      !webReconnecting &&
+      sshStatus === "mfaRequired" &&
+      !sshConnection?.challenge ? (
+        <Button
+          type="button"
+          size="sm"
+          className="pointer-events-auto"
+          data-testid="selfhost-ssh-connect"
+          disabled={sshConnection?.canceling}
+          onClick={() => connectHost(host.id)}
+        >
+          {intl.formatMessage({ id: "selfhost.network.sshConnect" })}
+        </Button>
+      ) : null}
     </div>
   );
+  const challenge = sshConnection?.challenge;
+  const connectionFeedback = (
+    <>
+      {connectionNotice}
+      {host && challenge && !webReconnecting ? (
+        <HostMfaDialog
+          key={`${workspaceKey(host, cwd)}:${challenge.revision}`}
+          hostName={host.name}
+          challenge={challenge}
+          onRespond={(code) => respondToMfa(challenge, code)}
+        />
+      ) : null}
+    </>
+  );
+  const withConnectionFeedback = (content: ReactNode) => (
+    <>
+      {content}
+      {connectionFeedback}
+    </>
+  );
   if (error || (!catalog && catalogIssue))
-    return (
+    return withConnectionFeedback(
       <WebLoginPage
         local={{
           title: "连接工作区失败",
@@ -298,18 +391,17 @@ function Workbench({
       />
     );
   if (!catalog || (host && cwd && !opened))
-    return (
+    return withConnectionFeedback(
       <WebLoginPage
         local={{
           title: "正在打开工作区",
-          description: noticeMessage ?? host?.name ?? "正在读取服务器配置…",
+          description: host?.name ?? "正在读取服务器配置…",
           form: null,
         }}
       />
     );
   if (!host || !cwd || !opened)
-    return (
-      <>
+    return withConnectionFeedback(
         <Catalog
           gateway={gateway}
           hosts={catalog.hosts}
@@ -317,9 +409,26 @@ function Workbench({
           logout={logout}
           account={account}
           select={select}
+          renderConnectionAction={(candidate) => {
+            const state = hostConnections[candidate.id];
+            if (state?.status !== "mfaRequired") return null;
+            return (
+              <Button
+                type="button"
+                size="sm"
+                data-testid="selfhost-catalog-ssh-connect"
+                data-host-id={candidate.id}
+                disabled={webReconnecting || state.canceling}
+                onClick={() => {
+                  navigate(new URLSearchParams({ host: String(candidate.id) }));
+                  if (!state.challenge) connectHost(candidate.id);
+                }}
+              >
+                {intl.formatMessage({ id: state.challenge ? "selfhost.network.sshVerify" : "selfhost.network.sshConnect" })}
+              </Button>
+            );
+          }}
         />
-        {connectionNotice}
-      </>
     );
   const services = opened.services;
   const switcher: NonNullable<Parameters<typeof Root>[0]["webRemoteControlWorkspaceSwitcher"]> = {
@@ -347,7 +456,7 @@ function Workbench({
       location.reload();
     },
   };
-  return (
+  return withConnectionFeedback(
     <ZCodeIntlProvider
       settingService={services.settingService}
       broadcastService={services.broadcastService}
@@ -359,6 +468,8 @@ function Workbench({
         services={services}
         platform={platform}
         initialWorkspaceAbsPath={cwd}
+        onOpenProjectDraft={openProjectDraft}
+        initialTaskDraft={draftHandoff?.identity === identity ? draftHandoff?.draft : undefined}
         initialTaskId={thread}
         composerClientNamespace={"ssh:" + host.id + ":" + cwd}
         restoreSession={false}
@@ -368,7 +479,6 @@ function Workbench({
         supportsEmbeddedBrowser={false}
         webRemoteControlFeatureEnabled={false}
       />
-      {connectionNotice}
       {editingId === host.id && (
         <HostForm
           key={host.id}

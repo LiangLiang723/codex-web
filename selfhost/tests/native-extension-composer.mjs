@@ -1,0 +1,240 @@
+import assert from "node:assert/strict";
+import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { createInterface } from "node:readline";
+import { promisify } from "node:util";
+import {
+  nativeUserInputItems,
+  restoreNativeTurnText,
+} from "../../packages/web/src/selfhost/nativeTurnInput.ts";
+
+const binary = process.env.SELFHOST_COMPOSER_CODEX_BIN ?? "codex";
+const fixtureHome = await realpath(await mkdtemp(join(tmpdir(), "selfhost-native-composer-")));
+const codexHome = join(fixtureHome, ".codex");
+const cwd = join(fixtureHome, "workspace");
+const skillName = "fixture-review";
+const repoSkill = join(cwd, ".agents/skills/review (workspace)/SKILL.md");
+const repoPhrase = "COMPOSER_FIXTURE_REPO_INSTRUCTIONS_5B5D24";
+const pluginPhrase = "COMPOSER_FIXTURE_PLUGIN_INSTRUCTIONS_E9F207";
+const pluginName = "fixture-audit";
+const marketplace = "composer-fixture";
+const pluginId = `${pluginName}@${marketplace}`;
+const app = { type: "mention", name: "Fixture App", path: "app://fixture_app" };
+const env = {
+  HOME: fixtureHome,
+  CODEX_HOME: codexHome,
+  PATH: process.env.PATH,
+  LANG: "en_US.UTF-8",
+  SELFHOST_COMPOSER_FIXTURE_KEY: "fixture-only",
+};
+
+const requests = [];
+const server = createServer(async (request, response) => {
+  if (request.method !== "POST" || request.url !== "/v1/responses") {
+    response.writeHead(404).end();
+    return;
+  }
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  requests.push(JSON.parse(Buffer.concat(chunks)));
+  const id = `response_${requests.length}`;
+  const message = {
+    type: "message",
+    id: `message_${requests.length}`,
+    role: "assistant",
+    status: "completed",
+    content: [{ type: "output_text", text: "Fixture response", annotations: [] }],
+  };
+  response.writeHead(200, { "Content-Type": "text/event-stream" });
+  for (const event of [
+    { type: "response.created", response: { id, model: "gpt-5" } },
+    { type: "response.output_item.done", output_index: 0, item: message },
+    { type: "response.completed", response: { id, status: "completed", output: [message] } },
+  ]) {
+    response.write("data: " + JSON.stringify(event) + "\n\n");
+  }
+  response.end();
+});
+
+let child;
+
+async function startAppServer() {
+  child = spawn(binary, ["app-server"], { cwd, env, stdio: ["pipe", "pipe", "inherit"] });
+  const appServer = child;
+  const pending = new Map();
+  const completed = new Map();
+  let nextId = 0;
+  const lines = createInterface({ input: appServer.stdout });
+  lines.on("line", (line) => {
+    const value = JSON.parse(line);
+    pending.get(value.id)?.(value);
+    if (value.method === "turn/completed") {
+      completed.set(value.params.turn.id, value.params.turn);
+      lines.emit("turnCompleted", value.params.turn);
+    }
+  });
+  const rpc = (method, params) => {
+    const id = ++nextId;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`App Server timed out on ${method}`));
+      }, 15000);
+      pending.set(id, (value) => {
+        pending.delete(id);
+        clearTimeout(timer);
+        if (value.error) reject(new Error(`${method}: ${value.error.message}`));
+        else resolve(value.result);
+      });
+      appServer.stdin.write(JSON.stringify({ id, method, params }) + "\n");
+    });
+  };
+  await once(appServer, "spawn");
+  const info = await rpc("initialize", {
+    clientInfo: { name: "fixture", title: "Selfhost native composer", version: "1" },
+    capabilities: { experimentalApi: true },
+  });
+  assert.equal(info.codexHome, codexHome);
+  appServer.stdin.write('{"method":"initialized"}\n');
+
+  return {
+    rpc,
+    version: info.userAgent.split(" ")[0],
+    async waitForTurn(turnId) {
+      const signal = AbortSignal.timeout(15000);
+      while (!completed.has(turnId)) await once(lines, "turnCompleted", { signal });
+      return completed.get(turnId);
+    },
+  };
+}
+
+async function stopAppServer() {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  const closed = once(child, "close");
+  child.kill();
+  await closed;
+}
+
+async function writeFixture(path, content) {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, content);
+}
+
+const skillDocument = (phrase) =>
+  `---\nname: ${skillName}\ndescription: A skill for checking the composer's explicit selection.\n---\n${phrase}\n`;
+
+try {
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  await writeFixture(
+    join(codexHome, "config.toml"),
+    `
+model = "gpt-5"
+model_provider = "composer-test"
+approval_policy = "never"
+sandbox_mode = "read-only"
+check_for_update_on_startup = false
+chatgpt_base_url = "${origin}"
+[model_providers.composer-test]
+name = "Selfhost composer fixture"
+base_url = "${origin}/v1"
+wire_api = "responses"
+env_key = "SELFHOST_COMPOSER_FIXTURE_KEY"
+request_max_retries = 0
+stream_max_retries = 0
+[projects.${JSON.stringify(cwd)}]
+trust_level = "trusted"
+`,
+  );
+  await writeFixture(repoSkill, skillDocument(repoPhrase));
+  const marketRoot = join(fixtureHome, "local-market");
+  const pluginRoot = join(marketRoot, "plugins", pluginName);
+  await writeFixture(
+    join(marketRoot, ".agents/plugins/marketplace.json"),
+    JSON.stringify({
+      name: marketplace,
+      plugins: [{ name: pluginName, source: { source: "local", path: `./plugins/${pluginName}` } }],
+    }),
+  );
+  await writeFixture(
+    join(pluginRoot, ".codex-plugin/plugin.json"),
+    JSON.stringify({
+      name: pluginName,
+      description: "Composer fixture plugin",
+      version: "1.0.0",
+      skills: "./skills",
+    }),
+  );
+  await writeFixture(join(pluginRoot, "skills/review/SKILL.md"), skillDocument(pluginPhrase));
+  const run = (args) => promisify(execFile)(binary, args, { cwd, env, timeout: 30000 });
+  await run(["plugin", "marketplace", "add", "--json", "--", marketRoot]);
+  await run(["plugin", "add", "--json", "--", pluginId]);
+
+  const active = await startAppServer();
+  const installed = await active.rpc("plugin/installed", { cwds: [cwd] });
+  assert(
+    installed.marketplaces
+      .flatMap((group) => group.plugins)
+      .some((plugin) => plugin.id === pluginId && plugin.installed && plugin.enabled),
+  );
+  const { data } = await active.rpc("skills/list", { cwds: [cwd], forceReload: true });
+  const candidates = data[0].skills.filter((skill) => skill.enabled);
+  const workspaceSkill = candidates.find((skill) => skill.path === repoSkill);
+  const pluginSkill = candidates.find((skill) => skill.pluginId === pluginId);
+  assert.equal(workspaceSkill?.name, skillName);
+  assert.equal(pluginSkill?.name, `${pluginName}:${skillName}`);
+
+  const sent = [];
+  for (const [selected, phrase, siblingPhrase] of [
+    [workspaceSkill, repoPhrase, pluginPhrase],
+    [pluginSkill, pluginPhrase, repoPhrase],
+  ]) {
+    const { thread } = await active.rpc("thread/start", { cwd });
+    const text = `验证🧪 [$${selected.name}](<${selected.path}>) [@${pluginName}](plugin://${pluginId}) [$Fixture App](${app.path})`;
+    const input = nativeUserInputItems({ text });
+    assert.deepEqual(input.slice(1), [
+      { type: "skill", name: selected.name, path: selected.path },
+      { type: "mention", name: pluginName, path: `plugin://${pluginId}` },
+      app,
+    ]);
+    const requestCount = requests.length;
+    const { turn } = await active.rpc("turn/start", { threadId: thread.id, input });
+    const completed = await active.waitForTurn(turn.id);
+    assert.equal(completed.status, "completed", JSON.stringify(completed.error));
+    const prompts = requests.slice(requestCount).map((request) => JSON.stringify(request.input));
+    assert(prompts.some((prompt) => prompt.includes(input[0].text) && prompt.includes(phrase)));
+    assert(prompts.every((prompt) => !prompt.includes(siblingPhrase)));
+    sent.push({ threadId: thread.id, turnId: turn.id, text, input });
+  }
+
+  await stopAppServer();
+  const reopened = await startAppServer();
+  for (const { threadId, turnId, text, input } of sent) {
+    const { thread } = await reopened.rpc("thread/read", { threadId, includeTurns: true });
+    const { data: turns } = await reopened.rpc("thread/turns/list", { threadId, limit: 5 });
+    for (const history of [thread.turns, turns]) {
+      const content = history
+        .find((turn) => turn.id === turnId)
+        ?.items.find((item) => item.type === "userMessage")?.content;
+      assert.deepEqual(content, input);
+      assert.equal(restoreNativeTurnText(content), text);
+    }
+  }
+  console.log(
+    `PASS native composer ${active.version}: explicit skill contents, installed plugin, app mention and cold history`,
+  );
+} finally {
+  await stopAppServer();
+  if (server.listening) {
+    const closed = once(server, "close");
+    server.close();
+    server.closeAllConnections();
+    await closed;
+  }
+  await rm(fixtureHome, { recursive: true, force: true });
+}

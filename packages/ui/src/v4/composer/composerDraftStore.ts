@@ -274,9 +274,17 @@ function readDraft(value: unknown): V4ComposerDraft | null {
     ["id", "category", "label", "value", "markdown"].every(
       (key) => typeof mention[key] === "string",
     ) &&
-    ["files", "skills", "commands", "subagents", "whiteboards", "sessions", "plugins"].includes(
-      String(mention.category),
-    );
+    // 设置跳回聊天会重挂载编辑器；App 引用也须保留，否则只剩普通 Markdown 文本。
+    [
+      "files",
+      "skills",
+      "commands",
+      "subagents",
+      "whiteboards",
+      "sessions",
+      "plugins",
+      "apps",
+    ].includes(String(mention.category));
   return {
     text: value.text,
     ...(value.taskGroupId === null || typeof value.taskGroupId === "string"

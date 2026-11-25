@@ -281,6 +281,18 @@ export function useRootWorkspaceActions({
         // 在第一次 await 前捕获活动任务/草稿；快捷键和侧栏新建共用同一组织意图。
         const requestOptions = typeof request === "string" ? { provider: request } : { ...request };
         if (
+          selfHostedBuild &&
+          requestOptions.targetWorkspace &&
+          openMobileProjectDraft &&
+          (requestOptions.targetWorkspace.workspacePath !== activeWorkspacePath ||
+            (requestOptions.targetWorkspace.workspaceIdentity ?? null) !==
+              (activeWorkspaceIdentity ?? null))
+        ) {
+          // 跨 SSH 项目时先切换工作区服务。旧 Root 准备的草稿会归入当前目录且使用错误的 Codex 服务。
+          await openMobileProjectDraft({ ...requestOptions, isCurrent });
+          return;
+        }
+        if (
           requestOptions.taskGroupId === undefined &&
           requestOptions.projectId === undefined &&
           readProjectSidebarView() === "grouped" &&

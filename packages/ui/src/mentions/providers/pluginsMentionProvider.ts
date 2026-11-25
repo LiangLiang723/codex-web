@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import {
   sortPluginStoreEntries,
@@ -10,15 +10,18 @@ import {
 } from "@zcode/shared";
 import type { MentionCategoryResult, MentionItem } from "@/mentions/mentionTypes.js";
 import { filterMentionItemsWithOptions } from "@/mentions/mentionSearch.js";
-import { buildPluginMentionMarkdown } from "@/mentions/mentionMarkdown.js";
+import { buildCodexAppMention, buildPluginMentionMarkdown } from "@/mentions/mentionMarkdown.js";
 import { usePluginReferenceCatalog } from "@/hooks/usePluginReferenceCatalog.js";
 import { usePluginStoreOrder } from "@/hooks/usePluginStoreOrder.js";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { useWorkspaceServicesResolution } from "@/hooks/useWorkspaceServices.js";
 
 export interface PluginMentionLabels {
   conflictReason: string;
 }
+
+const EMPTY_APP_ITEMS: MentionItem[] = [];
 
 // - 只展示 catalog 中 enabled 的 Plugin；disabled 条目不可被引用，不进入候选。
 // - 同名 manifest 冲突（conflictingPluginIds 非空）保持可见但禁选，展示冲突原因（V1 fail closed）。
@@ -156,5 +159,73 @@ export function usePluginsMentionProvider(
     error: catalog.error ? new Error(catalog.error) : null,
     emptyText,
     title,
+  };
+}
+
+export function useCodexAppsMentionProvider(
+  workspacePath: string,
+  workspaceIdentity: string | undefined,
+  threadId: string | null,
+  query: string,
+  enabled: boolean,
+): MentionCategoryResult {
+  const { intl } = useZCodeIntl();
+  const { services, remoteSessionId, rpcReady } = useWorkspaceServicesResolution(
+    workspacePath,
+    undefined,
+    workspaceIdentity,
+  );
+  const service = rpcReady ? services.codexAppsService : undefined;
+  const workspaceKey = workspaceIdentity?.trim() || workspacePath;
+  const active = Boolean(selfHostedBuild && enabled && workspacePath);
+  const scope = useMemo(
+    () => ({ service, threadId, active, workspaceKey, remoteSessionId }),
+    [active, remoteSessionId, service, threadId, workspaceKey],
+  );
+  const [result, setResult] = useState<{
+    scope: typeof scope;
+    items: MentionItem[];
+    error: Error | null;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!scope.active || !scope.service) return;
+    let cancelled = false;
+    void scope.service.listForComposer(scope.threadId ?? undefined).then(
+      (apps) => {
+        if (!cancelled) setResult({ scope, items: apps.map(buildCodexAppMention), error: null });
+      },
+      (error: unknown) => {
+        if (cancelled) return;
+        setResult({
+          scope,
+          items: [],
+          error: error instanceof Error ? error : new Error(String(error)),
+        });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [scope]);
+
+  // 已经切换工作区或 Thread 时，不能在下一次请求前展示上一目标的可调用应用。
+  const current = active && result?.scope === scope ? result : null;
+  const candidates = current?.items ?? EMPTY_APP_ITEMS;
+  const items = useMemo(
+    () => filterMentionItemsWithOptions(candidates, query, { requireQuery: false }),
+    [candidates, query],
+  );
+  return {
+    items,
+    loading: active && (!rpcReady || Boolean(service && !current)),
+    error: current?.error ?? null,
+    emptyText: intl.formatMessage({
+      id:
+        current && candidates.length === 0
+          ? "chat.mention.apps.unavailable"
+          : "chat.mention.apps.empty",
+    }),
+    title: intl.formatMessage({ id: "chat.mention.apps.title" }),
   };
 }

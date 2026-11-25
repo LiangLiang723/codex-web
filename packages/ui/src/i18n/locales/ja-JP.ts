@@ -715,6 +715,10 @@ const jaJP: Record<string, string> = {
   "chat.composer.contextShortcut": "コンテキストを追加",
   "chat.composer.capabilityShortcut": "機能を選択",
   "chat.composer.skillShortcut": "スキルを選択",
+  "chat.composer.appSkillShortcut": "アプリやスキルを選択",
+  "chat.composer.manageApps": "アプリを管理",
+  "chat.composer.managePlugins": "プラグインを管理",
+  "chat.composer.manageSkills": "スキルを管理",
   "chat.composer.addSection": "追加",
   "chat.composer.addWorkflow": "ワークフロー",
   "chat.composer.attachment": "添付ファイル",
@@ -4262,6 +4266,7 @@ const jaJP: Record<string, string> = {
     "{device}はオフラインです。再接続するまで構成の読み込みや変更はできません。",
   "settings.scope.deviceConnecting": "{device}に接続中…",
   "settings.scope.localDevice": "このコンピューター",
+  "settings.scope.sshDevice": "現在の SSH ホスト",
   "settings.scope.label": "範囲",
   "settings.scope.user": "ユーザー",
   "settings.scope.workspace": "ワークスペース",
@@ -5529,6 +5534,17 @@ const jaJP: Record<string, string> = {
   "settings.pluginManaged.badge": "プラグイン",
   "settings.pluginManaged.modifyInPlugin":
     "プラグインによって登録されています。プラグイン側で編集してください。",
+  "settings.codexApps.browse": "アプリを探す",
+  "workspace.extensions": "拡張機能",
+  "settings.codexApps.use": "使う",
+  "settings.codexApps.useApp": "{app} を使う",
+  "settings.codexApps.useInChat": "新しいチャットで使う",
+  "settings.codexApps.loginRequired":
+    "アプリを接続するには、この SSH ホストで ChatGPT にログインしてください。ターミナルで次のコマンドを実行し、更新してください。",
+  "settings.codexApps.featureDisabled":
+    "この SSH ホストではアプリが無効です。ターミナルで有効にしてから更新してください。",
+  "settings.codexApps.emptyInstalled":
+    "インストール済みのアプリはありません。「アプリを探す」から接続できます。",
   "settings.codexApps.title": "アプリ",
   "settings.codexApps.back": "戻る",
   "settings.codexApps.search": "アプリを検索",
@@ -5555,10 +5571,36 @@ const jaJP: Record<string, string> = {
   "settings.codexApps.noMatches": "該当するアプリはありません",
   "settings.codexApps.showMore": "さらに表示",
   "settings.codexApps.overridden": "優先度の高い設定が適用されています",
-  "settings.plugins.codexAccountManaged": "有効化は Codex アカウントで管理されます",
-  "settings.plugins.marketplaces.codexSource": "SSH ホスト上のパス、owner/repository、または Git URL",
+  "settings.plugins.codexAccountManaged":
+    "このアカウントのプラグインのインストールは ChatGPT プラグインディレクトリで管理できます。",
+  "settings.plugins.codexDirectory": "ChatGPT プラグインディレクトリを開く",
+  "settings.plugins.codexUse": "使う",
+  "settings.plugins.codexPolicyBlocked": "ワークスペース管理者がこのプラグインを無効にしています。",
+  "settings.plugins.codexInstallUnavailable": "インストール不可",
+  "settings.plugins.codexInstallPolicy":
+    "Codex アカウントまたはワークスペースのポリシーによりインストールできません。",
+  "settings.plugins.codexConfiguredCatalogFailed":
+    "一部の SSH ホストのプラグインマーケットプレイスを読み込めませんでした。",
+  "settings.plugins.codexConfiguredCatalogLoading":
+    "SSH ホストのプラグインマーケットプレイスを読み込み中…",
+  "settings.plugins.codexAccountCatalogFailed":
+    "Codex アカウントのプラグインディレクトリを読み込めませんでした。",
+  "settings.plugins.codexAccountCatalogLoading":
+    "Codex アカウントのプラグインディレクトリを読み込み中…",
+  "settings.plugins.marketplaces.codexSource":
+    "SSH ホスト上のパス、owner/repository、または Git URL",
   "settings.skills.codexSystem": "Codex 内蔵",
   "settings.skills.codexAdmin": "SSH ホストで管理",
+  "settings.skills.codexDiscover": "スキルを探す",
+  "settings.skills.codexDiscoverPrompt":
+    "インストールできるスキルとインストール方法を教えてください。",
+  "settings.skills.codexName": "スキル名",
+  "settings.skills.codexDependencies": "依存ツール",
+  "settings.skills.codexUse": "スキルを使う",
+  "settings.skills.codexUseShort": "使う",
+  "settings.skills.codexPreviewBinary": "SKILL.md をテキストとして読み込めません。",
+  "settings.skills.codexEffectiveMismatch":
+    "SSH ホストの有効なスキル設定が、要求された設定と異なります。",
   "settings.plugins.title": "プラグイン",
   "settings.plugin.scope.user": "ユーザー",
   "settings.plugin.scope.workspaces": "ワークスペース",
@@ -6462,6 +6504,13 @@ const jaJP: Record<string, string> = {
   "selfhost.network.sshConnecting": "SSH ホスト {host} に接続中…",
   "selfhost.network.sshFailed": "SSH ホスト {host} に接続できませんでした。",
   "selfhost.network.sshMfaRequired": "SSH ホスト {host} では多要素認証が必要です。",
+  "selfhost.network.sshConnect": "ホストに接続",
+  "selfhost.network.sshVerify": "SSH ホストの認証",
+  "selfhost.network.sshCode": "認証コード",
+  "selfhost.network.sshMultiplePrompts":
+    "このホストは複数の回答を求めています。キャンセルして SSH クライアントで認証してください。",
+  "selfhost.network.sshActionFailed":
+    "認証リクエストを送信できませんでした。ウェブ接続が復旧してから再試行してください。",
   "selfhost.status.title": "セッションの状態",
   "selfhost.status.open": "セッションの状態を開く",
   "selfhost.status.collapse": "セッションの状態を折りたたむ",
@@ -7564,6 +7613,9 @@ const jaJP: Record<string, string> = {
   "chat.mention.files.title": "ファイル",
   "chat.mention.files.empty": "一致するファイルはありません",
   "chat.mention.skills.title": "スキル",
+  "chat.mention.apps.title": "アプリ",
+  "chat.mention.apps.empty": "一致するアプリはありません",
+  "chat.mention.apps.unavailable": "「拡張機能 → アプリ」でアプリを接続または有効にできます。",
   "chat.mention.skills.empty": "一致するスキルはありません",
   "chat.mention.skills.searchHint": "入力してスキルを検索",
   "chat.mention.subagents.title": "エージェント",

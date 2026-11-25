@@ -70,7 +70,7 @@ import type {
   SavedWorkflowsOpenRunParams,
 } from "@/settings/saved-workflows/SavedWorkflowsSection.js";
 import { AutomationsMainBreadcrumbFrame } from "@/settings/AutomationsMainBreadcrumbFrame.js";
-import { PluginStorePage } from "@/settings/PluginStorePage.js";
+import { WorkspaceExtensionsPage } from "@/settings/PluginStorePage.js";
 import { TaskFindDialog } from "@/quickpick/TaskFindDialog.js";
 import { WebRemoteControlMobileShell } from "@/WebRemoteControlMobileShell.js";
 import { resolveTopOverlayLeadingPaddingClass, WorkspaceHeader } from "@/WorkspaceHeader.js";
@@ -2454,7 +2454,7 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
         workspaceContent={
           selfHostedBuild && workspaceMainView === "plugin-store" ? (
             <main className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-              <PluginStorePage
+              <WorkspaceExtensionsPage
                 key={`plugin-store:${pluginStoreOpenVersion}`}
                 isWebRemoteControl
                 workspacePath={workspaceAbsPath}
@@ -2586,7 +2586,7 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
               <AutomationsMainBreadcrumbFrame
                 isDesktop={Boolean(isDesktop)}
                 sectionLabel={intl.formatMessage({
-                  id: "workspace.openPluginsSettings",
+                  id: selfHostedBuild ? "workspace.extensions" : "workspace.openPluginsSettings",
                 })}
                 ariaLabel={intl.formatMessage({
                   id: "settings.breadcrumbLabel",
@@ -2594,7 +2594,7 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
               >
                 <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
                   <div className="mx-auto flex w-full max-w-4xl flex-col px-4 py-4 md:px-6 md:py-6">
-                    <PluginStorePage
+                    <WorkspaceExtensionsPage
                       isDesktop={isDesktop}
                       isMacDesktop={isMacDesktop}
                       isWindowsDesktop={isWindowsDesktop}
@@ -2604,6 +2604,7 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
                       workspaceIdentity={workspaceIdentity}
                       // Bug 根因：独立插件页曾绕过切回聊天页的包装回调，任务虽被创建，
                       // 视图仍停在插件详情，用户看到“立即试用”与示例 Prompt 点击无反应。
+                      onBack={selfHostedBuild ? showChatMainView : undefined}
                       onCreateTask={handleCreateTaskInChat}
                       onOpenDraftUi={handleOpenDraftPluginUi}
                       sessionId={activeTaskId}
@@ -3035,7 +3036,9 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
                             <AutomationsMainBreadcrumbFrame
                               isDesktop={Boolean(isDesktop)}
                               sectionLabel={intl.formatMessage({
-                                id: "workspace.openPluginsSettings",
+                                id: selfHostedBuild
+                                  ? "workspace.extensions"
+                                  : "workspace.openPluginsSettings",
                               })}
                               ariaLabel={intl.formatMessage({
                                 id: "settings.breadcrumbLabel",
@@ -3043,7 +3046,7 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
                             >
                               <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
                                 <div className="mx-auto flex w-full max-w-4xl flex-col px-4 py-4 md:px-6 md:py-6">
-                                  <PluginStorePage
+                                  <WorkspaceExtensionsPage
                                     isDesktop={isDesktop}
                                     isMacDesktop={isMacDesktop}
                                     isWindowsDesktop={isWindowsDesktop}
@@ -3051,6 +3054,7 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
                                     key={`plugin-store:${pluginStoreOpenVersion}`}
                                     workspacePath={workspaceAbsPath}
                                     workspaceIdentity={workspaceIdentity}
+                                    onBack={selfHostedBuild ? showChatMainView : undefined}
                                     onCreateTask={handleCreateTaskInChat}
                                     onOpenDraftUi={handleOpenDraftPluginUi}
                                     sessionId={activeTaskId}

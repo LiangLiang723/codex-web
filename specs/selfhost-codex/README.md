@@ -20,14 +20,30 @@ Acceptance includes a real model list and reasoning control, native prompt edito
 
 ## SSH 主机上的应用管理
 
-在设置的「Agent 能力」中，应用、插件、技能使用独立入口。应用列表属于当前 SSH 主机上的 Codex 账号。首屏读取一页目录与独立的安装快照，后续随展开或搜索按原生游标读 `app/list`，以 `app/installed` 区分已安装、已启用与当前可调用，并在打开详情时用 `app/read` 读取工具及所属插件。安装或连接从 Codex 返回的 HTTPS 地址进入，由用户在官方页面完成；返回后可以刷新。原生没有返回的状态显示为未知。目录或可选接口故障仍保留能读到的信息，旧主机的回包不能更新新主机的界面。
+桌面与手机在工作区侧栏提供同一个「扩展」入口。「插件 / 应用 / 技能」是该页面唯一一层能力分类，默认打开当前 SSH 主机的固定已安装插件视图。浏览市场、打开具体插件和添加来源直接到原有 ZCode 商店对应视图，返回后继续管理已安装插件。已安装目录先可操作，搜索、详情和就绪状态取自当前远端；可用条目的「使用」在同一项目创建带引用的可编辑草稿。MCP 继续从设置进入，普通插件设置沿用已有分类标签。
+
+导航依据是 [DeepSeek Harness 的插件页](https://github.com/deepseek-ai/deepseek-harness/blob/4b399c39a6d1479cd84ca591b4d7c88e24d38a96/packages/client/ui-plugin-manager/src/client/PluginManagerPage.tsx) 与[按 Host 返回的账号操作](https://github.com/deepseek-ai/deepseek-harness/blob/4b399c39a6d1479cd84ca591b4d7c88e24d38a96/packages/client/ui-connector-account/README.zh.md)。已安装项优先、进入聊天再选取的交互也参考了 [goose 的侧栏与会话扩展](https://goose-docs.ai/docs/getting-started/using-extensions/)，技能来源可查参考了 [OpenCode 的项目与个人技能](https://opencode.ai/docs/skills/)。Codex 配置及作用域取自 [OpenAI 配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)。
+
+在设置的「Agent 能力」中，应用、插件、技能使用独立入口。应用管理沿用 ZCode 商店的分段、搜索和新任务草稿交互。默认查看当前 SSH 主机上 Codex 返回的「已安装」应用，打开「浏览应用」后才分页读取整个目录。已有运行快照优先显示，原生冷缓存为空或用户刷新时再向远端刷新。账号连接从 Codex 返回的 HTTPS 地址进入。详情可查看工具及所属插件，可调用的应用提供「在新对话中使用」，生成当前工作区可编辑的应用引用草稿，由用户发送。
+
+原生 `app/installed` 拥有已安装、有效开关和可调用状态。输入框使用现有原生 Thread 的配置快照，新任务读取全局快照。只有远端缺少 `app/installed` 方法时才按游标读取 `app/list` 中明确可访问且启用的条目。目录故障不阻塞已安装列表，单个详情或图标缺失时保留已知的运行状态。ZCode 商店的交互参照 [`PluginStoreListView`](https://github.com/zai-org/ZCode/blob/a4b4445141eb7d3b3e99eada9292775383bfc44e/packages/ui/src/settings/PluginStoreListView.tsx) 和 [`PluginStorePage`](https://github.com/zai-org/ZCode/blob/a4b4445141eb7d3b3e99eada9292775383bfc44e/packages/ui/src/settings/PluginStorePage.tsx)，协议参照 [Codex Apps](https://learn.chatgpt.com/docs/app-server#apps-connectors)。
 
 应用开关将一个应用 ID 和布尔值提交到已认证主机，经限定操作写入 `apps.<id>.enabled`。单工具开关只写该应用的相应工具，配置服务处理策略覆盖。写完重新读取远端有效状态。浏览器不能从这个接口指定任意配置键或文件。点击应用详情不启动工具，也不自动向服务商授权。
+
+`app/read` 返回服务商公布的工具信息。工具开关另外读取 Codex 的有效配置 `config/read`，单工具的 `tools.<name>.enabled` 优先于应用的 `default_tools_enabled`，仅向页面返回该条目的状态。服务商禁用的工具保留原因。若暂时读不到配置，详情仍可查看，工具开关提示读取失败并允许重试。
+
+空目录通过原生 `account/read` 与 `config/read` 区分未登录 ChatGPT、API Key 登录、显式关闭 Apps 和确无条目的情况。前两种给出目标主机上的设备登录命令，显式关闭时给出原生启用命令。Gateway 只向页面传递原因，用户自行决定是否更改该主机的登录或配置。
 
 | 验收 | 场景 | 通过条件 |
 | --- | --- | --- |
 | SH-APP-MANAGEMENT | 两台主机、目录多页、未连接/已禁用/已连接但不可调用的应用、旧版本缺少运行态接口 | 桌面与手机从设置找到三类入口；按 ID 合并并区分状态，连接打开原生链接，详情显示该应用的工具，主机切换隔离旧响应。 |
 | SH-APP-WRITE | 启用或禁用应用及单个工具，策略覆盖或配置写失败 | 远端收到单个原生配置叶子的修改。覆盖或失败在页面可见，另一个应用及其他权限配置保留。 |
+| SH-APP-INVOKE | 首屏有已安装项，目录慢或失败；从设置打开可用应用，从聊天输入框选择应用 | 首屏与聊天选择不依赖市场请求。打开可用应用后可预填新任务；已停用或无可用工具的应用不能作为可用候选。远端 Turn 同时收到 `$` 文本与指向原生应用 ID 的 `app://` 引用。 |
+| SH-EXTENSIONS-ENTRY | 桌面和手机从项目侧栏打开扩展，切换三类列表，进入市场查看来源并返回，最后从「使用」回到聊天 | 三类资源共用一层分类，当前选中项与列表相符。已安装项先呈现，进入市场才读取账号目录。点击使用后当前项目的草稿保留可删除的引用，用户发送前无新 Turn。 |
+
+手机列表与聊天各自有导航状态。只有当前工作区准备好用户请求的预填草稿后，手机才从列表进入聊天；先打开扩展、浏览详情、切换其他主机都不应打开聊天。重挂载编辑器从同一个草稿读取结构化引用和正文。
+
+从 A 的扩展页选择项目 B 的技能时，Web 按选中主机核对 B 的注册目录，切换至 B 的工作区服务，再由 B 的 Root 接收原生技能引用和草稿。主机被替换、目录被移走或期间用户改选项目时，放弃这次交接。
 
 ```mermaid
 sequenceDiagram
@@ -82,20 +98,31 @@ sequenceDiagram
     F-->>W: 经 Gateway 同步结果
 ```
 
-## 输入框插件和技能
+## 输入框应用、插件和技能
 
-自托管 Web 的加号分别列出当前 SSH 工作目录可引用的已启用插件和技能。Codex App Server 的 `plugin/installed` 和 `skills/list` 分别提供候选。插件选择器读取已安装摘要，插件商店打开详情时读取详情。插件与技能分组可独立显示加载、结果和失败状态。
+桌面和手机 Web 都从输入框的加号选择应用、插件和技能。输入 `$` 可搜索应用和技能，输入 `@` 可搜索插件及原有的文件与会话引用。点击候选或用键盘确认后，在同一草稿的光标位置插入标签。加号中三个分组末尾分别提供管理入口，打开当前 SSH 工作区内对应的扩展页面。用户可返回原草稿继续编辑。选择可重复撤销，只有发送动作才提交给 Codex。
 
-候选文案显示 Codex 的展示名称。同名插件附市场，同名技能附来源和路径。选择插件使用原生插件 ID，选择技能使用原生 `SKILL.md` 路径。选中后按同一输入框的引用规则写入草稿，发送时转为 Codex 用户输入项。
+应用目录来自当前 SSH 主机。已有会话按 Codex Thread 查询其可用应用，新任务按当前主机查询。当前版本提供运行时快照时，候选是可调用的已启用应用。只支持 `app/list` 的版本以目录中同时可访问且启用的条目为准。已有 Thread 未加载时显示原生读取失败，不切换到主机全局结果。应用目录为空时，`+` 和 `$` 指向「扩展 → 应用」。插件读取已安装摘要，技能从当前 SSH 工作目录的 `skills/list` 获取。三组各自显示加载和读取失败。候选采用原生展示名称，同名插件附市场，同名技能附来源和路径。
 
-验收覆盖多市场安装摘要、后段虚拟列表条目、同名候选、插件详情慢或失败时的可选状态、技能目录错误时插件仍可用，以及两类选择的原生输入。桌面 Web 与手机 Web 复用同一 SSH 目录。
+草稿继续使用可复制、可恢复的引用文本，已有编辑器草稿快照在刷新后恢复可编辑的标签。提交路径复用同一个原生 UserInput 构造器，将引用转为文本标记及结构项。App 发送按 Codex 的名称规则生成的 `$slug` 与 `mention`（`app://<id>`）。插件发送 `@name` 与 `mention`（`plugin://<name>@<marketplace>`）。技能发送 `$name` 与 `skill`（原生名称和绝对 `SKILL.md` 路径）。同一引用多次出现在正文时保留各位置，结构引用按目标去重。原生文本的 `text_elements` 携带 UTF-8 字节范围和草稿引用，历史与队列使用原生响应中可核对的范围还原标签。已有包含引用链接的历史仍可读。
+
+新建与空闲会话通过 `turn/start` 提交，已有忙碌会话按现有引导/排队动作提交。具体工具执行由 Codex 决定。重新加载会话只读取原生历史和队列。原生 ZCode Desktop 使用其窗口 Host 上的选择器和连续会话。
+
+| 验收 | 场景 | 通过条件 |
+| --- | --- | --- |
+| SH-COMPOSER-EXTENSIONS | 桌面与手机，从加号、`$` 和 `@` 选择；目录独立失败和重新打开；同名、路径带空格或括号；加号内管理任一分类 | 只有可选项能插入。应用、插件与技能的当前身份可辨。已有会话请求携带真实 Thread ID，新任务目录请求使用主机范围。管理动作切换到对应分类，返回后原草稿可编辑。 |
+| SH-COMPOSER-EXTENSIONS-DELIVERY | 新任务首轮、已有会话续轮、运行中的引导与排队、发送前刷新草稿、发送后重开会话 | 草稿恢复各项选择。远端收到匹配的原生文本和 `skill` 或 `mention`，正文、附件、原生投递方式及命令身份一致。已接受的历史恢复标签和正文。 |
 
 ```mermaid
 sequenceDiagram
     participant W as 加号选择器
     participant G as SSH Gateway
     participant C as Codex App Server
-    par 插件目录
+    par 应用目录
+        W->>G: 可调用应用（主机或已有 Thread）
+        G->>C: 查询可用应用
+        C-->>W: 经 Gateway 返回应用 ID 和名称
+    and 插件目录
         W->>G: 已安装插件（当前工作目录）
         G->>C: plugin/installed
         C-->>W: 原生插件 ID 与展示名称
@@ -105,22 +132,35 @@ sequenceDiagram
         C-->>W: 原生技能路径与来源
     end
     W->>W: 选择候选并插入草稿
-    W->>G: 提交草稿和选中的身份
-    G->>C: 原生 mention 或 skill 输入
+    W->>G: 提交草稿与原有投递命令 ID
+    G->>C: 文本及原生 mention 或 skill
+    C-->>W: 经 Gateway 返回已接受的输入及历史
 ```
+
+验收入口为 `node selfhost/tests/plugin-picker.mjs`、`node selfhost/tests/native-input.mjs` 和 `SELFHOST_COMPOSER_CODEX_BIN=/path/to/codex node selfhost/tests/native-extension-composer.mjs`。原生验收在临时 Codex 配置和本机模型服务中核对插件安装身份、两种同名技能的实际内容注入，以及 App、插件和 Skill 的冷启动历史。交互沿用 ZCode v4 的 [加号菜单](https://github.com/zai-org/ZCode/blob/a4b4445141eb7d3b3e99eada9292775383bfc44e/packages/ui/src/prompt-editor/ChatPromptActionMenu.tsx) 和输入内引用。原生转译参见 [App Server 文档](https://learn.chatgpt.com/docs/app-server)、[Codex 0.170 协议](https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/app-server-protocol/schema/typescript/v2/UserInput.ts) 和 [Codex 0.172 选择器](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/tui/src/bottom_pane/chat_composer.rs)。
 
 ### SSH 主机上的插件与技能设置
 
+在「来源管理」可直接添加 SSH 主机上的本地或 Git 市场。空来源列表也显示这一动作，复用 ZCode 现有来源确认与安装流程。
+
+[SSH 技能设置与发现](./skills.md)描述技能作用域、原生内容预览、启停和发现的验收路径。
+
 插件管理、插件商店和技能设置复用 ZCode 的原有页面。插件管理以当前 SSH 用户的 Codex 安装状态为准，商店按原生市场分组，安装与卸载使用完整的 `名称@市场`。远端账号市场与 SSH 主机上的本地或 Git 市场各自保留来源。插件详情显示原生目录和本机包中可读取的资料，已安装插件的技能用完整插件 ID 关联。打开详情不安装插件。
 
-受限的 Gateway 接口用远端 `codex plugin list/add/remove/marketplace` 的 JSON 输出读取和管理目录。设置与输入框的已安装视图使用 `plugin/installed`，并保留独立错误反馈。OpenAI 标为开发中的市场协议不用于生产客户端。插件用户级开关只写 `plugins."名称@市场".enabled` 的布尔值。账号市场的启用状态由官方服务管理，SSH 本机配置无法覆盖时在页面说明。技能目录采用 `skills/list`，按当前目录与 `SKILL.md` 的绝对路径读取，技能开关调用 `skills/config/write`，保留作用域与来源。同名条目保留各自身份。
+已安装插件使用 `plugin/installed`。商店并行检索主机市场和账号目录，分别显示加载状态、已返回的条目及读取错误。主机市场先用 `codex plugin marketplace list --json` 枚举，再按市场名称搜索插件。账号目录查询使用 `codex plugin list --json --available --marketplace openai-curated-remote`。账号目录首次加载或读取失败时，可以继续查看已安装插件和主机市场，也可打开 ChatGPT 插件目录；失败后提供重试入口。配置和安装状态以同一 SSH 主机的有效读取为准。目录暂时失败时保留当前主机上次返回的条目，过期的目录回包不能恢复已卸载状态或覆盖切换后的主机。OpenAI 标为开发中的市场协议不用于生产客户端。CLI 和 App Server 的结果以完整插件 ID 合并，区分账号目录和主机市场，包含安装策略、Codex 提供的展示字段与市场名。
+
+插件用户级开关写入 `plugins."名称@市场".enabled` 的单个布尔值，由原生 App Server 重载并核对有效状态。账号插件支持本机停用与恢复，管理员停用的插件显示策略和禁用的开关。CLI 支持的主机市场和公共账号市场使用完整插件 ID 原生安装与卸载。个人及组织账号市场的卸载入口指向官方插件目录。目录报告不可安装的条目可查看详情，页面显示安装限制。已安装详情直接使用原生安装记录和可读取的本地包清单，即使对应市场目录尚未返回也可以打开。变更后先显示原生有效安装态，其余目录可继续加载。查看详情和刷新只读取数据。已安装列表提供「使用」，与详情的「立即试用」共用完整插件引用的草稿预填，用户发出消息后才使用能力；已停用或受策略限制的插件保留管理入口。与插件有关的技能和 MCP 在同一 App Server 上读取更新后的配置，新开的会话可用其已启用能力。
+
+技能目录采用 `skills/list`，按当前目录与 `SKILL.md` 的绝对路径读取，技能开关调用 `skills/config/write`，保留作用域与来源。同名条目保留各自身份。
 
 完成修改后重新读取远端状态。写入失败可从原页面重试，列表保留各接口能读取的事实。安装、卸载与新增市场不作为读取或刷新目录的副作用。页面切换 SSH 主机时不会套用上一次读取或操作的结果。
 
 | 验收 | 场景 | 通过条件 |
 | --- | --- | --- |
 | SH-PLUGIN-MANAGEMENT | 设置、插件商店、两个来源的同名插件及同一插件的工作区切换 | 桌面与手机展示真实来源与安装态。详情、安装、停用、恢复和卸载针对完整插件 ID。操作后以远端目录刷新，另一来源的条目保持原状态。 |
-| SH-PLUGIN-MARKETPLACE | 添加 SSH 主机本地市场或 Git 市场，刷新、移除及附带的官方目录 | 按原有确认流程接收来源，保留 CLI 正常与失败响应。官方账号市场和本地市场各自显示名称与可执行操作。 |
+| SH-PLUGIN-MARKETPLACE | 添加 SSH 主机本地市场或 Git 市场，官方目录首次读取延迟、失败后重试、返回安装限制；一个主机市场读取失败 | 已安装和主机市场各自出现，可在官方目录未返回时进入详情、安装或启停，并可打开 ChatGPT 插件目录。重试返回后补齐账号市场条目，失败的主机市场保留上次目录并显示错误。受限制的插件保留详情入口和限制说明。 |
+| SH-PLUGIN-ACCOUNT | 账号市场中已安装的公共、个人插件和管理员停用的条目 | 可停用和恢复允许管理的插件；公共账号插件使用原生 CLI 卸载，个人账号插件可打开官方管理入口。已启用的行可直接预填新对话；已停用或受限制的行不提供「使用」。 |
+| SH-PLUGIN-RUNTIME | 同一个隔离 App Server 在安装前已启动，本地市场有同名插件的技能 | 安装后读取相同服务器的有效安装与技能清单，停用和恢复仅影响选定插件，卸载后其技能退出清单。 |
 | SH-SKILL-MANAGEMENT | 本地与插件技能同名、切换 User/Workspace、读取或写入失败 | 当前 SSH 目录的原生技能路径和来源可辨识。开关提交相应的 `SKILL.md` 路径，随后重新读取有效状态。技能目录失败时仍可独立查看插件。 |
 
 ```mermaid
@@ -128,14 +168,21 @@ sequenceDiagram
     participant W as ZCode 设置与商店
     participant G as 已验证主机的 Gateway
     participant C as SSH 主机上的 Codex
-    W->>G: 查询当前目录或提交选定条目的修改
-    G->>C: CLI 插件操作或受限的 App Server 请求
-    C-->>G: 目录、写入结果或失败原因
-    G-->>W: 可显示的远端结果
-    W->>G: 写入完成后重新查询
+    par 已安装
+        W->>G: 查询当前 SSH 工作目录的已安装插件
+        G->>C: plugin/installed
+        C-->>W: 有效状态、来源和展示字段
+    and 主机与账号市场分别加载
+        W->>G: 查询一个市场来源
+        G->>C: 该来源的 CLI 目录读取
+        C-->>W: 对应目录或失败原因
+    end
+    W->>G: 提交完整插件 ID 和操作
+    G->>C: 受限的安装、卸载或配置变更
+    C-->>W: 变更结果及重新读取的有效状态
 ```
 
-参见 [App Server 技能与插件协议](https://learn.chatgpt.com/docs/app-server) 和 [Codex CLI 插件实现](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/cli/src/plugin_cmd.rs)。
+交互参见 ZCode v4 的 [插件商店](https://github.com/zai-org/ZCode/blob/a4b4445141eb7d3b3e99eada9292775383bfc44e/packages/ui/src/settings/PluginStorePage.tsx) 和[插件详情](https://github.com/zai-org/ZCode/blob/a4b4445141eb7d3b3e99eada9292775383bfc44e/packages/ui/src/settings/PluginStoreDetailView.tsx)。原生边界参见 [App Server 技能与插件协议](https://learn.chatgpt.com/docs/app-server)、[Codex CLI 插件实现](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/cli/src/plugin_cmd.rs)和 [ChatGPT 与 Codex 插件目录](https://learn.chatgpt.com/docs/plugins)。
 
 ## 会话状态栏
 
@@ -309,6 +356,8 @@ Codex App Server 持有模型请求及当前轮次状态。Web 收到当前轮�
 
 初次进入或重连时，Gateway 从现有有界事件缓冲读取与活动轮次对应的最近恢复事件，截止于原快照的回放游标。后续事件继续通过原订阅推进。浏览器与 Gateway 的连接由浏览器 `Gateway` 管理。WebSocket 意外关闭、握手失败或已认证的连接心跳超时时，保留工作区并显示自动重连，收到 `ready` 即清除。SSH 主机链路由 Gateway 的 Host Supervisor 管理，Web 使用认证后的主机生命周期事件提示当前主机的连接进度与失败，连接成功后清除。其他主机的事件不影响当前工作区。重连继续通过原订阅恢复线程，轮次由远端 Codex 继续负责。
 
+需要 SSH 多因素认证的主机在 Gateway 重启后保持待连接。订阅主机生命周期时，Host Supervisor 向订阅者返回同一登录账号下仍需主动连接的主机状态。用户在主机列表或已打开的工作区点击「连接主机」后才发送 `host.mfa.connect`。Gateway 原有 MFA 管理器持有 SSH 挑战与超时，认证完成前可用 `host.mfa.request` 重放当前挑战。Web 展示选定主机的实际提示文本和输入可见性，以原 `host.mfa.submit` 提交单项回答或用 `host.mfa.cancel` 取消。处于多项挑战时可取消并从原生 SSH 客户端处理。验证码只存在当次表单和当前认证 WebSocket 内，断线、取消、切换账号或主机时清除输入，连接成功后清除该主机提示。其余主机和已有会话的重连路径继续按原订阅运行。
+
 ```mermaid
 sequenceDiagram
     participant C as Codex App Server
@@ -318,13 +367,21 @@ sequenceDiagram
     G-->>W: canonical 事件及回放游标
     W->>G: 心跳或 WebSocket 自动重连
     G-->>W: ready、活动轮次恢复事件及后续增量
-    G-->>W: 当前 SSH 主机的生命周期事件
+    W->>G: 订阅登录账号的主机生命周期
+    G-->>W: 当前待连接的 MFA 主机及后续状态
+    W->>G: 用户点击后连接选定主机
+    G-->>W: 主机请求认证时下发实际挑战
+    W->>G: 同一认证连接提交回答或取消
+    G-->>W: 当前主机认证与连接结果
 ```
 
 | 验收 | 设置与操作 | 证据 |
 | --- | --- | --- |
 | SH-NETWORK-MODEL | 当前轮次模拟 `2/5`、无次数重试、HTTPS 回退、输出恢复、最终超时及页面重开 | 重试即时可见、进度随同轮清除、重连恢复有效进度、失败原因可见且聊天记录保留 |
 | SH-NETWORK-LINK | 断开浏览器 WebSocket、模拟心跳丢失和 SSH 主机失败，再恢复连接 | 桌面和手机提示对应链路、恢复清除、其他主机事件隔离、重连未重发输入 |
+| SH-NETWORK-MFA | Gateway 重启后订阅、显式 SSH 连接、异主机挑战、取消后重试和提交、切换两个主机 ID 相同的账号 | 连接入口持续可见。切换账号时等该账号的主机目录返回后再显示挑战与名称。挑战可填写、取消或重试，确认后清除。输入保持在当次验证里。 |
+
+SSH 多因素认证沿用 [Gateway 原认证命令](https://github.com/yunhaoli24/codex-gateway/blob/76200537c19f0c4075153c1458667a07e804db6c/server/utils/gateway/realtime/handlers/host-mfa.ts) 与[主机认证界面](https://github.com/yunhaoli24/codex-gateway/blob/76200537c19f0c4075153c1458667a07e804db6c/app/components/sidebar/host-tree/HostMfaDialog.vue)。
 
 ## 2026-11-24 发布验收
 
@@ -350,6 +407,20 @@ sequenceDiagram
 
 本版类型检查和架构检查通过。Lint 为 530 条告警、0 个错误，受影响的工程测试 281 项通过、1 项跳过。
 
+## 2026-11-25 扩展中心发布验收
+
+正式服务已更新至 `zcode-selfhost:20261125-workspace-extensions-final`。发布前备份 SQLite 和服务配置，记录上一版健康镜像的精确 ID。验收使用独立网页登录账号和专用 SSH 项目。桌面与手机宽度从侧栏进入同一个扩展中心，加号内的管理入口可返回原聊天草稿。
+
+| 正式服务场景 | 实际结果 |
+| --- | --- |
+| 1480px，经 SSH 使用 Mac 上的 Codex 0.172.0 选择 Google Drive | 原生目录和详情页各有 47 个工具。完成一次主机连接检查后，从点击「应用」到「使用 Google Drive」可见的一次采样是 8.124 秒。选择应用并发送后，真实模型返回了目录中的 `mcp__codex_apps__google_drive_search`。验证范围为工具发现。 |
+| 390px，经 SSH 使用 Linux 上的 Codex 0.171.0 管理项目技能 | 从作用域菜单直达当前项目，停用和恢复测试技能，打开远端 `SKILL.md`，点击「使用」后再发送。受控模型在收到指定技能正文后返回验收标记。手机触摸复制这条真实回复，可粘贴到未发送的输入框。 |
+| 390px，在同一隔离主机管理插件 | 通过来源对话框添加私有市场，安装插件、停用、恢复，从已安装列表带入草稿并发送。页面重开后可见原回复，随后在界面卸载插件并移除市场。 |
+
+三条正式会话都从独立启动的 Codex App Server 用 `thread/read` 和 `thread/turns/list` 读回。应用和插件保留原生 `mention`，技能保留原生 `skill` 和所选路径。官方 0.170.0、0.172.0 还分别通过了 1480px 与 390px 的作用域验收，覆盖同名条目、跨主机过滤和项目 B 的草稿归属。手机宽度使用 Chromium 触摸模拟。
+
+隔离服务重启后实测需要主动连接的 SSH 主机，网页显示连接入口，点击后同一请求从 HTTP 502 恢复为 200。回归还通过了右侧面板、逐轮文件卡、撤销冲突，以及两种宽度下普通 HTTP、安全上下文和剪贴板拒绝的六组实际粘贴。`pnpm typecheck` 和架构检查通过，Lint 为 530 条告警、0 个错误，本次 React Hooks 专项新增告警为 0。受影响工程测试 281 项通过、1 项跳过，发布与上游管理测试 7 项通过。
+
 ## 发布后的空间回收
 
 在构建机和服务端确认新版验收通过后，清理该次发布的临时构建目录、传输归档及本项目已替换的镜像。Compose 更新等待 `codex-web` 健康才进入镜像清理。保留当前镜像、任意容器引用的镜像、晚于当前版本构建的候选镜像及更新前的一版回滚镜像。清理的镜像限于 `zcode-selfhost` 发布仓库。清理前核对 Docker daemon 与已验证的容器 ID 和镜像 ID，若更新失败则保留发布前镜像。
@@ -370,8 +441,8 @@ flowchart LR
     Clipboard -->|拒绝或不支持| Failure[本地化失败提示]
 ```
 
-SH-CLIPBOARD 浏览器验收使用 `node selfhost/tests/clipboard.mjs`。1480px 和 390px 在非安全 HTTP 与安全上下文均点选表格、代码块和消息复制并实际粘贴，核对 Unicode、换行和成功反馈。桌面右键和手机长按后，用链接菜单复制完整 URL。拒绝写入时显示失败，粘贴仍得到原有内容。私有分享页验证复用的表格和代码块复制，以及复制后的焦点与选区。分享成功结果用受控的已发布状态验证复制链接。
+SH-CLIPBOARD 浏览器验收使用 `node selfhost/tests/clipboard.mjs`。1480px 和 390px 在非安全 HTTP 与安全上下文均点选表格、代码块和消息复制并实际粘贴，核对 Unicode、换行和成功反馈。桌面右键和手机长按后，用链接菜单复制完整 URL，等菜单结束退场后再将焦点移入验收用的粘贴输入框。拒绝写入时显示失败，粘贴仍得到原有内容。私有分享页验证复用的表格和代码块复制，以及复制后的焦点与选区。分享成功结果用受控的已发布状态验证复制链接。
 
-验收使用 Chromium Headless Shell 的内存剪贴板。可运行 `pnpm exec playwright-core install chromium --only-shell` 安装，也可用 `SELFHOST_CLIPBOARD_HEADLESS_SHELL` 指定已安装的 Headless Shell。
+验收使用 Chromium Headless Shell 的内存剪贴板。预览服务仅监听回环地址，浏览器显式选择直连，并将普通 HTTP 场景的测试域名解析到该地址。安全与拒绝场景在 URL 中使用回环地址。文档导航最多等待 30 秒，进入工作区后按对话内容和操作反馈判断就绪。JavaScript 和样式由同一预览服务直接返回，权限拒绝由文档的 `Permissions-Policy` 响应头触发。可运行 `pnpm exec playwright-core install chromium --only-shell` 安装，也可用 `SELFHOST_CLIPBOARD_HEADLESS_SHELL` 指定已安装的 Headless Shell。
 
 参考 [OpenAI App Server 协议](https://learn.chatgpt.com/docs/app-server)、[Codex CLI 项目协议](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/app-server-protocol/src/protocol/common.rs)、[Codex CLI 的自动命名](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/tui/src/app/thread_title.rs)。

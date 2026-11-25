@@ -25,16 +25,25 @@ type Entry = {
   enabled: boolean;
   rootPath: string;
   account: boolean;
+  policyBlocked?: true;
+  installPolicy?: "NOT_AVAILABLE";
   listing?: ZCodePluginStoreListing;
 };
+type CatalogSource = "installed" | "configured" | "account";
 type Inventory = {
   entries: Entry[];
   markets: ZCodePluginMarketplaceSummary[];
   issues: ZCodePluginDiagnostic[];
 };
 const catalogLoads = new WeakMap<Gateway, Map<string, Promise<Inventory>>>();
-const official = new Set(["openai-curated", "openai-curated-remote", "openai-bundled"]);
+const accountMarketplace = "openai-curated-remote";
+const official = new Set(["openai-curated", accountMarketplace, "openai-bundled"]);
 const pluginEnvelope = z.object({ value: z.unknown() });
+const refreshFailureSchema = z.object({
+  code: z.string(),
+  failedAt: z.string(),
+  message: z.string(),
+});
 
 function readCliEntry(value: Message): Entry {
   const source = rec(value.source);
@@ -46,7 +55,9 @@ function readCliEntry(value: Message): Entry {
     installed: value.installed === true,
     enabled: value.enabled === true,
     rootPath: str(value.installedPath) || str(source.path),
-    account: source.source === "remote" || value.marketplaceName === "openai-curated-remote",
+    account: source.source === "remote" || value.marketplaceName === accountMarketplace,
+    policyBlocked: value.availability === "DISABLED_BY_ADMIN" ? true : undefined,
+    installPolicy: value.installPolicy === "NOT_AVAILABLE" ? "NOT_AVAILABLE" : undefined,
   };
 }
 
@@ -59,6 +70,7 @@ function pluginInfo({
   description,
   version,
   rootPath,
+  policyBlocked,
 }: Entry): ZCodePluginInfo {
   return {
     id,
@@ -69,6 +81,9 @@ function pluginInfo({
     version,
     rootPath,
     source: account ? "codex-account" : "cache",
+    nativePolicyBlocked: policyBlocked,
+    nativeUninstallRequiresAccount:
+      account && marketplace !== accountMarketplace ? true : undefined,
     skillRootCount: 0,
     commandRootCount: 0,
     mcpServerNames: [],
@@ -95,10 +110,18 @@ function readInstalled(result: Message) {
           description: str(details.shortDescription) || str(details.longDescription) || undefined,
           version: str(item.localVersion) || str(item.version) || undefined,
           rootPath: str(source.path),
-          account: source.source === "remote" || marketplace === "openai-curated-remote",
+          // App Server 用 type 标记来源，CLI JSON 才使用 source。
+          account: source.type === "remote" || marketplace === accountMarketplace,
+          policyBlocked: item.availability === "DISABLED_BY_ADMIN" ? true : undefined,
+          installPolicy: item.installPolicy === "NOT_AVAILABLE" ? "NOT_AVAILABLE" : undefined,
           listing: {
             displayName: str(details.displayName) || undefined,
             author: str(details.developerName) || undefined,
+            category: str(details.category) || undefined,
+            icon: str(details.logoUrl) || str(details.composerIconUrl) || undefined,
+            examplePrompts: Array.isArray(details.defaultPrompt)
+              ? details.defaultPrompt.filter((value): value is string => typeof value === "string")
+              : undefined,
             homepage: str(details.websiteUrl) || undefined,
             privacyPolicy: str(details.privacyPolicyUrl) || undefined,
             termsOfService: str(details.termsOfServiceUrl) || undefined,
@@ -115,14 +138,7 @@ const pluginDiagnostic = (message: string): ZCodePluginDiagnostic => ({
   message,
 });
 
-async function requestInventory(
-  cli: Promise<Message>,
-  installed: Promise<Message>,
-): Promise<Inventory> {
-  const [catalog, runtime] = await Promise.allSettled([cli, installed]);
-  if (catalog.status === "rejected" && runtime.status === "rejected") throw catalog.reason;
-  const catalogValue = catalog.status === "fulfilled" ? catalog.value : {};
-  const runtimeValue = runtime.status === "fulfilled" ? runtime.value : {};
+function projectInventory(catalogValue: Message, runtimeValue: Message): Inventory {
   const cliEntries = array(catalogValue.entries);
   const entries = new Map(
     cliEntries
@@ -131,26 +147,21 @@ async function requestInventory(
       .map((item) => [item.id, item]),
   );
   for (const item of readInstalled(runtimeValue)) {
-    const known = entries.get(item.id);
-    // App Server 补已安装目录和展示数据。CLI 已明确报告未安装的本地项不能被旧缓存复活。
-    entries.set(
-      item.id,
-      known && !known.account
-        ? { ...item, ...known, listing: item.listing, description: item.description }
-        : { ...known, ...item },
-    );
+    entries.set(item.id, item);
   }
   const markets = new Map<string, ZCodePluginMarketplaceSummary>();
   for (const item of array(catalogValue.markets)) {
     const name = str(item.name);
     const root = str(item.root);
     const configured = rec(item.marketplaceSource);
+    const failure = refreshFailureSchema.safeParse(item.refreshFailure);
     if (!name) continue;
     markets.set(name, {
       id: name,
       name,
       pluginCount: 0,
       isOfficial: official.has(name),
+      refreshFailure: failure.data,
       source: {
         type: str(configured.sourceType) || "local",
         path: str(configured.source) || root,
@@ -162,7 +173,7 @@ async function requestInventory(
     const market = str(entry.marketplaceName);
     if (!market || markets.has(market)) continue;
     const source = rec(entry.marketplaceSource);
-    const remote = rec(entry.source).source === "remote";
+    const remote = rec(entry.source).source === "remote" || market === accountMarketplace;
     markets.set(market, {
       id: market,
       name: market,
@@ -190,12 +201,15 @@ async function requestInventory(
         isOfficial: official.has(name),
         source: { type: "local", path },
       });
-    else if (name && official.has(name))
+    else if (
+      name &&
+      [...entries.values()].some((item) => item.marketplace === name && item.account)
+    )
       markets.set(name, {
         id: name,
         name: label,
         pluginCount: 0,
-        isOfficial: true,
+        isOfficial: official.has(name),
         source: { type: "remote" },
       });
   }
@@ -206,12 +220,6 @@ async function requestInventory(
   const messages = Array.isArray(catalogValue.issues)
     ? catalogValue.issues.map((item) => str(item))
     : [];
-  for (const rejected of [catalog, runtime]) {
-    if (rejected.status === "rejected" && !methodUnavailable(rejected.reason))
-      messages.push(
-        rejected.reason instanceof Error ? rejected.reason.message : String(rejected.reason),
-      );
-  }
   for (const issue of array(runtimeValue.marketplaceLoadErrors)) {
     const path = str(issue.marketplacePath);
     const message = str(issue.message);
@@ -236,7 +244,8 @@ export async function nativePluginManagement(
   params: Message,
   appRequest: AppRequest,
 ): Promise<unknown> {
-  const key = JSON.stringify([hostId, str(params.workspaceIdentity).trim() || cwd]);
+  const hostKey = `${hostId}\0`;
+  const key = `${hostKey}${str(params.workspaceIdentity).trim() || cwd}\0`;
   const request = async (operation: string, data: Message = {}) => {
     const { value } = await gateway.request("/api/selfhost/plugins", pluginEnvelope, "POST", {
       hostId,
@@ -244,23 +253,39 @@ export async function nativePluginManagement(
       operation,
       ...data,
     });
-    if (operation !== "catalog" && operation !== "describe") catalogLoads.get(gateway)?.delete(key);
+    if (operation !== "catalog" && operation !== "describe") {
+      const loads = catalogLoads.get(gateway);
+      // 用户层的变更对同一台主机的其他工作目录也生效。
+      for (const active of loads?.keys() ?? []) {
+        if (active.startsWith(hostKey)) loads?.delete(active);
+      }
+    }
     return rec(value);
   };
   const installed = () => appRequest("plugin/installed", { cwds: [cwd] });
-  const inventory = () => {
+  const inventory = (source: CatalogSource): Promise<Inventory> => {
     let loads = catalogLoads.get(gateway);
     if (!loads) {
       loads = new Map();
       catalogLoads.set(gateway, loads);
     }
-    const active = loads.get(key);
+    const sourceKey = key + source;
+    const active = loads.get(sourceKey);
     if (active) return active;
-    const task = requestInventory(request("catalog"), installed()).finally(() => {
+    const read =
+      source === "installed"
+        ? installed()
+            .then((value) => projectInventory({}, value))
+            .catch((error) => {
+              if (!methodUnavailable(error)) throw error;
+              return inventory("configured");
+            })
+        : request("catalog", { source }).then((value) => projectInventory(value, {}));
+    const task = read.finally(() => {
       // 写入失效期间启动的新查询由它自己的 Promise 负责清理。
-      if (loads.get(key) === task) loads.delete(key);
+      if (loads.get(sourceKey) === task) loads.delete(sourceKey);
     });
-    loads.set(key, task);
+    loads.set(sourceKey, task);
     return task;
   };
 
@@ -271,15 +296,14 @@ export async function nativePluginManagement(
       .then(readInstalled)
       .catch(async (error) => {
         if (!methodUnavailable(error)) throw error;
-        const catalog = await request("catalog");
-        return array(catalog.entries).map(readCliEntry);
+        return (await inventory("configured")).entries;
       });
     return zcodePluginsReferenceCatalogResultSchema.parse({
       authority: "workspace",
       plugins: [
         ...new Map(
           entries
-            .filter((item) => item.installed && item.enabled)
+            .filter((item) => item.installed && item.enabled && !item.policyBlocked)
             .map((item) => [
               item.id,
               {
@@ -361,7 +385,7 @@ export async function nativePluginManagement(
     const details = rec(manifest.interface);
     const components = [];
     const diagnostics: ZCodePluginDiagnostic[] = [];
-    if (entry.installed === true || !entry.pluginId) {
+    if (entry.installed === true && entry.enabled !== false) {
       try {
         const skills = await appRequest("skills/list", { cwds: [cwd] });
         const items = array(array(skills.data)[0]?.skills)
@@ -397,18 +421,23 @@ export async function nativePluginManagement(
     };
   }
 
-  const { entries, markets, issues } = await inventory();
-  const diagnostics = method === "listPlugins" ? [] : issues;
-  const installedEntries = entries.filter((entry) => entry.installed);
-  if (method === "listPlugins")
+  if (method === "listPlugins") {
+    const { entries, issues } = await inventory("installed");
     return zcodePluginsListResultSchema.parse({
-      plugins: installedEntries.map(pluginInfo),
-      diagnostics,
+      plugins: entries.filter((entry) => entry.installed).map(pluginInfo),
+      diagnostics: issues,
     });
+  }
+  const requested = params.codexCatalogSource;
+  const source =
+    requested === "installed" || requested === "configured" || requested === "account"
+      ? requested
+      : "installed";
+  const { entries, markets, issues } = await inventory(source);
   return zcodePluginsOverviewResultSchema.parse({
     marketplaces: markets,
     availablePlugins: entries.map(
-      ({ id, name, marketplace, description, version, installed, listing }) => ({
+      ({ id, name, marketplace, description, version, installed, listing, installPolicy }) => ({
         id,
         name,
         marketplace,
@@ -416,10 +445,12 @@ export async function nativePluginManagement(
         version,
         installed,
         listing,
+        installPolicy,
       }),
     ),
-    installedPlugins: installedEntries.map(
-      ({ id, name, marketplace, description, version, enabled, listing }) => ({
+    installedPlugins: entries
+      .filter((entry) => entry.installed)
+      .map(({ id, name, marketplace, description, version, enabled, listing }) => ({
         id,
         name,
         marketplace,
@@ -431,7 +462,7 @@ export async function nativePluginManagement(
       }),
     ),
     restorableBuiltins: [],
-    diagnostics,
+    diagnostics: issues,
     capability: { supported: true },
   });
 }

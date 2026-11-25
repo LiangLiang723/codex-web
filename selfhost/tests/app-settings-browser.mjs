@@ -13,6 +13,7 @@ async function verify(page, origin) {
   let enabled = true,
     toolEnabled = true;
   const writes = [];
+  const directoryReads = [];
   const app = (id, name, accessible = true) => ({
     id,
     name,
@@ -34,13 +35,33 @@ async function verify(page, origin) {
       body = req.postDataJSON();
     if (p === "/api/selfhost/apps") {
       assert.equal(body.hostId, hostId);
+      if (body.operation === "installed")
+        return route.fulfill({
+          json: {
+            apps: [app("drive", "Drive")],
+            nextCursor: null,
+            runtimeKnown: true,
+            directoryIssue: null,
+            runtimeIssue: null,
+          },
+        });
       if (body.operation === "list") {
+        directoryReads.push(body.cursor ?? null);
         const continuation = Boolean(body.cursor);
         return route.fulfill({
           json: {
             apps: continuation
               ? [app("late", "Late search match", false)]
-              : [app("drive", "Drive"), app("new", "New app", false)],
+              : [
+                  app("drive", "Drive"),
+                  app("new", "New app", false),
+                  {
+                    ...app("directory-only", "Directory only"),
+                    installed: false,
+                    enabled: true,
+                    callable: null,
+                  },
+                ],
             nextCursor: continuation ? null : "page2",
             runtimeKnown: !continuation,
             directoryIssue: null,
@@ -109,12 +130,48 @@ async function verify(page, origin) {
         );
     }),
   );
-  await page.goto(new URL("/?" + new URLSearchParams({ host: String(hostId), cwd }), origin).href);
+  await page.goto(new URL("/?" + new URLSearchParams({ host: String(hostId), cwd }), origin).href, {
+    waitUntil: "domcontentloaded",
+  });
+  const entry = page.getByTestId("plugin-store-sidebar-open");
+  await entry.waitFor();
+  assert.equal((await entry.innerText()).trim(), "扩展");
+  await entry.click();
+  const extensions = page.getByTestId("workspace-extensions");
+  const categories = extensions.getByRole("navigation", { name: "扩展", exact: true });
+  const selectedCategory = categories.getByRole("button", { pressed: true });
+  await extensions.getByTestId("plugin-store-browse").waitFor();
+  assert.equal(await selectedCategory.getAttribute("data-testid"), "workspace-extensions-plugins");
+  assert.equal(await extensions.getByRole("tablist").count(), 0);
+  await extensions.getByTestId("plugin-store-browse").click();
+  const market = extensions.getByTestId("plugin-store-root");
+  await market.getByTestId("plugin-store-title").waitFor();
+  assert.equal(await selectedCategory.getAttribute("data-testid"), "workspace-extensions-plugins");
+  await market.getByRole("button", { name: "返回", exact: true }).click();
+  await extensions.getByTestId("plugin-store-browse").waitFor();
+  assert.equal(await extensions.getByRole("tablist").count(), 0);
+  await extensions.getByTestId("workspace-extensions-skills").click();
+  await extensions.getByTestId("plugin-settings-scope-trigger").waitFor();
+  assert.equal(await selectedCategory.getAttribute("data-testid"), "workspace-extensions-skills");
+  assert.equal(await extensions.getByRole("tablist").count(), 0);
+  await extensions.getByTestId("workspace-extensions-apps").click();
+  await extensions.getByTestId("codex-app-drive").waitFor();
+  assert.equal(await selectedCategory.getAttribute("data-testid"), "workspace-extensions-apps");
+  await extensions.getByRole("button", { name: "使用 Drive", exact: true }).click();
+  await page.locator('[contenteditable="true"] [data-mention-id="app:drive"]').waitFor();
+  if (page.viewportSize().width < 600) {
+    await page
+      .locator('[data-mobile-page="chat"]')
+      .getByRole("button", { name: "返回任务首页", exact: true })
+      .click();
+  }
   await page.getByTestId("task-settings-button").click();
   const appNav = page.locator('[data-settings-section-nav="codexApps"]');
   await appNav.click();
   const row = page.getByTestId("codex-app-drive");
   await row.getByRole("button", { name: "Drive", exact: true }).click();
+  await page.getByRole("button", { name: "在新对话中使用" }).waitFor();
+  assert.equal(directoryReads.length, 0);
   await page.getByText("List files", { exact: true }).waitFor();
   await page.getByRole("switch", { name: "List files", exact: true }).click();
   await page.waitForFunction(
@@ -131,6 +188,15 @@ async function verify(page, origin) {
         .querySelector('[data-testid="codex-app-drive"] [role="switch"]')
         ?.getAttribute("aria-checked") === "false",
   );
+  await row.getByRole("button", { name: "Drive", exact: true }).click();
+  assert.equal(await page.getByRole("button", { name: "在新对话中使用" }).count(), 0);
+  await page.getByRole("button", { name: "返回", exact: true }).last().click();
+  await page.getByRole("button", { name: "浏览应用", exact: true }).click();
+  await page.getByTestId("codex-app-directory-only").waitFor();
+  assert.equal(
+    await page.getByRole("button", { name: "使用 Directory only", exact: true }).count(),
+    0,
+  );
   assert.equal(
     new URL(await page.getByTestId("codex-app-new").getByRole("link").getAttribute("href"))
       .protocol,
@@ -146,6 +212,30 @@ async function verify(page, origin) {
       ["drive", undefined, false],
     ],
   );
+  await page.getByTestId("codex-apps-installed").click();
+  await row.getByRole("switch").click();
+  await row.locator('[role="switch"][aria-checked="true"]').waitFor();
+  await row.getByRole("button", { name: "Drive", exact: true }).click();
+  await page.getByRole("button", { name: "在新对话中使用" }).click();
+  await page.getByTestId("settings-page").waitFor({ state: "hidden" });
+  await page
+    .locator('[contenteditable="true"] [data-mention-id="app:drive"]')
+    .waitFor()
+    .catch(async (cause) => {
+      const snapshot = await page.evaluate(() => ({
+        editors: [...document.querySelectorAll('[contenteditable="true"]')].map(
+          (el) => el.innerText,
+        ),
+        mentions: [...document.querySelectorAll("[data-mention-id]")].map(
+          (el) => el.dataset.mentionId,
+        ),
+        alerts: [...document.querySelectorAll('[role="alert"],[role="status"]')].map(
+          (el) => el.textContent,
+        ),
+        savedDraft: Object.entries(localStorage).filter(([key]) => /composer|draft/i.test(key)),
+      }));
+      throw Error("App draft after leaving settings: " + JSON.stringify(snapshot), { cause });
+    });
 }
 const target = process.env.SELFHOST_APP_SETTINGS_TEST_URL;
 const out = target ? null : await mkdtemp(join(tmpdir(), "app-settings-browser-"));
@@ -171,6 +261,7 @@ try {
       isMobile: width === 390,
       hasTouch: width === 390,
     });
+    page.setDefaultTimeout(60000);
     try {
       await verify(page, origin);
       console.log("PASS SSH App settings " + width + "px");

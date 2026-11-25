@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import type { Locale, SkillScope, ZCodeProvider } from "@zcode/shared";
+import { DEFAULT_LOCALE, type Locale, type SkillScope } from "@zcode/shared";
+import type { ZCodeProvider, ZCodeSkillReferenceCatalogEntry } from "@zcode/shared";
 import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import type { MentionCategoryResult, MentionItem } from "@/mentions/mentionTypes.js";
 import { filterMentionItemsWithOptions } from "@/mentions/mentionSearch.js";
@@ -7,17 +8,25 @@ import { buildSkillMentionMarkdown } from "@/mentions/mentionMarkdown.js";
 import { useSkills } from "@/hooks/useSkills.js";
 import { filterSkillsForProvider } from "@/lib/skillSourceFilter.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { LOCALE_MESSAGES } from "@/i18n/localeMessages.js";
 import { resolveSkillDisplayDescription, resolveSkillSourceLabel } from "@/lib/builtinSkillI18n.js";
 
 export function mapSkillsToMentionItemsForTest(
-  skills: Array<{
-    id: string;
-    name: string;
-    description: string;
-    path: string;
-    scope: SkillScope;
-    pluginName?: string;
-  }>,
+  skills: Array<
+    Pick<
+      ZCodeSkillReferenceCatalogEntry,
+      | "id"
+      | "name"
+      | "description"
+      | "displayName"
+      | "shortDescription"
+      | "path"
+      | "scope"
+      | "pluginName"
+      | "pluginId"
+      | "codexScope"
+    >
+  >,
   locale?: Locale,
 ): MentionItem[] {
   const uniqueSkillsByName = new Map<string, (typeof skills)[number]>();
@@ -28,7 +37,9 @@ export function mapSkillsToMentionItemsForTest(
     user: 2,
   };
   for (const skill of skills) {
-    const key = skill.name.trim().toLowerCase();
+    const key = (selfHostedBuild ? (skill.displayName ?? skill.name) : skill.name)
+      .trim()
+      .toLowerCase();
     if (selfHostedBuild) {
       nativeNameCounts.set(key, (nativeNameCounts.get(key) ?? 0) + 1);
       continue;
@@ -44,21 +55,42 @@ export function mapSkillsToMentionItemsForTest(
   const visibleSkills = selfHostedBuild ? skills : [...uniqueSkillsByName.values()];
 
   return visibleSkills.map((skill) => {
-    const sourceLabel = resolveSkillSourceLabel(skill.scope, locale);
+    const messages = LOCALE_MESSAGES[locale ?? DEFAULT_LOCALE];
+    const codexSource =
+      skill.pluginId ??
+      (skill.codexScope === "system"
+        ? messages["settings.skills.codexSystem"]
+        : skill.codexScope === "admin"
+          ? messages["settings.skills.codexAdmin"]
+          : undefined);
+    const sourceLabel =
+      (selfHostedBuild ? codexSource : undefined) ?? resolveSkillSourceLabel(skill.scope, locale);
+    const displayLabel = selfHostedBuild ? skill.displayName : undefined;
     const description = selfHostedBuild
-      ? skill.description
+      ? (skill.shortDescription ?? skill.description)
       : resolveSkillDisplayDescription(skill, locale);
-    const duplicateName = (nativeNameCounts.get(skill.name.trim().toLowerCase()) ?? 0) > 1;
+    const duplicateName =
+      (nativeNameCounts.get((displayLabel ?? skill.name).trim().toLowerCase()) ?? 0) > 1;
     return {
       id: `skill:${skill.id}`,
       category: "skills",
       label: skill.name,
+      displayLabel,
       description: [sourceLabel, duplicateName ? skill.path : description]
         .filter(Boolean)
         .join(" · "),
       value: skill.name,
       markdown: buildSkillMentionMarkdown(skill.name, skill.path),
-      keywords: [...new Set([skill.name, skill.description, description, skill.scope])],
+      keywords: [
+        ...new Set([
+          displayLabel ?? skill.name,
+          skill.name,
+          skill.description,
+          description,
+          sourceLabel,
+          skill.scope,
+        ]),
+      ],
       data: {
         path: skill.path,
         scope: skill.scope,

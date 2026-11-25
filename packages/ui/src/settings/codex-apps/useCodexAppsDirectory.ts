@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CodexAppsList, ICodexAppsService } from "@zcode/shared";
 
-export function useCodexAppsDirectory(service: ICodexAppsService) {
+export function useCodexAppsDirectory(service: ICodexAppsService, installedOnly: boolean) {
   const [data, setData] = useState<CodexAppsList | null>(null);
   const [busy, setBusy] = useState(false),
     [issue, setIssue] = useState("");
@@ -24,7 +24,9 @@ export function useCodexAppsDirectory(service: ICodexAppsService) {
       setBusy(true);
       setIssue("");
       try {
-        const page = await service.list(force, cursor);
+        const page = installedOnly
+          ? await service.listInstalled(force)
+          : await service.list(force, cursor);
         if (requests.generation !== generation) return;
         if (cursor) requests.seen.add(cursor);
         if (page.nextCursor && requests.seen.has(page.nextCursor))
@@ -63,7 +65,7 @@ export function useCodexAppsDirectory(service: ICodexAppsService) {
         }
       }
     },
-    [requests, service],
+    [installedOnly, requests, service],
   );
   const refresh = useCallback((force: boolean) => load(force, false), [load]);
   const more = useCallback(() => load(false, true), [load]);

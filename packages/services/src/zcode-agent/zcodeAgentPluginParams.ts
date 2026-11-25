@@ -30,6 +30,8 @@ export interface ZCodeAgentPluginMutationTarget extends ZCodeAgentWorkspaceTarge
 
 export interface ZCodeAgentPluginViewParams extends ZCodeAgentWorkspaceTarget {
   configScope?: "user" | "workspace";
+  /** 仅 SSH Codex Web 的服务适配层使用。每个目录源独立返回，原生 ZCode RPC 保持整份概览。 */
+  codexCatalogSource?: "installed" | "configured" | "account";
 }
 
 export interface ZCodeAgentListMcpServerStatusesParams extends ZCodeAgentWorkspaceTarget {

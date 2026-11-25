@@ -33,6 +33,7 @@ export interface MentionPanelSection {
   id: string;
   title: string;
   options: MentionPanelOption[];
+  footerOption?: MentionPanelOption;
   emptyText: string;
   loadingText?: string;
   loading?: boolean;
@@ -87,6 +88,11 @@ export const SECTION_HEADER_ROW_HEIGHT = 34;
 export const SECTION_HEADER_CLASS_NAME =
   "flex h-8 items-center px-3 text-ui-base font-semibold uppercase tracking-wide text-foreground-subtle";
 
+export function visibleMentionPanelOptions(section: MentionPanelSection): MentionPanelOption[] {
+  const options = section.errorText || section.noticeText || section.loading ? [] : section.options;
+  return section.footerOption ? [...options, section.footerOption] : options;
+}
+
 export function buildVirtualRows(sections: MentionPanelSection[]): VirtualRow[] {
   const rows: VirtualRow[] = [];
   let flatOptionIndex = 0;
@@ -129,16 +135,15 @@ export function buildVirtualRows(sections: MentionPanelSection[]): VirtualRow[] 
         content: "empty",
         text: section.emptyText,
       });
-    } else {
-      for (const option of section.options) {
-        rows.push({
-          kind: "option",
-          sectionId: section.id,
-          option,
-          flatOptionIndex,
-        });
-        flatOptionIndex += 1;
-      }
+    }
+    for (const option of visibleMentionPanelOptions(section)) {
+      rows.push({
+        kind: "option",
+        sectionId: section.id,
+        option,
+        flatOptionIndex,
+      });
+      flatOptionIndex += 1;
     }
   }
 

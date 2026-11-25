@@ -67,6 +67,8 @@ export interface RootProps {
   initialTaskId?: string;
   /** 手机目录 admission 完成后，在 prewarm 前接收项目和输入草稿。 */
   initialTaskDraft?: CreateTaskOptions;
+  /** 切换自托管 SSH 项目时由 Web 重建该目录的服务，并将草稿交给新的 Root。 */
+  onOpenProjectDraft?: (request: CreateTaskOptions) => Promise<void>;
   /** 本客户端连接目标的稳定身份，手机跨设备切换必须隔离草稿和 Recent。 */
   composerClientNamespace?: string;
   terminalOwnerId?: string;

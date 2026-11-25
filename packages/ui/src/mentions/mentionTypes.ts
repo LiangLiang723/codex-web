@@ -5,6 +5,7 @@ export type MentionCategory =
   | "subagents"
   | "whiteboards"
   | "sessions"
+  | "apps"
   | "plugins"
   /** 插件 composer.mention 条目给的候选项（docs/plugins/extension-host.md §16.6）：序列化为 insertText 原文。 */
   | "extensions"

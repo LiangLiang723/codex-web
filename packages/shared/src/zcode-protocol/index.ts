@@ -3196,6 +3196,10 @@ export const zcodePluginInfoSchema = z
     enabledSource: zcodePluginScopeSchema.optional(),
     optionSources: z.record(z.string(), zcodePluginScopeSchema).optional(),
     workspaceTrust: zcodePluginWorkspaceTrustSchema.optional(),
+    // SSH Codex 的账号策略可以使插件保持安装但禁止启用。
+    nativePolicyBlocked: z.literal(true).optional(),
+    // Codex CLI 只支持卸载公共账号市场中的远端插件。
+    nativeUninstallRequiresAccount: z.literal(true).optional(),
   })
   .strict();
 export type ZCodePluginInfo = z.infer<typeof zcodePluginInfoSchema>;
@@ -3303,10 +3307,15 @@ export const zcodeSkillReferenceCatalogEntrySchema = z
     id: nonEmptyString,
     name: nonEmptyString,
     description: z.string(),
+    displayName: nonEmptyString.optional(),
+    shortDescription: nonEmptyString.optional(),
     path: nonEmptyString,
     scope: z.enum(["workspace", "user", "plugin"]),
     enabled: z.literal(true),
     pluginName: nonEmptyString.optional(),
+    // SSH 原生接收的范围和插件归属独立，保留两个字段以区分同名技能的来源。
+    codexScope: z.enum(["user", "repo", "system", "admin"]).optional(),
+    pluginId: nonEmptyString.optional(),
   })
   .strict();
 export type ZCodeSkillReferenceCatalogEntry = z.infer<typeof zcodeSkillReferenceCatalogEntrySchema>;
@@ -3875,6 +3884,8 @@ export const zcodeAvailablePluginSummarySchema = z
     description: z.string().optional(),
     version: z.string().optional(),
     installed: z.boolean(),
+    // SSH Codex 仍展示目录中不可安装的插件及其详情。
+    installPolicy: z.literal("NOT_AVAILABLE").optional(),
     componentTypes: z.array(z.string()).optional(),
     listing: zcodePluginStoreListingSchema.optional(),
   })

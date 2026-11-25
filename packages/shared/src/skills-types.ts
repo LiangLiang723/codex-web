@@ -11,6 +11,8 @@ export interface SkillSummary {
   id: string;
   name: string;
   description: string;
+  displayName?: string;
+  shortDescription?: string;
   body: string;
   path: string;
   /**
@@ -25,8 +27,9 @@ export interface SkillSummary {
   pluginName?: string;
   /** plugin scope 时为来源插件完整 ID（name@marketplace）；旧 payload 可缺省。 */
   pluginId?: string;
-  /** Codex 将内置技能和系统管理员配置的技能单独标记。 */
-  codexScope?: "system" | "admin";
+  /** 原生作用域与插件归属是两个字段。插件技能同样具有作用域。 */
+  codexScope?: "user" | "repo" | "system" | "admin";
+  codexToolDependencies?: Array<{ type: string; value: string; description?: string }>;
   metadata?: SkillMetadata;
 }
 

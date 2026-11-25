@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright-core";
 import { createServer } from "vite";
 
@@ -67,6 +68,13 @@ async function verifyNetworkStatus(page, origin) {
   let holdReady = false;
   let losePong = false;
   let failCatalog = false;
+  let restoreMfaGate = false;
+  let skipNextPrompt = false;
+  const anotherToken = "another-network-test-fixture";
+  const anotherHost = { ...host, name: "Second Account SSH" };
+  const anotherCatalogRequested = Promise.withResolvers();
+  const anotherCatalogRelease = Promise.withResolvers();
+  const anotherChallengeSent = Promise.withResolvers();
   const retry = (message, id = turnId) => ({
     type: "error.reported",
     params: { threadId, turnId: id, willRetry: true, error: { message } },
@@ -86,6 +94,16 @@ async function verifyNetworkStatus(page, origin) {
     assert(hostSubscribed);
     socket.send(JSON.stringify({ type: "host.lifecycle", event: { hostId: id, status } }));
   };
+  const sendMfa = (id, prompt, instructions) =>
+    socket.send(
+      JSON.stringify({
+        type: "host.mfa.request",
+        hostId: id,
+        name: id === hostId ? host.name : "Other Host",
+        prompts: [{ prompt, echo: false }],
+        instructions,
+      }),
+    );
   page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript(() => {
     localStorage.setItem("selfhost.auth", "network-test-fixture");
@@ -94,6 +112,13 @@ async function verifyNetworkStatus(page, origin) {
   // Vite 的源模块也可能含有 /api/ 目录，只模拟网关的根 API。
   await page.route(new URL("/api/**", origin).href, (route) => {
     const url = new URL(route.request().url());
+    if (
+      url.pathname === "/api/hosts" &&
+      route.request().headers().authorization === `Bearer ${anotherToken}`
+    ) {
+      anotherCatalogRequested.resolve();
+      return anotherCatalogRelease.promise.then(() => route.fulfill({ json: [anotherHost] }));
+    }
     if (failCatalog && url.pathname === "/api/hosts")
       return route.fulfill({ status: 503, json: { message: "fixture catalog offline" } });
     const request = route.request().postDataJSON();
@@ -102,8 +127,11 @@ async function verifyNetworkStatus(page, origin) {
       "/api/selfhost/projects": url.searchParams.get("organization")
         ? { items: [project], memberships: { [threadId]: cwd } }
         : [project],
-      "/api/threads": { data: url.searchParams.get("archived")==="true"?[]:[thread], nextCursor: null },
-      "/api/selfhost/thread-summary": {thread},
+      "/api/threads": {
+        data: url.searchParams.get("archived") === "true" ? [] : [thread],
+        nextCursor: null,
+      },
+      "/api/selfhost/thread-summary": { thread },
       "/api/models": { data: [model], nextCursor: null },
       "/api/selfhost/settings": { locale: "zh-CN" },
       "/api/selfhost/capability": { value: [] },
@@ -127,7 +155,15 @@ async function verifyNetworkStatus(page, origin) {
       const reply = (message) => ws.send(JSON.stringify({ ...message, requestId: call.requestId }));
       switch (call.type) {
         case "auth.authenticate":
-          if (holdReady) pendingReady = () => reply({ type: "ready" });
+          if (call.token === anotherToken) {
+            reply({ type: "ready" });
+            sendMfa(
+              hostId,
+              "Second account verification code",
+              "Challenge for the second account.",
+            );
+            anotherChallengeSent.resolve();
+          } else if (holdReady) pendingReady = () => reply({ type: "ready" });
           else reply({ type: "ready" });
           break;
         case "thread.activate":
@@ -145,6 +181,26 @@ async function verifyNetworkStatus(page, origin) {
           break;
         case "host.lifecycle.subscribe":
           hostSubscribed = true;
+          if (restoreMfaGate) sendHost("mfaRequired");
+          break;
+        case "host.mfa.connect":
+          assert.deepEqual(call, { type: "host.mfa.connect", hostId });
+          sendHost("connecting");
+          if (skipNextPrompt) sendHost("connected");
+          else
+            sendMfa(
+              hostId,
+              "Fixture SSH verification code",
+              "Authentication is required by this SSH host.",
+            );
+          break;
+        case "host.mfa.cancel":
+          assert.deepEqual(call, { type: "host.mfa.cancel", hostId });
+          sendHost("mfaRequired");
+          break;
+        case "host.mfa.submit":
+          assert.deepEqual(call, { type: "host.mfa.submit", hostId, code: "fixture-auth-answer" });
+          sendHost("connected");
           break;
         case "ping":
           if (!losePong) reply({ type: "pong", nonce: call.nonce });
@@ -157,10 +213,10 @@ async function verifyNetworkStatus(page, origin) {
 
   const url = new URL("/", origin);
   url.search = new URLSearchParams({ host: String(hostId), cwd, thread: threadId });
-  await page.goto(url.href);
+  await page.goto(url.href, { waitUntil: "domcontentloaded" });
   await page
     .getByText("测试模型连线", { exact: true })
-    .waitFor({ timeout: 20000 })
+    .waitFor({ timeout: 60000 })
     .catch(async (error) => {
       throw new Error(
         `${error.message}\n${(await page.locator("body").innerText()).slice(0, 600)}\n${commands.map(({ type }) => type).join(", ")}\n${errors.join("\n")}`,
@@ -181,7 +237,7 @@ async function verifyNetworkStatus(page, origin) {
   pendingReady();
   await webNotice.waitFor({ state: "hidden" });
   await counter.waitFor();
-  await page.reload();
+  await page.reload({ waitUntil: "domcontentloaded" });
   await counter.waitFor();
 
   recoveryEvent = emit(retry("Stream was interrupted"));
@@ -212,7 +268,7 @@ async function verifyNetworkStatus(page, origin) {
   emit({ type: "turn.completed", turn });
   const failed = page.getByText("模型连接超时，回复未完成。你可以重新发送消息。", { exact: true });
   await failed.waitFor();
-  await page.reload();
+  await page.reload({ waitUntil: "domcontentloaded" });
   await failed.waitFor();
   await page.getByText("部分回复", { exact: true }).waitFor();
 
@@ -229,15 +285,60 @@ async function verifyNetworkStatus(page, origin) {
   sendHost("connected");
   await hostFailure.waitFor({ state: "hidden" });
 
+  sendMfa(2, "Foreign host code", "Foreign host instructions");
+  restoreMfaGate = true;
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const mfaConnect = page.getByTestId("selfhost-ssh-connect");
+  const mfaDialog = page.getByTestId("selfhost-ssh-mfa-dialog");
+  const mfaAnswer = mfaDialog.getByLabel("Fixture SSH verification code", { exact: true });
+  await mfaConnect.waitFor();
+  assert.equal(commands.filter(({ type }) => type === "host.mfa.connect").length, 0);
+  sendMfa(2, "Foreign host code", "Foreign host instructions");
+  await mfaConnect.click();
+  await mfaDialog
+    .getByText("Authentication is required by this SSH host.", { exact: true })
+    .waitFor();
+  await mfaAnswer.waitFor();
+  assert.equal(await mfaAnswer.getAttribute("type"), "password");
+  await mfaAnswer.fill("discarded-fixture-answer");
+  await mfaDialog.getByRole("button", { name: "取消", exact: true }).click();
+  await mfaDialog.waitFor({ state: "hidden" });
+  await mfaConnect.click();
+  await mfaAnswer.waitFor();
+  assert.equal(await mfaAnswer.inputValue(), "");
+  await mfaAnswer.fill("fixture-auth-answer");
+  await mfaDialog.getByRole("button", { name: "确认", exact: true }).click();
+  await mfaDialog.waitFor({ state: "hidden" });
+  await page.getByText("正在连接 SSH 主机 Test Mac…", { exact: true }).waitFor({ state: "hidden" });
+  assert.deepEqual(
+    commands.filter(({ type }) => type.startsWith("host.mfa.")).map(({ type }) => type),
+    ["host.mfa.connect", "host.mfa.cancel", "host.mfa.connect", "host.mfa.submit"],
+  );
+  assert.equal(
+    await page.evaluate(() => JSON.stringify(localStorage).includes("fixture-auth-answer")),
+    false,
+  );
+  skipNextPrompt = true;
+  sendHost("mfaRequired");
+  await mfaConnect.click();
+  await mfaConnect.waitFor({ state: "hidden" });
+  await mfaDialog.waitFor({ state: "hidden" });
+  restoreMfaGate = false;
+
   failCatalog = true;
-  const failedRefresh = page.waitForResponse(response => new URL(response.url()).pathname === "/api/hosts" && response.status() === 503);
-  socket.send(JSON.stringify({type:"config.catalog.changed"}));
+  const failedRefresh = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/api/hosts" && response.status() === 503,
+  );
+  socket.send(JSON.stringify({ type: "config.catalog.changed" }));
   await failedRefresh;
-  await page.getByText("fixture catalog offline", {exact:false}).first().waitFor();
-  await page.getByText("部分回复", {exact:true}).waitFor();
+  await page.getByText("fixture catalog offline", { exact: false }).first().waitFor();
+  await page.getByText("部分回复", { exact: true }).waitFor();
   failCatalog = false;
-  socket.send(JSON.stringify({type:"config.catalog.changed"}));
-  await page.getByText("fixture catalog offline", {exact:false}).first().waitFor({state:"hidden"});
+  socket.send(JSON.stringify({ type: "config.catalog.changed" }));
+  await page
+    .getByText("fixture catalog offline", { exact: false })
+    .first()
+    .waitFor({ state: "hidden" });
 
   holdReady = true;
   losePong = true;
@@ -250,6 +351,38 @@ async function verifyNetworkStatus(page, origin) {
   pendingReady();
   await webNotice.waitFor({ state: "hidden" });
   await failed.waitFor();
+
+  sendMfa(hostId, "Fixture SSH verification code", "Switching accounts clears this form.");
+  await mfaAnswer.fill("unsent-fixture-answer");
+  const repliesBeforeSwitch = commands.filter(
+    ({ type }) => type === "host.mfa.submit" || type === "host.mfa.cancel",
+  ).length;
+  await page.evaluate((newValue) => {
+    const key = "selfhost.auth";
+    const oldValue = localStorage.getItem(key);
+    localStorage.setItem(key, newValue);
+    window.dispatchEvent(new StorageEvent("storage", { key, oldValue, newValue }));
+  }, anotherToken);
+  try {
+    await Promise.race([
+      Promise.all([anotherCatalogRequested.promise, anotherChallengeSent.promise]),
+      delay(30000, undefined, { ref: false }).then(() => {
+        throw Error("The second account did not request its host catalog and receive a challenge");
+      }),
+    ]);
+    await page.getByText("正在读取服务器配置…", { exact: true }).waitFor();
+    assert.equal(await mfaDialog.count(), 0);
+  } finally {
+    anotherCatalogRelease.resolve();
+  }
+  await mfaDialog
+    .getByText(`SSH 主机 ${anotherHost.name} 需要多因素验证。`, { exact: true })
+    .waitFor();
+  assert.equal(await mfaDialog.getByLabel("Second account verification code").inputValue(), "");
+  assert.equal(
+    commands.filter(({ type }) => type === "host.mfa.submit" || type === "host.mfa.cancel").length,
+    repliesBeforeSwitch,
+  );
   assert.equal(commands.filter((call) => call.type === "turn.start").length, 0);
   assert.deepEqual(errors, []);
 
@@ -271,6 +404,8 @@ try {
         isMobile: width < 600,
         hasTouch: width < 600,
       });
+      page.setDefaultTimeout(30000);
+      page.setDefaultNavigationTimeout(60000);
       try {
         await verifyNetworkStatus(page, origin);
         console.log(`${width}px model, WebSocket and SSH connection status passed`);

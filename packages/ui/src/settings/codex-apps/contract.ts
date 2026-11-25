@@ -6,4 +6,5 @@ export interface AppDetailsProps {
   back(): void;
   refreshApps(): Promise<void>;
   openingConnection(): void;
+  startDraft?: (app: CodexApp) => void;
 }

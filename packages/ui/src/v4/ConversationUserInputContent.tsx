@@ -5,6 +5,7 @@ import {
   Bot,
   Cable,
   GoalIcon,
+  LayoutGrid,
   MessagesSquare,
   MousePointerClick,
   ScrollText,
@@ -135,6 +136,15 @@ function V4UserInputMention({
     return (
       <span className={mentionClassName("plugins")} data-plugin-mention-id={part.pluginId}>
         <PluginUserMessageIcon src={pluginIcon} />
+        {part.label}
+      </span>
+    );
+  }
+
+  if (part.type === "app") {
+    return (
+      <span className={mentionClassName("apps")} data-app-mention-id={part.appId}>
+        <LayoutGrid aria-hidden="true" className="size-4 shrink-0" />
         {part.label}
       </span>
     );

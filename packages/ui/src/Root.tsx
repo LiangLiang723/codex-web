@@ -222,6 +222,7 @@ function RootInner({
   initialWorkspacePurpose,
   initialTaskId,
   initialTaskDraft,
+  onOpenProjectDraft,
   isDesktop,
   isMacDesktop,
   isWindowsDesktop,
@@ -746,7 +747,8 @@ function RootInner({
     userId: user?.id,
     onOpenRemoteConnection: allowRemoteWorkspace ? handleOpenRemoteConnection : undefined,
     openRemoteProjectWorkspace: openPreparedRemoteProjectWorkspace,
-    openMobileProjectDraft: webRemoteControlWorkspaceSwitcher?.openProjectDraft,
+    openMobileProjectDraft:
+      onOpenProjectDraft ?? webRemoteControlWorkspaceSwitcher?.openProjectDraft,
     workbenchGroupClientMode: isWebRemoteControlRoot
       ? "web-remote-replayable"
       : "desktop-continuous",

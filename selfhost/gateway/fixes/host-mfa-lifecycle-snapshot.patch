@@ -1,0 +1,71 @@
+diff --git a/server/utils/gateway/runtime/host-runtime-supervisor.ts b/server/utils/gateway/runtime/host-runtime-supervisor.ts
+--- a/server/utils/gateway/runtime/host-runtime-supervisor.ts
++++ b/server/utils/gateway/runtime/host-runtime-supervisor.ts
+@@ -24,7 +24,7 @@
+ import { threadBroker } from "./broker";
+ import { hostMfaManager } from "../host-mfa/host-mfa-instance";
+ import { hostStore } from "../state/hosts";
+-import { hostLifecycleBus } from "../state/host-events";
++import { hostLifecycleBus, type HostLifecycleEvent } from "../state/host-events";
+ import { codexRuntime, sshConnections } from "../infra/host-services";
+ import { restartCodexDaemon } from "../infra/codex/codex-daemon";
+ import { CodexDaemonOwnershipError } from "../infra/codex/codex-daemon-errors";
+@@ -351,15 +351,28 @@
+     return this.started && slot.connected && !slot.connecting && !slot.timer;
+   }
+ 
++  mfaRequiredSnapshot(userId: number): HostLifecycleEvent[] {
++    const createdAt = new Date().toISOString();
++    const events: HostLifecycleEvent[] = [];
++    for (const slot of this.slots.values()) {
++      if (slot.userId !== userId || slot.connected || slot.connecting ||
++          hostMfaManager.canStartConnection(userId, slot.hostId)) continue;
++      events.push({ ...this.mfaRequiredEvent(slot.hostId), createdAt });
++    }
++    return events;
++  }
++
++  private mfaRequiredEvent(hostId: number): Omit<HostLifecycleEvent, "createdAt"> {
++    return {
++      hostId,
++      status: "mfaRequired",
++      message: "SSH 连接已断开，请手动输入 MFA 验证码后重新连接",
++      messageTranslation: { key: "mfaDisconnected" },
++    };
++  }
++
+   private publishMfaRequired(slot: HostRuntimeSlot) {
+-    runWithGatewayUser(slot.userId, () => {
+-      hostLifecycleBus.emit({
+-        hostId: slot.hostId,
+-        status: "mfaRequired",
+-        message: "SSH 连接已断开，请手动输入 MFA 验证码后重新连接",
+-        messageTranslation: { key: "mfaDisconnected" },
+-      });
+-    });
++    runWithGatewayUser(slot.userId, () => hostLifecycleBus.emit(this.mfaRequiredEvent(slot.hostId)));
+   }
+ 
+   private slotKey(userId: number, hostId: number) {
+diff --git a/server/utils/gateway/realtime/handlers/host-lifecycle.ts b/server/utils/gateway/realtime/handlers/host-lifecycle.ts
+--- a/server/utils/gateway/realtime/handlers/host-lifecycle.ts
++++ b/server/utils/gateway/realtime/handlers/host-lifecycle.ts
+@@ -1,7 +1,8 @@
+ import { hostLifecycleBus, type HostLifecycleEvent } from "../../state/host-events";
+ import { hostUpgradeState } from "../../state/host-upgrades";
+ import type { RealtimeClientMessage } from "~~/shared/types";
+-import { sendRealtimePeerMessage, stateFor, type RealtimePeer } from "../peer-state";
++import { hostRuntimeSupervisor } from "../../runtime/host-runtime-supervisor";
++import { authenticatedUserId, sendRealtimePeerMessage, stateFor, type RealtimePeer } from "../peer-state";
+ 
+ export function subscribeHostLifecycle(peer: RealtimePeer) {
+   const state = stateFor(peer);
+@@ -15,6 +16,8 @@
+     stopLifecycle();
+     stopUpgrades();
+   };
++  // Gateway 重启时发布的 MFA 门禁早于浏览器订阅，首次连接必须读取所属账号的当前状态。
++  for (const event of hostRuntimeSupervisor.mfaRequiredSnapshot(authenticatedUserId(peer))) send(event);
+ }
+ 
+ export function readHostUpgrades(

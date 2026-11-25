@@ -1,5 +1,6 @@
 import {
   zcodeSkillsReferenceCatalogResultSchema,
+  type SkillsListResult,
   type ZCodeMcpServerStatusSnapshot,
 } from "@zcode/shared";
 import { z } from "zod";
@@ -57,6 +58,84 @@ export const codexRequest = async (g: Gateway, hostId: number, method: string, p
   );
   return rec(value);
 };
+
+const nativeSkillsReply = z.object({
+  data: z.array(
+    z.object({
+      cwd: z.string(),
+      skills: z.array(
+        z.object({
+          path: z.string().min(1),
+          name: z.string().min(1),
+          description: z.string(),
+          shortDescription: z.string().nullish(),
+          scope: z.enum(["user", "repo", "system", "admin"]),
+          enabled: z.boolean(),
+          pluginId: z.string().nullish(),
+          interface: z
+            .object({ displayName: z.string().nullish(), shortDescription: z.string().nullish() })
+            .nullish(),
+          dependencies: z
+            .object({
+              tools: z.array(
+                z.object({
+                  type: z.string(),
+                  value: z.string(),
+                  description: z
+                    .string()
+                    .nullish()
+                    .transform((value) => value ?? undefined),
+                }),
+              ),
+            })
+            .nullish(),
+        }),
+      ),
+      errors: z.array(z.object({ path: z.string(), message: z.string() })),
+    }),
+  ),
+});
+
+function projectNativeSkills(reply: Message, cwd: string): SkillsListResult {
+  const parsed = nativeSkillsReply.safeParse(reply);
+  if (!parsed.success) throw Error("Codex returned an invalid skill directory.");
+  const batches = parsed.data.data;
+  const batch =
+    batches.find((entry) => entry.cwd === cwd) ?? (batches.length === 1 ? batches[0] : undefined);
+  if (!batch) throw Error("Codex returned no skill directory for the selected SSH workspace.");
+  const skills = new Map<string, SkillsListResult["skills"][number]>();
+  for (const item of batch.skills) {
+    const pluginId = item.pluginId || undefined;
+    // 插件技能也可能标记为 user。完整插件 ID 表示归属，始终按原生路径区分同名技能。
+    skills.set(item.path, {
+      id: item.path,
+      path: item.path,
+      name: item.name,
+      description: item.description,
+      body: "",
+      displayName: item.interface?.displayName?.trim() || undefined,
+      shortDescription:
+        item.interface?.shortDescription?.trim() || item.shortDescription?.trim() || undefined,
+      scope: pluginId ? "plugin" : item.scope === "repo" ? "workspace" : "user",
+      enabled: item.enabled,
+      pluginId,
+      pluginName: pluginId?.split("@")[0],
+      codexScope: item.scope,
+      codexToolDependencies: item.dependencies?.tools,
+    });
+  }
+  return {
+    skills: [...skills.values()],
+    diagnostics: batch.errors.map(({ path, message }) => ({
+      code: "skill_read_failed",
+      severity: "error",
+      path,
+      message,
+    })),
+    capability: { userScopeAvailable: true },
+  };
+}
+
 export async function extensionRequest(
   g: Gateway,
   id: number,
@@ -70,73 +149,49 @@ export async function extensionRequest(
       cwds: [cwd],
       ...(method === "listSkills" ? { forceReload: true } : {}),
     });
-    const batches = array(reply.data);
-    const batch =
-      batches.find((group) => group.cwd === cwd) ?? (batches.length === 1 ? batches[0] : undefined);
-    const skillsByPath = new Map(
-      array(batch?.skills).flatMap((item) => {
-        const path = str(item.path);
-        const name = str(item.name);
-        const pluginId = str(item.pluginId);
-        const pluginName = pluginId.split("@")[0];
-        if (!path || !name) return [];
-        return [
-          [
-            path,
-            {
-              id: path,
-              name,
-              description: str(item.description),
-              path,
-              scope:
-                pluginId || item.scope === "plugin"
-                  ? "plugin"
-                  : item.scope === "repo"
-                    ? "workspace"
-                    : "user",
-              enabled: item.enabled === true,
-              ...(pluginId ? { pluginId, pluginName } : {}),
-              ...(item.scope === "system" || item.scope === "admin"
-                ? { codexScope: item.scope }
-                : {}),
-            },
-          ],
-        ];
-      }),
-    );
-    const skills = [...skillsByPath.values()];
-    if (method === "getSkillReferenceCatalog")
-      return zcodeSkillsReferenceCatalogResultSchema.parse({
-        authority: "workspace",
-        skills: skills
-          .filter((x) => x.enabled)
-          .map(({ id, name, description, path, scope, enabled, pluginName }) => ({
+    const listing = projectNativeSkills(reply, cwd);
+    if (method === "listSkills") return listing;
+    return zcodeSkillsReferenceCatalogResultSchema.parse({
+      authority: "workspace",
+      skills: listing.skills
+        .filter((skill) => skill.enabled)
+        .map(
+          ({
             id,
             name,
             description,
+            displayName,
+            shortDescription,
             path,
             scope,
             enabled,
             pluginName,
-          })),
-      });
-    return {
-      skills: skills.map((skill) => ({ ...skill, body: "" })),
-      diagnostics: array(batch?.errors).map((e) => ({
-        code: "skill_read_failed",
-        severity: "error",
-        message: str(e.message),
-        path: str(e.path),
-      })),
-      capability: { userScopeAvailable: true },
-    };
+            codexScope,
+            pluginId,
+          }) => ({
+            id,
+            name,
+            description,
+            displayName,
+            shortDescription,
+            path,
+            scope,
+            enabled,
+            pluginName,
+            codexScope,
+            pluginId,
+          }),
+        ),
+    });
   }
   if (method === "setSkillEnabled") {
     const path = str(p.skillId);
     if (!path.startsWith("/") || typeof p.enabled !== "boolean")
       throw Error("Codex skill enablement requires an absolute skill path and a boolean value.");
     const result = await call("skills/config/write", { path, enabled: p.enabled });
-    if (typeof result.effectiveEnabled === "boolean" && result.effectiveEnabled !== p.enabled)
+    if (typeof result.effectiveEnabled !== "boolean")
+      throw Error("Codex did not confirm the skill setting.");
+    if (result.effectiveEnabled !== p.enabled)
       throw Error("The SSH host’s Codex policy overrides this skill setting.");
     return;
   }

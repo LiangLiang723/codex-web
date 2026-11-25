@@ -1892,6 +1892,7 @@ export function LexicalChatInput({
             workspacePath={workspacePath}
             workspaceIdentity={workspaceIdentity}
             sessionId={skillCatalogSessionId ?? taskId}
+            nativeThreadId={taskId}
             provider={activeTaskProvider}
             container={triggerPanelContainer}
             disabled={disabled}

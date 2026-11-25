@@ -494,7 +494,11 @@ function PersonalSegment({
   if (groups.length === 0) {
     return (
       <p className="rounded-xl border border-dashed border-border px-4 py-3 text-ui-base text-foreground-subtle">
-        {intl.formatMessage({ id: "settings.plugins.store.personalEmpty" })}
+        {intl.formatMessage({
+          id: selfHostedBuild
+            ? "settings.plugins.marketplacePlugins.empty"
+            : "settings.plugins.store.personalEmpty",
+        })}
       </p>
     );
   }

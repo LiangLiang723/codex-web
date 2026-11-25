@@ -1,6 +1,7 @@
 const OPEN_PLUGIN_STORE_EVENT = "zcode:open-plugin-store";
 
 export interface PluginStoreOpenTarget {
+  section?: "apps" | "plugins" | "skills";
   pluginId?: string;
   intent?: "add-marketplace";
   returnScopeKey?: string;

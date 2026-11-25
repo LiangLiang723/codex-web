@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright-core";
 import { build, preview } from "vite";
+import { nativeUserInputItems } from "../../packages/web/src/selfhost/nativeTurnInput.ts";
 import {
   composerPicker,
   revealPickerItem,
@@ -13,7 +14,8 @@ import {
 const web = resolve(import.meta.dirname, "../../packages/web");
 const hostId = 2;
 const cwd = "/picker-fixture";
-const threadId = "picker-fixture";
+const threadId = "11111111-1111-4111-8111-111111111111";
+const draftThreadId = "22222222-2222-4222-8222-222222222222";
 const thread = {
   id: threadId,
   cwd,
@@ -29,6 +31,17 @@ const model = {
   isDefault: true,
   defaultReasoningEffort: "low",
   supportedReasoningEfforts: [{ reasoningEffort: "low" }],
+};
+const app = {
+  id: "connector_docs_42",
+  name: "Fixture Docs",
+  description: "Find fixture documents",
+  installUrl: null,
+  accessible: true,
+  enabled: true,
+  installed: true,
+  callable: true,
+  plugins: [],
 };
 
 const plugin = (marketplace, name, displayName, enabled = true) => ({
@@ -58,26 +71,46 @@ const marketplaces = [
     ],
   },
 ];
-const repoSkill = { name: "Review", path: cwd + "/.agents/skills/review/SKILL.md", scope: "repo" };
+const repoSkill = {
+  name: "review",
+  path: cwd + "/.agents/skills/review (repo)/SKILL.md",
+  scope: "repo",
+};
 const userSkill = {
-  name: "Review",
+  name: "review",
   path: "/fixtures/user/.agents/skills/review/SKILL.md",
   scope: "user",
 };
 const pluginSkill = {
-  name: "Review",
+  name: "review:review",
+  interface: { displayName: "review" },
   path: "/fixtures/plugins/review/SKILL.md",
   scope: "user",
   pluginId: "review@local",
 };
+const systemSkill = {
+  name: "internal-review",
+  path: "/fixtures/codex/internal-review/SKILL.md",
+  scope: "system",
+};
 const pickerButton = (page) => page.getByRole("button", { name: "添加上下文", exact: true });
+const noApps = "可在「扩展 → 应用」中连接或启用应用";
+const unloadedApps = "Fixture thread is not loaded";
+const legacyMention = "旧消息 [@Legacy](plugin://legacy@local)";
 
 async function verify(page, origin) {
   let failSkills = true;
+  let appDirectory = "unloaded";
+  const mobile = page.viewportSize().width === 390;
+  const activate = (locator) => (mobile ? locator.tap() : locator.click());
+  const showTaskList = async () => {
+    if (mobile) await activate(page.getByRole("button", { name: "返回任务首页", exact: true }));
+  };
+  const appQueries = [];
   const detailQueries = [];
   const pageErrors = [];
-  let captureSend;
-  const submitted = new Promise((resolve) => (captureSend = resolve));
+  const submissions = [];
+  const creations = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.addInitScript(() => {
     localStorage.setItem("selfhost.auth", "picker-test-fixture");
@@ -87,6 +120,33 @@ async function verify(page, origin) {
     const url = new URL(route.request().url());
     const request = route.request().postDataJSON();
     const project = { hostId, remotePath: cwd, name: "引用测试项目" };
+    if (url.pathname === "/api/selfhost/apps" && request?.operation === "available") {
+      assert.equal(request.hostId, hostId);
+      appQueries.push(request);
+      if (appDirectory === "unloaded" && request.threadId) {
+        return route.fulfill({ status: 404, json: { message: unloadedApps } });
+      }
+      return route.fulfill({ json: { apps: appDirectory === "empty" ? [] : [app] } });
+    }
+    if (url.pathname === "/api/selfhost/apps") {
+      assert.equal(request.hostId, hostId);
+      assert(["installed", "list"].includes(request.operation));
+      return route.fulfill({
+        json: {
+          apps: [app],
+          nextCursor: null,
+          runtimeKnown: true,
+          directoryIssue: null,
+          runtimeIssue: null,
+        },
+      });
+    }
+    if (url.pathname === "/api/selfhost/plugins") {
+      assert.equal(request.operation, "catalog");
+      assert.equal(request.hostId, hostId);
+      assert.equal(request.cwd, cwd);
+      return route.fulfill({ json: { value: { entries: [], markets: [], issues: [] } } });
+    }
     if (url.pathname === "/api/selfhost/capability") {
       if (request?.method === "plugin/read") {
         detailQueries.push(request);
@@ -102,7 +162,7 @@ async function verify(page, origin) {
         assert.deepEqual(request.params.cwds, [cwd]);
         if (failSkills)
           return route.fulfill({ status: 503, json: { message: "Fixture skills unavailable" } });
-        const skills = [repoSkill, userSkill, pluginSkill].map((skill) => ({
+        const skills = [repoSkill, userSkill, pluginSkill, systemSkill].map((skill) => ({
           ...skill,
           description: "",
           enabled: true,
@@ -124,7 +184,9 @@ async function verify(page, origin) {
       "/api/selfhost/projects": url.searchParams.get("organization")
         ? { items: [project], memberships: { [threadId]: cwd } }
         : [project],
-      "/api/selfhost/thread-summary": { thread },
+      "/api/selfhost/thread-summary": {
+        thread: { ...thread, id: url.searchParams.get("threadId") ?? threadId },
+      },
       "/api/threads": {
         data: url.searchParams.get("archived") === "true" ? [] : [thread],
         nextCursor: null,
@@ -152,16 +214,29 @@ async function verify(page, origin) {
         case "auth.authenticate":
           return reply({ type: "ready" });
         case "thread.activate": {
-          const items = [
-            { id: "input", type: "userMessage", content: [{ type: "text", text: "验收引用目录" }] },
-          ];
+          const activeThread = { ...thread, id: call.threadId };
+          const turns =
+            call.threadId === threadId
+              ? ["验收引用目录", legacyMention].map((text, index) => ({
+                  id: `turn-${index + 1}`,
+                  status: "completed",
+                  items: [
+                    {
+                      id: `input-${index}`,
+                      type: "userMessage",
+                      content: [{ type: "text", text }],
+                    },
+                  ],
+                }))
+              : [];
+          for (const submission of submissions) {
+            if (submission.command.threadId === call.threadId) turns.push(submission.turn);
+          }
           return reply({
             type: "thread.snapshot",
-            thread,
-            history: {
-              thread: { ...thread, turns: [{ id: "turn-1", status: "completed", items }] },
-            },
-            lastEventId: 0,
+            thread: activeThread,
+            history: { thread: { ...activeThread, turns } },
+            lastEventId: submissions.length,
             eventEpoch: "picker-fixture",
           });
         }
@@ -171,9 +246,50 @@ async function verify(page, origin) {
           return reply({ goal: null });
         case "thread.native.controls":
           return reply({ queue: false });
-        case "turn.start":
-          captureSend(call);
-          return reply({ type: "turn.start.accepted", turnId: "turn-2" });
+        case "thread.start":
+          creations.push(call);
+          return reply({
+            type: "thread.delivery.state",
+            state: "created",
+            threadId: draftThreadId,
+          });
+        case "turn.start": {
+          const input = nativeUserInputItems(call);
+          const turn = {
+            id: call.deliveryId,
+            status: "completed",
+            items: [
+              {
+                type: "userMessage",
+                id: call.deliveryId,
+                clientId: call.deliveryId,
+                content: input,
+              },
+            ],
+          };
+          submissions.push({ command: call, input, turn });
+          reply({
+            type: "thread.delivery.state",
+            state: "accepted",
+            threadId: call.threadId,
+            delivery: "startNow",
+            turnId: call.deliveryId,
+          });
+          // 宽布局切换任务时会保留订阅，必须通过原生完成事件更新它的历史。
+          return ws.send(
+            JSON.stringify({
+              type: "thread.event",
+              eventEpoch: "picker-fixture",
+              event: {
+                id: submissions.length,
+                hostId,
+                threadId: call.threadId,
+                createdAt: new Date().toISOString(),
+                event: { type: "turn.completed", turn },
+              },
+            }),
+          );
+        }
         case "ping":
           return reply({ type: "pong", nonce: call.nonce });
         default:
@@ -183,75 +299,173 @@ async function verify(page, origin) {
   });
   const url = new URL("/", origin);
   url.search = new URLSearchParams({ host: String(hostId), cwd, thread: threadId });
-  await page.goto(url.href);
-  await page.getByText("验收引用目录", { exact: true }).waitFor({ timeout: 20000 });
+  await page.goto(url.href, { waitUntil: "commit" });
+  await page.getByText("验收引用目录", { exact: true }).waitFor({ timeout: 45000 });
+  await page.locator('[data-plugin-mention-id="legacy@local"]').waitFor();
   const picker = composerPicker(page);
-  const editor = page.locator('[contenteditable="true"]').first();
-  const open = async () => {
-    await pickerButton(page).click();
+  const dollar = page
+    .getByTestId("prompt-suggestion-panel")
+    .and(page.locator('[data-trigger="$"]'));
+  const editor = page.getByTestId("v4-composer-input");
+  const send = page.getByTestId("v4-composer-send");
+  const open = async (optionKind = "plugin") => {
+    await activate(pickerButton(page));
     await picker.waitFor();
-    await picker.locator('[role="option"][data-section-id="plugins"]').first().waitFor();
+    // 每次打开都会重新读取候选，管理按钮在加载期间已可见。等目标组的候选挂载后再扫描虚拟列表。
+    await picker
+      .locator(`[role="option"][data-option-id^="${optionKind}:"]`)
+      .first()
+      .waitFor({ state: "attached" });
+  };
+  const closePicker = async () => {
+    await page.keyboard.press("Escape");
+    await picker.waitFor({ state: "detached" });
   };
   const select = async (optionId, description) => {
-    await open();
+    await open(optionId.split(":", 1)[0]);
     const option = await revealPickerOption(picker, optionId);
     assert(await option.isEnabled(), optionId + " should be selectable");
     if (description) assert((await option.innerText()).includes(description));
-    await option.click();
-    await picker.waitFor({ state: "hidden" });
+    await activate(option);
+    await picker.waitFor({ state: "detached" });
   };
 
   await open();
+  const appStatus = await revealPickerItem(picker, "prompt-suggestion-status-apps");
+  await appStatus.and(page.locator('[data-status="error"]')).waitFor();
+  assert.equal(await appStatus.textContent(), unloadedApps);
+  assert(appQueries.length > 0 && appQueries.every((query) => query.threadId === threadId));
   const skillStatus = await revealPickerItem(picker, "prompt-suggestion-status-skills");
   await skillStatus.and(page.locator('[data-status="error"]')).waitFor();
   const appTools = await revealPickerOption(picker, "plugin:codex-app-tools@bundled");
   assert.equal(await appTools.innerText(), "Codex App Tools");
   assert.equal(await picker.locator('[data-option-id="plugin:disabled@bundled"]').count(), 0);
   assert.equal(await picker.locator('[data-option-id="plugin:available@bundled"]').count(), 0);
-  await page.keyboard.press("Escape");
+  await closePicker();
+
+  appDirectory = "empty";
+  await open();
+  await picker.getByText(noApps, { exact: true }).waitFor();
+  await closePicker();
+  await editor.focus();
+  await page.keyboard.insertText("$");
+  await dollar.getByText(noApps, { exact: true }).waitFor();
+  await page.keyboard.press("Backspace");
+  await dollar.waitFor({ state: "hidden" });
+  await page.keyboard.insertText("验收🧪 ");
+
+  appDirectory = "loaded";
+  await select("app:" + app.id, app.description);
+  assert.equal(appQueries.at(-1).threadId, threadId);
 
   // Native plugin IDs remain distinct when the configured manifest names and display labels match.
   await select("plugin:review@local", "local");
   await select("plugin:review@bundled", "bundled");
 
   failSkills = false;
-  const waitForSkills = page.waitForResponse(
-    (response) => response.ok() && response.request().postDataJSON()?.method === "skills/list",
-  );
-  await open();
-  await waitForSkills;
-  await page.keyboard.press("Escape");
   // All three native skill paths remain selectable with the same display name.
+  await open("skill");
+  const builtIn = await revealPickerOption(picker, "skill:" + systemSkill.path);
+  assert.match(await builtIn.textContent(), /Codex 内置/u);
+  await closePicker();
   await select("skill:" + repoSkill.path, repoSkill.path);
   await select("skill:" + userSkill.path, userSkill.path);
-  await select("skill:" + pluginSkill.path, pluginSkill.path);
+  await select("skill:" + pluginSkill.path, `${pluginSkill.pluginId} · ${pluginSkill.path}`);
 
-  for (const id of [
+  const chosen = [
+    "app:" + app.id,
     "plugin:review@local",
     "plugin:review@bundled",
     ...[repoSkill, userSkill, pluginSkill].map((skill) => "skill:" + skill.path),
-  ]) {
-    const chip = editor.locator('[data-mention-id="' + id + '"]');
-    assert.equal(await chip.count(), 1);
-  }
-  await page.getByTestId("v4-composer-send").click();
-  const signal = AbortSignal.timeout(5000);
-  const sent = await Promise.race([
-    submitted,
-    new Promise((_, reject) =>
-      signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
-    ),
+  ];
+  const chip = (id) => editor.locator('[data-mention-id="' + id + '"]');
+  for (const id of chosen) await chip(id).waitFor();
+  await page.reload({ waitUntil: "commit" });
+  for (const id of chosen) await chip(id).waitFor({ timeout: 45000 });
+  assert.match(await editor.innerText(), /^验收🧪 /u);
+  assert.equal(submissions.length, 0, "restoring the draft must not submit it");
+
+  await activate(send);
+  await editor.locator('[data-mention-category="apps"]').waitFor({ state: "detached" });
+  assert.equal(submissions.length, 1);
+  assert.equal(submissions[0].command.threadId, threadId);
+  assert.equal(
+    submissions[0].input[0].text,
+    "验收🧪 $fixture-docs @review @review $review $review $review:review",
+  );
+  assert.equal(
+    submissions[0].input[0].text_elements[0].byteRange.start,
+    Buffer.byteLength("验收🧪 "),
+  );
+  assert.deepEqual(submissions[0].input.slice(1), [
+    { type: "mention", name: app.name, path: "app://" + app.id },
+    { type: "mention", name: "review", path: "plugin://review@local" },
+    { type: "mention", name: "review", path: "plugin://review@bundled" },
+    ...[repoSkill, userSkill, pluginSkill].map(({ name, path }) => ({ type: "skill", name, path })),
   ]);
-  assert.equal(sent.threadId, threadId);
-  for (const ref of [
-    "plugin://review@local",
-    "plugin://review@bundled",
-    ...[repoSkill, userSkill, pluginSkill].map((x) => x.path),
-  ])
-    assert(
-      JSON.stringify(sent).includes(ref),
-      "Selected identities must be carried through delivery",
-    );
+  const historyApp = page.locator('[data-app-mention-id="' + app.id + '"]');
+  await showTaskList();
+  await activate(page.getByTestId("task-new-button"));
+  await page.waitForURL((windowUrl) => !windowUrl.searchParams.has("thread"));
+  await editor.waitFor();
+  await editor.focus();
+  await page.keyboard.insertText("$fixture-docs");
+  const appOption = dollar.getByTestId("prompt-suggestion-option-app:" + app.id);
+  await appOption.waitFor();
+  assert.equal(appQueries.at(-1).threadId, undefined);
+  if (mobile) await activate(appOption);
+  else {
+    await appOption.and(page.locator('[aria-selected="true"]')).waitFor();
+    await page.keyboard.press("Enter");
+  }
+  await chip("app:" + app.id).waitFor();
+  await page.keyboard.insertText("$review");
+  await activate(dollar.getByTestId("prompt-suggestion-option-skill:" + repoSkill.path));
+  await chip("skill:" + repoSkill.path).waitFor();
+  await page.keyboard.insertText("@plugin-23");
+  const at = page.getByTestId("prompt-suggestion-panel").and(page.locator('[data-trigger="@"]'));
+  await activate(at.getByTestId("prompt-suggestion-option-plugin:plugin-23@local"));
+  await activate(send);
+  await page.waitForURL((windowUrl) => windowUrl.searchParams.get("thread") === draftThreadId);
+  assert.equal(creations.length, 1);
+  assert.equal(submissions.length, 2);
+  assert.equal(submissions[1].command.threadId, draftThreadId);
+  assert.equal(submissions[1].command.deliveryId, creations[0].deliveryId);
+  assert.deepEqual(submissions[1].input.slice(1), [
+    { type: "mention", name: app.name, path: "app://" + app.id },
+    { type: "skill", name: repoSkill.name, path: repoSkill.path },
+    { type: "mention", name: "plugin-23", path: "plugin://plugin-23@local" },
+  ]);
+  await historyApp.waitFor();
+  await showTaskList();
+  await activate(page.getByTestId(`task-item-${threadId}`));
+  await page.waitForURL((windowUrl) => windowUrl.searchParams.get("thread") === threadId);
+  await historyApp.waitFor();
+  for (const pluginId of ["review@local", "review@bundled", "legacy@local"]) {
+    assert.equal(await page.locator('[data-plugin-mention-id="' + pluginId + '"]').count(), 1);
+  }
+  assert.equal(submissions.length, 2, "replaying history must not send another turn");
+  await editor.focus();
+  await page.keyboard.insertText("管理页往返草稿");
+  for (const [section, label] of [
+    ["apps", "管理应用"],
+    ["plugins", "管理插件"],
+    ["skills", "管理技能"],
+  ]) {
+    await open();
+    const manage = await revealPickerOption(picker, `manage-${section}`);
+    assert.equal(await manage.getAttribute("data-section-id"), section);
+    assert.equal(await manage.textContent(), label);
+    await activate(manage);
+    const extensions = page.getByTestId("workspace-extensions");
+    await extensions
+      .getByTestId(`workspace-extensions-${section}`)
+      .and(page.locator('[aria-pressed="true"]'))
+      .waitFor();
+    await activate(extensions.getByRole("button", { name: "返回", exact: true }));
+    await editor.getByText("管理页往返草稿", { exact: true }).waitFor();
+  }
+  assert.equal(submissions.length, 2, "extension management must leave the draft unsent");
   assert.deepEqual(detailQueries, [], "Loading references must make no per-plugin detail calls");
   assert.deepEqual(pageErrors, []);
 }
@@ -274,6 +488,7 @@ try {
   const origin = target ?? server.resolvedUrls.local[0];
   const browser = await chromium.launch({ channel: "chrome", headless: true });
   try {
+    const failures = [];
     for (const width of [1236, 390]) {
       const page = await browser.newPage({
         viewport: { width, height: 820 },
@@ -283,11 +498,25 @@ try {
       page.setDefaultTimeout(10000);
       try {
         await verify(page, origin);
-        console.log("PASS self-hosted native plugin and Skill picker (" + width + "px)");
+        console.log(
+          "PASS self-hosted App, Skill and plugin picker, first and later turns, replay (" +
+            width +
+            "px)",
+        );
+      } catch (error) {
+        console.error(
+          `Composer browser acceptance failed at ${width}px.`,
+          await page
+            .locator("body")
+            .innerText({ timeout: 3000 })
+            .catch(() => ""),
+        );
+        failures.push(error);
       } finally {
         await page.close();
       }
     }
+    if (failures.length) throw new AggregateError(failures, "Composer browser acceptance failed");
   } finally {
     await browser.close();
   }

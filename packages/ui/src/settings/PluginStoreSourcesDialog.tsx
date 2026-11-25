@@ -44,13 +44,14 @@ export function PluginStoreSourceRefreshFailure({
   );
 }
 
-/** 顶栏店铺图标 → 市场源管理：列出已登记市场，支持刷新与移除（新增走 New 按钮）。 */
+/** 顶栏来源管理，支持刷新、移除，以及平台提供的添加来源入口。 */
 export function PluginStoreSourcesDialog({
   open,
   onOpenChange,
   marketplaces,
   onUpdateMarketplace,
   onRemoveMarketplace,
+  onAddSource,
   activeOperations,
   error,
 }: {
@@ -59,6 +60,7 @@ export function PluginStoreSourcesDialog({
   marketplaces: ZCodePluginMarketplaceSummary[];
   onUpdateMarketplace: (marketplace: string) => void;
   onRemoveMarketplace: (marketplace: string) => void;
+  onAddSource?: () => void;
   activeOperations: ReadonlyArray<{ id: string }>;
   error?: string | null;
 }) {
@@ -76,6 +78,7 @@ export function PluginStoreSourcesDialog({
         <DialogTitle className="text-ui-lg font-medium text-foreground">
           {intl.formatMessage({ id: "settings.plugins.store.sources.title" })}
         </DialogTitle>
+        {onAddSource && <Button variant="outline" size="sm" className="w-fit" onClick={onAddSource} data-testid="plugin-store-source-add">{intl.formatMessage({id:"settings.plugins.marketplaces.add"})}</Button>}
         {error ? (
           <p role="alert" className="break-words text-ui-base text-destructive">
             {error}

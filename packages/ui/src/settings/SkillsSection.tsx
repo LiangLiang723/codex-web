@@ -17,13 +17,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Switch } from "@/components/ui/switch.js";
 import type {
   ZCodeProvider,
-  SkillDiagnostic,
   SkillDiagnosticCode,
   SkillSummary,
-  SkillsCapability,
+  SkillsListResult,
   RemoteTarget,
 } from "@zcode/shared";
-import type { IServiceAccessor } from "@zcode/services";
+import type { IFileService, IServiceAccessor } from "@zcode/services";
 import { ZCODE_AGENT_PROVIDER } from "@zcode/shared";
 import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import type { CreateTaskRequest } from "@/app-shell/types.js";
@@ -66,6 +65,11 @@ import {
   selectPluginsForScope,
   selectSkillsForScope,
 } from "@/settings/pluginCapabilityProjection.js";
+
+const EMPTY_SKILL_LIST: Pick<SkillsListResult, "skills" | "diagnostics"> = {
+  skills: [],
+  diagnostics: [],
+};
 
 function getWorkspaceBasename(workspacePath: string | null): string {
   if (!workspacePath) return "";
@@ -117,11 +121,15 @@ function SkillPathDetailField({
   path,
   openLabel,
   onOpen,
+  openTestId,
+  opening = false,
 }: {
   label: string;
   path: string;
   openLabel: string;
   onOpen: () => void;
+  openTestId?: string;
+  opening?: boolean;
 }) {
   return (
     <div className="min-w-0 col-span-2">
@@ -132,6 +140,8 @@ function SkillPathDetailField({
           variant="link"
           size="sm"
           aria-label={openLabel}
+          data-testid={openTestId}
+          disabled={opening}
           title={openLabel}
           className="inline-flex h-auto max-w-full items-baseline gap-1.5 whitespace-normal break-all px-0 py-0 text-left align-baseline font-mono text-ui-base font-normal text-foreground-subtle underline-offset-2 hover:text-foreground hover:underline"
           onClick={onOpen}
@@ -140,6 +150,78 @@ function SkillPathDetailField({
           <ExternalLink className="relative top-px size-3 shrink-0" aria-hidden="true" />
         </Button>
       </div>
+    </div>
+  );
+}
+
+function CodexSkillFilePreview({
+  path,
+  readTextFile,
+}: {
+  path: string;
+  readTextFile: IFileService["readTextFile"];
+}) {
+  const { intl } = useZCodeIntl();
+  const [preview, setPreview] = useState<
+    | { kind: "loading" }
+    | { kind: "ready"; content: string; truncated: boolean }
+    | { kind: "error"; message: string }
+    | null
+  >(null);
+  const openPreview = async () => {
+    setPreview({ kind: "loading" });
+    try {
+      // Web 无法在浏览器本机打开 SSH 绝对路径，使用同一目标文件服务读取已发现的 SKILL.md。
+      const { content, truncated, isBinary } = await readTextFile({ path, length: 256 * 1024 });
+      if (isBinary) throw Error(intl.formatMessage({ id: "settings.skills.codexPreviewBinary" }));
+      setPreview({ kind: "ready", content, truncated });
+    } catch (error) {
+      setPreview({
+        kind: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+  return (
+    <div className="col-span-2 min-w-0 space-y-3">
+      <SkillPathDetailField
+        label={intl.formatMessage({ id: "settings.skills.detail.path" })}
+        path={path}
+        openLabel={intl.formatMessage({ id: "settings.skills.detail.openPath" })}
+        openTestId="native-skill-preview"
+        opening={preview?.kind === "loading"}
+        onOpen={() => void openPreview()}
+      />
+      {preview?.kind === "loading" ? (
+        <p role="status" className="text-ui-sm text-foreground-subtle">
+          {intl.formatMessage({ id: "common.loading" })}
+        </p>
+      ) : null}
+      {preview?.kind === "error" ? (
+        <div className="space-y-2">
+          <p role="alert" className="break-words text-ui-sm text-destructive">
+            {preview.message}
+          </p>
+          <Button type="button" variant="outline" size="sm" onClick={() => void openPreview()}>
+            {intl.formatMessage({ id: "common.retry" })}
+          </Button>
+        </div>
+      ) : null}
+      {preview?.kind === "ready" ? (
+        <>
+          <pre
+            data-testid="native-skill-body"
+            className="whitespace-pre-wrap break-words rounded-lg border border-border bg-surface p-3 font-mono text-ui-sm text-foreground"
+          >
+            {preview.content}
+          </pre>
+          {preview.truncated ? (
+            <p className="text-ui-sm text-foreground-subtle">
+              {intl.formatMessage({ id: "settings.skills.diagnostics.code.skill_too_large" })}
+            </p>
+          ) : null}
+        </>
+      ) : null}
     </div>
   );
 }
@@ -195,8 +277,6 @@ export function SkillsSection({
   const pluginWorkspaceIdentity = usePluginManagementStore((state) => state.workspaceIdentity);
   const pluginConfigScope = usePluginManagementStore((state) => state.configScope);
   const initializePlugins = usePluginManagementStore((state) => state.initialize);
-  // useConfirmDialog 是纯 Zustand selector（不含 useState），放在这里不会影响 SkillsSection
-  // 既有的「按 useState 调用次序」单测桩（见下方 selectedSkill 附近的注释）。
   const confirmDialog = useConfirmDialog();
   const activeWorkspacePath = workspacePath ?? null;
   const activeWorkspaceIdentity = workspaceIdentity;
@@ -209,10 +289,13 @@ export function SkillsSection({
   );
   // PluginsSection 已把 Scope target 传入，但 Skills 仍从当前 ServiceProvider
   // 取服务，导致跨远程 host 误路由。技能读写改用同一 target 解析结果。
-  const { pluginManagementService, skillsService } = targetServiceResolution.services;
-  const [skills, setSkills] = useState<SkillSummary[]>([]);
-  const [capability, setCapability] = useState<SkillsCapability | null>(null);
-  const [loadedSkillTargetKey, setLoadedSkillTargetKey] = useState("");
+  const { fileService, pluginManagementService, skillsService } = targetServiceResolution.services;
+  const [listing, setListing] = useState<{ targetKey: string; result: SkillsListResult } | null>(
+    null,
+  );
+  const [listFailure, setListFailure] = useState<{ targetKey: string; message: string } | null>(
+    null,
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [writingSkill, setWritingSkill] = useState(false);
@@ -222,7 +305,6 @@ export function SkillsSection({
   useEffect(() => {
     onDetailOpenChange?.(selectedSkill !== null);
   }, [onDetailOpenChange, selectedSkill]);
-  const [diagnostics, setDiagnostics] = useState<SkillDiagnostic[]>([]);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const latestRequestIdRef = useRef(0);
@@ -231,8 +313,10 @@ export function SkillsSection({
     activeWorkspaceIdentity,
     cacheAuthorityKey,
   );
-  const projectionMatchesTarget =
-    !activeWorkspacePath || loadedSkillTargetKey === activeSkillTargetKey;
+  const currentListing = listing?.targetKey === activeSkillTargetKey ? listing.result : null;
+  const { skills, diagnostics } = currentListing ?? EMPTY_SKILL_LIST;
+  const capability = currentListing?.capability;
+  const directoryError = listFailure?.targetKey === activeSkillTargetKey ? listFailure : null;
 
   useEffect(() => {
     if (selfHostedBuild || !activeWorkspacePath || !targetServiceResolution.rpcReady) return;
@@ -318,24 +402,21 @@ export function SkillsSection({
   );
 
   const loadSkills = useCallback(
-    async (showBlockingLoading: boolean) => {
+    async (
+      showBlockingLoading: boolean,
+      expected?: { skillId: string; enabled: boolean; failureMessage: string },
+    ) => {
       if (!targetServiceResolution.rpcReady) return;
       if (!activeWorkspacePath) {
-        setSkills([]);
-        setCapability(null);
-        setDiagnostics([]);
+        setListing(null);
+        setListFailure(null);
         setError(null);
         setLoading(false);
-        setLoadedSkillTargetKey("");
         return;
       }
-      const requestTargetKey = buildSourceSettingsProjectionKey(
-        activeWorkspacePath,
-        activeWorkspaceIdentity,
-        cacheAuthorityKey,
-      );
       setLoading(showBlockingLoading);
       setError(null);
+      setListFailure(null);
       const requestId = ++latestRequestIdRef.current;
       try {
         const result = await skillsService.list({
@@ -346,24 +427,36 @@ export function SkillsSection({
         if (requestId !== latestRequestIdRef.current) {
           return;
         }
-        setSkills(result.skills);
-        setCapability(result.capability);
-        setDiagnostics(result.diagnostics);
-        setLoadedSkillTargetKey(requestTargetKey);
+        setListing({ targetKey: activeSkillTargetKey, result });
+        if (selfHostedBuild) {
+          setSelectedSkill((skill) =>
+            skill && result.skills.some((entry) => entry.id === skill.id) ? skill : null,
+          );
+        }
         setLoading(false);
+        if (
+          expected &&
+          result.skills.find((skill) => skill.id === expected.skillId)?.enabled !== expected.enabled
+        ) {
+          setError(expected.failureMessage);
+        }
       } catch (loadError) {
         if (requestId !== latestRequestIdRef.current) {
           return;
         }
-        setLoadedSkillTargetKey(requestTargetKey);
+        // 读取失败没有当前目标的目录证据，沿用上一份投影会误显示旧路径或已安装为空。
+        setListFailure({
+          targetKey: activeSkillTargetKey,
+          message: loadError instanceof Error ? loadError.message : String(loadError),
+        });
+        setSelectedSkill(null);
         setLoading(false);
-        setError(loadError instanceof Error ? loadError.message : String(loadError));
       }
     },
     [
       activeWorkspaceIdentity,
       activeWorkspacePath,
-      cacheAuthorityKey,
+      activeSkillTargetKey,
       skillsService,
       targetServiceResolution.rpcReady,
     ],
@@ -371,7 +464,6 @@ export function SkillsSection({
 
   useEffect(() => {
     if (!targetServiceResolution.rpcReady) {
-      latestRequestIdRef.current += 1;
       setLoading(false);
       setError(null);
       setImportDialogOpen(false);
@@ -380,7 +472,10 @@ export function SkillsSection({
     // 首屏或切换 Scope target 时必须显示阻塞 loading；手动刷新仍走后台刷新，
     // 避免有当前 target 数据时整块闪烁。
     void loadSkills(true);
-  }, [activeWorkspacePath, loadSkills, targetServiceResolution.rpcReady]);
+    return () => {
+      latestRequestIdRef.current += 1;
+    };
+  }, [loadSkills, targetServiceResolution.rpcReady]);
 
   const refresh = useCallback(async () => {
     await loadSkills(false);
@@ -418,8 +513,23 @@ export function SkillsSection({
           workspaceIdentity: activeWorkspaceIdentity,
           reason: "settings-skill-enabled",
         });
-        await Promise.all([loadSkills(false), refreshSharedSkillStoreForCurrentWorkspace()]);
+        await Promise.all([
+          loadSkills(
+            false,
+            selfHostedBuild
+              ? {
+                  skillId,
+                  enabled,
+                  failureMessage: intl.formatMessage({
+                    id: "settings.skills.codexEffectiveMismatch",
+                  }),
+                }
+              : undefined,
+          ),
+          refreshSharedSkillStoreForCurrentWorkspace(),
+        ]);
       } catch (setEnabledError) {
+        if (selfHostedBuild) await loadSkills(false);
         setError(
           setEnabledError instanceof Error ? setEnabledError.message : String(setEnabledError),
         );
@@ -431,6 +541,7 @@ export function SkillsSection({
     [
       activeWorkspaceIdentity,
       activeWorkspacePath,
+      intl,
       loadSkills,
       refreshSharedSkillStoreForCurrentWorkspace,
       skills,
@@ -490,9 +601,8 @@ export function SkillsSection({
   const scopedProviderSkills = useMemo(() => {
     // 原生技能表已经含有效插件归属。由插件管理目录再次过滤会丢失同名或处于独立来源的技能。
     if (selfHostedBuild)
-      return skills.filter(
-        (skill) =>
-          skill.scope === scopeFilter || (scopeFilter === "user" && skill.scope === "plugin"),
+      return skills.filter((skill) =>
+        scopeFilter === "workspace" ? skill.codexScope === "repo" : skill.codexScope !== "repo",
       );
     const allProviderSkills = filterSkillsForProvider(skills, ZCODE_AGENT_PROVIDER);
     const pluginStoreMatchesTarget =
@@ -515,10 +625,30 @@ export function SkillsSection({
     scopeFilter,
     skills,
   ]);
-  const groupedSkills = useMemo(
-    () => groupSkillsByPlugin(scopedProviderSkills, query),
-    [query, scopedProviderSkills],
-  );
+  const groupedSkills = useMemo(() => {
+    if (!selfHostedBuild) return groupSkillsByPlugin(scopedProviderSkills, query);
+    const keyword = query.trim().toLowerCase();
+    const local: SkillSummary[] = [];
+    const plugin: SkillSummary[] = [];
+    // SSH 主机的路径可能区分大小写。按原生路径去重已由适配器完成。
+    for (const skill of scopedProviderSkills) {
+      if (
+        keyword &&
+        ![
+          skill.name,
+          skill.displayName,
+          skill.description,
+          skill.shortDescription,
+          renderScopeLabel(skill),
+          skill.pluginId,
+          skill.path,
+        ].some((value) => value?.toLowerCase().includes(keyword))
+      )
+        continue;
+      (skill.scope === "plugin" ? plugin : local).push(skill);
+    }
+    return { local, plugin };
+  }, [query, renderScopeLabel, scopedProviderSkills]);
   const skillSourceGroups = useMemo(() => {
     return groupScopedSkillsBySource(
       [...groupedSkills.local, ...groupedSkills.plugin],
@@ -528,11 +658,19 @@ export function SkillsSection({
     );
   }, [groupedSkills.local, groupedSkills.plugin, intl, scopeFilter, workspaceLabel]);
   const filteredSkillCount = groupedSkills.local.length + groupedSkills.plugin.length;
+  const systemSkills = groupedSkills.local.filter((skill) => skill.codexScope === "system");
+  const adminSkills = groupedSkills.local.filter((skill) => skill.codexScope === "admin");
+  const directSkills = selfHostedBuild
+    ? groupedSkills.local.filter(
+        (skill) => skill.codexScope !== "system" && skill.codexScope !== "admin",
+      )
+    : groupedSkills.local;
   const hasEmptySearchResult = Boolean(query.trim()) && filteredSkillCount === 0;
   const directInstalledSkillCount = scopedProviderSkills.filter(
-    (skill) => skill.scope !== "plugin",
+    (skill) =>
+      skill.scope !== "plugin" && skill.codexScope !== "system" && skill.codexScope !== "admin",
   ).length;
-  const hideInstalledGroup = Boolean(query.trim()) && groupedSkills.local.length === 0;
+  const hideInstalledGroup = Boolean(query.trim()) && directSkills.length === 0;
   const pluginIconItemById = useMemo(
     () =>
       new Map(
@@ -546,39 +684,66 @@ export function SkillsSection({
   useEffect(() => {
     onVisibleCountChange?.(filteredSkillCount);
   }, [filteredSkillCount, onVisibleCountChange]);
-  const handleCreateSkill = () => {
+  const startSkillDraft = (name: string, skill?: SkillSummary, prompt = "") => {
     if (!activeWorkspacePath || !onCreateTask) {
       return;
     }
-    const effectiveProvider: ZCodeProvider = ZCODE_AGENT_PROVIDER;
-    const skillCreator = (
-      selfHostedBuild ? skills : filterSkillsForProvider(skills, effectiveProvider)
-    ).find((skill) => skill.name === "skill-creator" && (!selfHostedBuild || skill.enabled));
-    const markdown = buildSkillMentionMarkdown("skill-creator", skillCreator?.path);
+    const markdown = buildSkillMentionMarkdown(name, skill?.path);
 
     // v4 迁移删除旧 pendingComposerPrefill 后，这个入口仍手工操作 session
     // store，只剩返回聊天页的导航，skill-creator 文本没有进入新 Composer。统一委托
     // Root 的新任务入口，让草稿持久化、workspaceIdentity 隔离和 Composer 插入保持单一路径。
     onCreateTask({
-      provider: effectiveProvider,
-      initialPrompt: `${markdown} `,
+      provider: ZCODE_AGENT_PROVIDER,
+      initialPrompt: `${markdown} ${prompt}`,
+      ...(selfHostedBuild
+        ? {
+            targetWorkspace: {
+              workspacePath: activeWorkspacePath,
+              workspaceIdentity: activeWorkspaceIdentity,
+            },
+          }
+        : {}),
       initialPromptMention: {
-        id: `skill:${skillCreator?.id ?? "skill-creator"}`,
+        id: `skill:${skill?.id ?? name}`,
         category: "skills",
-        label: "skill-creator",
-        value: "skill-creator",
+        label: skill?.displayName ?? name,
+        value: name,
         markdown,
-        ...(skillCreator?.description ? { description: skillCreator.description } : {}),
-        ...(skillCreator
+        ...(skill?.description ? { description: skill.description } : {}),
+        ...(skill
           ? {
               data: {
-                path: skillCreator.path,
-                scope: skillCreator.scope,
+                path: skill.path,
+                scope: skill.scope,
               },
             }
           : {}),
       },
     });
+  };
+  const isAvailableSystemSkill = (skill: SkillSummary, name: string) =>
+    skill.codexScope === "system" &&
+    skill.name === name &&
+    skill.enabled &&
+    skill.path.startsWith("/");
+  const skillCreator = selfHostedBuild
+    ? skills.find((skill) => isAvailableSystemSkill(skill, "skill-creator"))
+    : filterSkillsForProvider(skills, ZCODE_AGENT_PROVIDER).find(
+        (skill) => skill.name === "skill-creator",
+      );
+  const skillInstaller = selfHostedBuild
+    ? skills.find((skill) => isAvailableSystemSkill(skill, "skill-installer"))
+    : undefined;
+  const handleCreateSkill = () => startSkillDraft("skill-creator", skillCreator);
+  const canUseSkill = (skill: SkillSummary) =>
+    selfHostedBuild &&
+    Boolean(onCreateTask && activeWorkspacePath) &&
+    skill.enabled &&
+    skill.path.startsWith("/");
+  const openSkillDraft = (skill: SkillSummary) => {
+    setSelectedSkill(null);
+    startSkillDraft(skill.name, skill);
   };
 
   const detailSkill = selectedSkill
@@ -649,10 +814,13 @@ export function SkillsSection({
           }}
         >
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="truncate text-ui-base font-medium text-foreground">{skill.name}</span>
+            <span className="truncate text-ui-base font-medium text-foreground">
+              {skill.displayName ?? skill.name}
+            </span>
           </div>
           <div className="mt-0.5 truncate text-ui-sm text-foreground-subtle">
-            {skill.description ||
+            {skill.shortDescription ||
+              skill.description ||
               intl.formatMessage({
                 id: "settings.skills.noDescription",
               })}
@@ -664,6 +832,18 @@ export function SkillsSection({
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {canUseSkill(skill) ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="native-skill-use-row"
+              disabled={writingSkill}
+              onClick={() => openSkillDraft(skill)}
+            >
+              {intl.formatMessage({ id: "settings.skills.codexUseShort" })}
+            </Button>
+          ) : null}
           {selfHostedBuild ? (
             skill.path.startsWith("/") && (
               <Switch
@@ -709,18 +889,38 @@ export function SkillsSection({
   );
 
   const skillHeaderActions = (
-    <SettingsResourceHeaderActions
-      onRefresh={() => void Promise.all([refresh(), refreshSharedSkillStoreForCurrentWorkspace()])}
-      onImport={selfHostedBuild ? undefined : () => setImportDialogOpen(true)}
-      onNew={
-        selfHostedBuild && !skills.some((skill) => skill.name === "skill-creator" && skill.enabled)
-          ? undefined
-          : handleCreateSkill
-      }
-      importDisabled={!capability?.userScopeAvailable}
-      importActionId="settings.skills.import.open"
-      newActionId="settings.skills.create.open"
-    />
+    <div className="flex flex-wrap items-center gap-2">
+      {skillInstaller && onCreateTask ? (
+        <Button
+          type="button"
+          variant="outline"
+          data-testid="native-skill-discover"
+          onClick={() =>
+            startSkillDraft(
+              skillInstaller.name,
+              skillInstaller,
+              intl.formatMessage({ id: "settings.skills.codexDiscoverPrompt" }),
+            )
+          }
+        >
+          {intl.formatMessage({ id: "settings.skills.codexDiscover" })}
+        </Button>
+      ) : null}
+      <SettingsResourceHeaderActions
+        onRefresh={() =>
+          void Promise.all([refresh(), refreshSharedSkillStoreForCurrentWorkspace()])
+        }
+        refreshDisabled={selfHostedBuild && writingSkill}
+        onImport={selfHostedBuild ? undefined : () => setImportDialogOpen(true)}
+        onNew={selfHostedBuild && (!skillCreator || !onCreateTask) ? undefined : handleCreateSkill}
+        newLabel={
+          selfHostedBuild ? intl.formatMessage({ id: "settings.skills.create.open" }) : undefined
+        }
+        importDisabled={!capability?.userScopeAvailable}
+        importActionId="settings.skills.import.open"
+        newActionId="settings.skills.create.open"
+      />
+    </div>
   );
   const remoteSyncAction = dataSync.visible ? (
     <ControlHintTooltip title={intl.formatMessage({ id: "settings.skills.remoteSync.open" })}>
@@ -774,7 +974,7 @@ export function SkillsSection({
         </div>
       ) : null}
 
-      {targetServiceResolution.rpcReady && diagnostics.length > 0 ? (
+      {targetServiceResolution.rpcReady && !directoryError && diagnostics.length > 0 ? (
         <div className="overflow-hidden rounded-lg border border-amber-500/40 bg-amber-500/10 text-ui-base text-foreground">
           <button
             type="button"
@@ -845,14 +1045,35 @@ export function SkillsSection({
       ) : null}
 
       {targetServiceResolution.rpcReady && error ? (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-ui-base text-destructive">
+        <div
+          role="alert"
+          className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-ui-base text-destructive"
+        >
           {error}
         </div>
       ) : null}
 
       {!targetServiceResolution.rpcReady ? (
         <PluginLoadingState label={intl.formatMessage({ id: "common.connecting" })} />
-      ) : loading || !projectionMatchesTarget ? (
+      ) : directoryError ? (
+        <div
+          data-testid={selfHostedBuild ? "native-skill-list-error" : undefined}
+          className="space-y-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2"
+        >
+          <p role="alert" className="break-words text-ui-base text-destructive">
+            {directoryError.message}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() =>
+              void Promise.all([loadSkills(true), refreshSharedSkillStoreForCurrentWorkspace()])
+            }
+          >
+            {intl.formatMessage({ id: "common.retry" })}
+          </Button>
+        </div>
+      ) : loading || (activeWorkspacePath && !currentListing) ? (
         <PluginLoadingState label={intl.formatMessage({ id: "common.loading" })} />
       ) : hasEmptySearchResult ? (
         <PluginSearchEmptyState
@@ -866,14 +1087,14 @@ export function SkillsSection({
             <div data-skills-plugin-direct-actions="true">
               <SettingsResourceGroupHeader
                 actions={skillHeaderActions}
-                count={groupedSkills.local.length}
+                count={directSkills.length}
                 title={intl.formatMessage({
                   id: "settings.plugin.skills.installed",
                 })}
               />
             </div>
-            {groupedSkills.local.length > 0 ? (
-              renderSkillList(groupedSkills.local)
+            {directSkills.length > 0 ? (
+              renderSkillList(directSkills)
             ) : directInstalledSkillCount === 0 && !query.trim() && selfHostedBuild ? (
               <PluginSearchEmptyState
                 label={intl.formatMessage({ id: "settings.plugin.skills.emptyInstalledTitle" })}
@@ -911,6 +1132,20 @@ export function SkillsSection({
               />
             ) : null}
           </section>
+          {[
+            { items: systemSkills, titleId: "settings.skills.codexSystem" },
+            { items: adminSkills, titleId: "settings.skills.codexAdmin" },
+          ].map(({ items, titleId }) =>
+            items.length > 0 ? (
+              <section key={titleId} className="space-y-4">
+                <SettingsResourceGroupHeader
+                  count={items.length}
+                  title={intl.formatMessage({ id: titleId })}
+                />
+                {renderSkillList(items)}
+              </section>
+            ) : null,
+          )}
           {skillSourceGroups
             .filter((group) => group.id.startsWith("plugin:"))
             .map((group) => (
@@ -947,7 +1182,9 @@ export function SkillsSection({
           {detailSkill ? (
             <div className="flex min-h-0 flex-col">
               <DialogHeader className="border-b border-popover-border px-4 pt-4 pb-3">
-                <DialogTitle className="truncate pr-8 text-ui-lg">{detailSkill.name}</DialogTitle>
+                <DialogTitle className="truncate pr-8 text-ui-lg">
+                  {detailSkill.displayName ?? detailSkill.name}
+                </DialogTitle>
               </DialogHeader>
               <div className="min-h-0 space-y-4 overflow-auto px-4 py-5">
                 <div className="grid gap-1.5">
@@ -964,6 +1201,13 @@ export function SkillsSection({
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+                  {detailSkill.displayName && detailSkill.displayName !== detailSkill.name ? (
+                    <SkillDetailField
+                      label={intl.formatMessage({ id: "settings.skills.codexName" })}
+                      value={detailSkill.name}
+                      mono
+                    />
+                  ) : null}
                   <SkillDetailField
                     label={intl.formatMessage({
                       id: "settings.skills.detail.scope",
@@ -1013,7 +1257,13 @@ export function SkillsSection({
                     mono
                     className="col-span-2"
                   />
-                  {selfHostedBuild ? (
+                  {selfHostedBuild && detailSkill.path.startsWith("/") ? (
+                    <CodexSkillFilePreview
+                      key={detailSkill.path}
+                      path={detailSkill.path}
+                      readTextFile={(params) => fileService.readTextFile(params)}
+                    />
+                  ) : selfHostedBuild ? (
                     <SkillDetailField
                       label={intl.formatMessage({ id: "settings.skills.detail.path" })}
                       value={detailSkill.path}
@@ -1033,6 +1283,35 @@ export function SkillsSection({
                     />
                   )}
                 </div>
+                {detailSkill.codexToolDependencies?.length ? (
+                  <div className="space-y-1">
+                    <div className="text-ui-base font-medium text-foreground">
+                      {intl.formatMessage({ id: "settings.skills.codexDependencies" })}
+                    </div>
+                    <ul className="space-y-1 text-ui-sm text-foreground-subtle">
+                      {detailSkill.codexToolDependencies.map((tool, i) => (
+                        <li key={`${tool.type}:${tool.value}:${i}`} className="break-words">
+                          <span className="font-mono">
+                            {tool.type} · {tool.value}
+                          </span>
+                          {tool.description ? (
+                            <span className="block">{tool.description}</span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {canUseSkill(detailSkill) ? (
+                  <Button
+                    type="button"
+                    data-testid="native-skill-use"
+                    disabled={writingSkill}
+                    onClick={() => openSkillDraft(detailSkill)}
+                  >
+                    {intl.formatMessage({ id: "settings.skills.codexUse" })}
+                  </Button>
+                ) : null}
               </div>
             </div>
           ) : null}

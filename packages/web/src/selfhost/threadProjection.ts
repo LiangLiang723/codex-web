@@ -28,6 +28,7 @@ import { turnFileHeader } from "./turnFileChanges.js";
 import { array, num, rec, str } from "./nativeValues.js";
 import { projectNativeSubagents } from "./nativeSubagents.js";
 import { nativeUserImages } from "./attachments.js";
+import { restoreNativeTurnText } from "./nativeTurnInput.js";
 
 export { array, num, rec, str } from "./nativeValues.js";
 
@@ -446,7 +447,7 @@ export function projectThread(
         stream = phase === "running" && item.status !== "completed";
       if (item.type === "userMessage") {
         const { attachments, links } = nativeUserImages(item.content, { turnId, itemId });
-        const text = nativeUserText(plain(item.content ?? item.text), attachments);
+        const text = nativeUserText(restoreNativeTurnText(item.content ?? item.text), attachments);
         collectNativeSources(sources, item, text);
         for (const { href, fileName } of links) addSource(sources, "userLink", href, fileName);
         rows.push({
@@ -576,7 +577,7 @@ export function projectThread(
               queueItemId,
               clientId: providerId,
               kind: "sendText" as const,
-              text: nativeUserText(plain(item.input), attachments),
+              text: nativeUserText(restoreNativeTurnText(item.input), attachments),
               attachments,
               admittedAt: time(item.createdAt, 0),
               delivery: { requested: "queue" as const, admitted: "queue" as const },

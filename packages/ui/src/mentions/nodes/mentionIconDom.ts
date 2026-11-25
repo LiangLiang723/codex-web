@@ -10,6 +10,13 @@ export type MentionLucideIconNode = ReadonlyArray<
   readonly ["path" | "circle" | "rect", Readonly<Record<string, string>>]
 >;
 
+export const APP_MENTION_ICON_NODE = [
+  ["rect", { width: "7", height: "7", x: "3", y: "3", rx: "1" }],
+  ["rect", { width: "7", height: "7", x: "14", y: "3", rx: "1" }],
+  ["rect", { width: "7", height: "7", x: "14", y: "14", rx: "1" }],
+  ["rect", { width: "7", height: "7", x: "3", y: "14", rx: "1" }],
+] as const satisfies MentionLucideIconNode;
+
 export const SKILL_MENTION_LUCIDE_ICON_NAME = "WandSparkles";
 export const SKILL_MENTION_ICON_NODE = [
   [

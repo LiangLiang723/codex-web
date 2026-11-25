@@ -24,6 +24,8 @@ try {
   const calls = [];
   let legacy = false,
     failDirectory = false;
+  let userToolEnabled;
+  let appToolsDefault;
   const app = (id, name, accessible = true) => ({
     id,
     name,
@@ -72,8 +74,21 @@ try {
         ],
         missingAppIds: [],
       };
-    if (method === "config/value/write")
+    if (method === "config/read")
+      return {
+        config: {
+          apps: {
+            "app.with.dot": {
+              default_tools_enabled: appToolsDefault,
+              tools: { "files/list.v2": { enabled: userToolEnabled } },
+            },
+          },
+        },
+      };
+    if (method === "config/value/write") {
+      userToolEnabled = params.value;
       return { status: "okOverridden", overriddenMetadata: { message: "Managed setting" } };
+    }
     throw Error("Unexpected native method " + method);
   };
   let list = await manageCodexApps(rpc, { operation: "list", force: true });
@@ -100,6 +115,16 @@ try {
   const detail = await manageCodexApps(rpc, { operation: "detail", id: "app.with.dot" });
   assert.equal(detail.tools[0].name, "files/list.v2");
   assert.equal(detail.tools[0].readOnly, true);
+  appToolsDefault = false;
+  assert.equal(
+    (await manageCodexApps(rpc, { operation: "detail", id: "app.with.dot" })).tools[0].enabled,
+    false,
+  );
+  userToolEnabled = true;
+  assert.equal(
+    (await manageCodexApps(rpc, { operation: "detail", id: "app.with.dot" })).tools[0].enabled,
+    true,
+  );
   const written = await manageCodexApps(rpc, {
     operation: "setEnabled",
     id: "app.with.dot",
@@ -118,6 +143,12 @@ try {
   await assert.rejects(
     manageCodexApps(rpc, { operation: "setEnabled", id: "_default", enabled: false }),
   );
+  const afterWrite = await manageCodexApps(rpc, { operation: "detail", id: "app.with.dot" });
+  assert.equal(
+    afterWrite.tools[0].enabled,
+    false,
+    "public metadata stays enabled while local Codex disables the tool",
+  );
   await assert.rejects(
     manageCodexApps(rpc, {
       operation: "setEnabled",
@@ -135,6 +166,66 @@ try {
   list = await manageCodexApps(rpc, { operation: "list", force: false });
   assert.equal(list.apps.length, 2);
   assert.ok(list.directoryIssue);
+  const before = calls.length;
+  const available = await manageCodexApps(rpc, {
+    operation: "available",
+    threadId: "native-thread",
+  });
+  assert.deepEqual(
+    available.apps.map((app) => app.id),
+    ["installed-only"],
+  );
+  assert.deepEqual(calls[before], [
+    "app/installed",
+    { threadId: "native-thread", forceRefresh: false },
+  ]);
+  assert(!calls.slice(before).some(([method]) => method === "app/list"));
+  const mine = await manageCodexApps(rpc, { operation: "installed", force: false });
+  assert.deepEqual(
+    mine.apps.map((app) => app.id),
+    ["app.with.dot", "installed-only"],
+  );
+  assert.equal(mine.apps[0].enabled, false);
+  assert.equal(mine.nextCursor, null);
+  const coldCalls = [];
+  const cold = await manageCodexApps(
+    async (method, params) => {
+      coldCalls.push([method, params]);
+      if (method === "app/installed" && !params.forceRefresh) return { apps: [] };
+      return rpc(method, params);
+    },
+    { operation: "available" },
+  );
+  assert.equal(cold.apps.length, 1);
+  assert.deepEqual(
+    coldCalls.filter(([m]) => m === "app/installed").map(([, p]) => p.forceRefresh),
+    [false, true],
+  );
+  legacy = true;
+  failDirectory = false;
+  const old = await manageCodexApps(rpc, { operation: "available", threadId: "native-old" });
+  assert.deepEqual(
+    old.apps.map((app) => app.id),
+    ["app.with.dot"],
+  );
+  assert(calls.filter(([m, p]) => m === "app/list" && p.threadId === "native-old").length === 2);
+  for (const [account, features, expected] of [
+    [null, {}, "chatgpt"],
+    [{ type: "apiKey" }, {}, "chatgpt"],
+    [{ type: "chatgpt" }, { apps: false }, "disabled"],
+    [{ type: "chatgpt" }, {}, null],
+  ]) {
+    const empty = await manageCodexApps(
+      async (method) => {
+        if (method === "account/read") return { account };
+        if (method === "config/read") return { config: { features } };
+        if (method === "app/installed") return { apps: [] };
+        throw Error(method);
+      },
+      { operation: "installed", force: false },
+    );
+    assert.equal(empty.emptyReason, expected);
+  }
   console.log(
     "PASS native App directory pagination, runtime fallback, tools, scoped config writes and policy overrides",
   );

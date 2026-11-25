@@ -65,7 +65,9 @@ export const ProjectSidebarNavigation = memo(function ProjectSidebarNavigation({
           onClick={() => props.onOpenPluginStore?.()}
         >
           <Blocks className="size-4" />
-          {intl.formatMessage({ id: "workspace.openPluginsSettings" })}
+          {intl.formatMessage({
+            id: selfHostedBuild ? "workspace.extensions" : "workspace.openPluginsSettings",
+          })}
         </Button>
       ) : null}
       {/* 扩展导航条目（nav.primary）：手机远控与「插件市场」一同隐藏；逻辑都在 extension-slots。 */}

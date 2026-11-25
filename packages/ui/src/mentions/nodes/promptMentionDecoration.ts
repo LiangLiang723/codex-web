@@ -7,6 +7,7 @@ import {
 import { resolvePluginIconSource } from "@/lib/pluginIconSource.js";
 import type { MentionCategory, MentionItemData } from "@/mentions/mentionTypes.js";
 import {
+  APP_MENTION_ICON_NODE,
   COMMAND_MENTION_ICON_NODE,
   COMPACT_COMMAND_MENTION_ICON_NODE,
   createMentionSvgIcon,
@@ -75,6 +76,10 @@ export function decoratePromptMention(
   // 插件 composer.mention 的候选项：统一用插件图标（候选项的图标只在 `@` 面板里渲染）。
   if (category === "extensions") {
     setMask(dom, PLUGIN_MENTION_ICON_NODE);
+    return;
+  }
+  if (category === "apps") {
+    setMask(dom, APP_MENTION_ICON_NODE);
     return;
   }
   if (category === "files") {

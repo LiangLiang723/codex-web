@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { useZCodeIntl } from "@zcode/ui";
 import { WorkspaceAvatar } from "@zcode/ui/workspace-avatar";
 import { AvatarPicker } from "./AvatarPicker.js";
@@ -218,9 +218,18 @@ type Props = {
   account: () => void;
   refresh: () => Promise<void>;
   select: (h: Host, cwd: string) => void;
+  renderConnectionAction?: (host: Host) => ReactNode;
   logout: () => void;
 };
-export function Catalog({ gateway, hosts, account, refresh, select, logout }: Props) {
+export function Catalog({
+  gateway,
+  hosts,
+  account,
+  refresh,
+  select,
+  renderConnectionAction,
+  logout,
+}: Props) {
   const { intl } = useZCodeIntl();
   const [form, setForm] = useState<Host | null | undefined>(),
     [remove, setRemove] = useState<Host | null>(null),
@@ -314,11 +323,13 @@ export function Catalog({ gateway, hosts, account, refresh, select, logout }: Pr
                   {host.username}@{host.sshHost} · {host.port ?? 22}
                 </p>
               </div>
-              <Button size="sm" disabled={entering !== null} onClick={() => void enter(host)}>
-                {intl.formatMessage({
-                  id: entering === host.id ? "selfhost.loading" : "selfhost.enter",
-                })}
-              </Button>
+              {renderConnectionAction?.(host) ?? (
+                <Button size="sm" disabled={entering !== null} onClick={() => void enter(host)}>
+                  {intl.formatMessage({
+                    id: entering === host.id ? "selfhost.loading" : "selfhost.enter",
+                  })}
+                </Button>
+              )}
               <Button size="sm" variant="ghost" onClick={() => setForm(host)}>
                 编辑
               </Button>
