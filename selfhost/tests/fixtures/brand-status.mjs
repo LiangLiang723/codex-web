@@ -118,7 +118,10 @@ async function verifyStartup(page, origin, reducedMotion) {
     await splash.waitFor();
     const anatomy = (await page.locator('meta[name="codex-bot-anatomy"]').count()) === 1;
     if (anatomy) {
-      await splash.locator("svg path[d]").first().waitFor({ state: "attached" });
+      const mark = splash.locator('[data-bot-engine="anatomy"]');
+      await mark.waitFor();
+      assert.equal(await mark.getAttribute("data-bot-motion"), "idle");
+      await mark.locator("svg path[d]").first().waitFor({ state: "attached" });
     }
     const frames = await splash.evaluate(async (element) => {
       const read = () => {
@@ -148,7 +151,7 @@ export async function verifyBrowserStartup(browser, origin) {
     page.setDefaultTimeout(10000);
     try {
       await verifyStartup(page, origin, reducedMotion);
-      console.log(`PASS initial splash (${reducedMotion})`);
+      console.log(`PASS idle startup splash (${reducedMotion})`);
     } finally {
       await page.close();
     }

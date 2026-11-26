@@ -214,13 +214,15 @@ const bundle = await build({
       const bootHost = globalThis.document?.querySelector(".zcode-boot-loading__anatomy");
       const root = bootHost?.closest("#root");
       if (bootHost && root) {
+        const mark = bootHost.parentElement;
         const media = matchMedia("(prefers-reduced-motion: reduce)");
         let player;
         const mount = () => {
           player?.destroy();
           const next = createBot(bootHost, {
             size: 72,
-            state: media.matches ? "idle" : "loading",
+            // 进度形变会遮住 Bot 的脸，启动等待使用原版的待机循环。
+            state: "idle",
             reducedMotion: media.matches,
             maxFps: 30,
             seed: "startup",
@@ -229,7 +231,8 @@ const bundle = await build({
           player = next;
           void next.ready.then(() => {
             if (player === next && next.el && bootHost.isConnected) {
-              bootHost.parentElement.dataset.botEngine = "anatomy";
+              mark.dataset.botMotion = next.state;
+              mark.dataset.botEngine = "anatomy";
             }
           });
         };
