@@ -42,6 +42,7 @@ export function BotStateGallery({
             motion={motion}
             shape={preferences.shape}
             color={preferences.color}
+            material={preferences.material}
             renderSize={128}
             animated
             explicitPlayback

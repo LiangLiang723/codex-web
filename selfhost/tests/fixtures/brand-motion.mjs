@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { verifyMaterialOptions, verifySavedMaterial } from "./brand-materials.mjs";
 
 export async function verifyAnatomyMotion(avatar) {
   const drawing = avatar.locator("svg");
@@ -27,7 +28,7 @@ export async function verifyAnatomyMotion(avatar) {
   }));
 }
 
-export async function verifyMotionPreview(page, activate) {
+export async function verifyMotionPreview(page, activate, materialRequests) {
   const studio = page.getByTestId("conversation-pet-studio");
   const preview = studio.getByTestId("bot-studio-avatar");
   const picks = studio.locator("[data-pet-shape-option]");
@@ -46,6 +47,7 @@ export async function verifyMotionPreview(page, activate) {
   assert.equal(await preview.locator("[data-bot-mirrored]").evaluate((svg) => getComputedStyle(svg).scale), "-1 1");
   await activate(studio.locator('[data-pet-facing-option="original"]'));
   await preview.locator("[data-bot-mirrored]").waitFor({ state: "detached" });
+  if (materialRequests) await verifyMaterialOptions(page, studio, preview, activate, materialRequests);
   const allActions = page.getByTestId("bot-studio-allActions");
   assert.equal(await allActions.getAttribute("aria-checked"), "false");
   await activate(allActions);
@@ -68,6 +70,9 @@ export async function verifyMotionPreview(page, activate) {
   await activate(studio.locator('[data-bot-state-card="radar"]'));
   await studio.getByTestId("bot-studio-trigger").getByText(/搜索/u).waitFor();
   await verifyAnatomyMotion(preview.locator('[data-bot-motion="radar"]'));
+  if (materialRequests) {
+    await preview.locator('canvas[data-bot-material="glass"]').waitFor();
+  }
   await activate(studio.getByTestId("bot-studio-poke"));
   await activate(studio.getByTestId("bot-studio-replay"));
   if (screenshots) await studio.screenshot({ path: join(screenshots, `pet-gallery-${width}.png`) });
@@ -194,7 +199,7 @@ export async function verifyAnatomyCatalogue(page) {
   assert.deepEqual(result, { unplayed: [], missing: [], skipped: [], shapes: 25, cutoutErrors: [] });
 }
 
-export async function verifyBrandSettings(page, { activate, showTaskList, origin, threadId, anatomyEnabled }) {
+export async function verifyBrandSettings(page, { activate, showTaskList, origin, threadId, anatomyEnabled, materialRequests }) {
   const mobile = page.viewportSize().width === 390;
   const pet = page.locator("[data-codex-pet]");
   const canvas = pet.locator("[data-codex-bot]");
@@ -210,7 +215,7 @@ export async function verifyBrandSettings(page, { activate, showTaskList, origin
   const petToggle = page.getByRole("switch", { name: "桌宠", exact: true });
   assert.equal(await petToggle.getAttribute("aria-checked"), "true");
   if (anatomyEnabled) {
-    await verifyMotionPreview(page, activate);
+    await verifyMotionPreview(page, activate, materialRequests);
   }
   await activate(petToggle);
   assert.equal(await petToggle.getAttribute("aria-checked"), "false");
@@ -235,6 +240,10 @@ export async function verifyBrandSettings(page, { activate, showTaskList, origin
   await activate(page.getByTestId("task-settings-button"));
   await activate(page.locator('[data-settings-section-nav="conversationPet"]'));
   if (anatomyEnabled) await verifySavedAppearance(page);
+  if (materialRequests) {
+    const studio = page.getByTestId("conversation-pet-studio");
+    await verifySavedMaterial(studio, studio.getByTestId("bot-studio-avatar"));
+  }
   assert.equal(await petToggle.getAttribute("aria-checked"), "false");
   await activate(petToggle);
   assert.equal(await petToggle.getAttribute("aria-checked"), "true");
@@ -248,5 +257,8 @@ export async function verifyBrandSettings(page, { activate, showTaskList, origin
   if (anatomyEnabled) {
     assert.equal(await canvas.getAttribute("data-bot-shape"), "cloud");
     assert.equal(await canvas.getAttribute("data-bot-mirrored"), null);
+    if (materialRequests) {
+      await dockedPet.locator('canvas[data-bot-material="glass"]').waitFor();
+    }
   }
 }

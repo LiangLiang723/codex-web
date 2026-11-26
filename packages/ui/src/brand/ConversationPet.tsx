@@ -177,6 +177,7 @@ export function ConversationPet({
           mirrored={preferences.facing === "mirrored" || (preferences.facing === "auto" && autoMirrored)}
           shape={preferences.shape}
           color={preferences.color}
+          material={preferences.material}
           scale={BOT_SIZES[preferences.size]}
         />
       </button>

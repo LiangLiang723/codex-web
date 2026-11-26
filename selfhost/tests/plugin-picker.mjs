@@ -7,6 +7,7 @@ import { build, preview } from "vite";
 import { repositorySummary } from "./fixtures/workspace-git.mjs";
 import { nativeUserInputItems } from "../../packages/web/src/selfhost/nativeTurnInput.ts";
 import { revealPickerItem, revealPickerOption } from "./fixtures/composer-picker.mjs";
+import { trackMaterialRequests } from "./fixtures/brand-materials.mjs";
 import {
   verifyAnatomyCatalogue,
   verifyAnatomyMotion,
@@ -102,6 +103,7 @@ const unloadedApps = "Fixture thread is not loaded";
 const legacyMention = "旧消息 [@Legacy](plugin://legacy@local)";
 
 async function verify(page, origin) {
+  const materialRequests = process.env.SELFHOST_BOT_MATERIALS_TEST ? trackMaterialRequests(page) : null;
   let failSkills = true;
   let appDirectory = "unloaded";
   const { width } = page.viewportSize();
@@ -705,7 +707,7 @@ async function verify(page, origin) {
   if (mobile) await activate(page.getByTestId(`task-item-${threadId}`));
   await editor.getByText("管理页往返草稿", { exact: true }).waitFor();
   assert.equal(submissions.length, 2, "extension management must leave the draft unsent");
-  await verifyBrandSettings(page, { activate, showTaskList, origin, threadId, anatomyEnabled });
+  await verifyBrandSettings(page, { activate, showTaskList, origin, threadId, anatomyEnabled, materialRequests });
   await showTaskList();
   await activate(page.getByTestId("task-new-button"));
   await pet.and(page.locator('[data-pet-placement="draft"]')).waitFor();
@@ -742,7 +744,13 @@ try {
     server = await preview({ ...config, preview: { host: "127.0.0.1", port: 0 } });
   }
   const origin = target ?? server.resolvedUrls.local[0];
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({
+    channel: "chrome",
+    headless: true,
+    args: process.env.SELFHOST_BOT_MATERIALS_TEST
+      ? ["--enable-webgl", "--ignore-gpu-blocklist", "--enable-unsafe-swiftshader"]
+      : [],
+  });
   try {
     const failures = [];
     for (const width of [1236, 390]) {

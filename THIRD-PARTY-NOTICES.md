@@ -2436,6 +2436,8 @@ The original import revisions of copied components are not recorded in the curre
 
 ## Copied source and assets
 
+- Open Bot Avatar (MIT): WebGL2 fluffy and glass materials in `upstream/open-bot-avatar`, pinned to `646793af2c86604539e02faa344e9793ab2aefe8`. Copyright (c) 2026 Dominik Scholz. The license is in `upstream/open-bot-avatar/LICENSE` and in the bundled material modules.
+
 - shadcn (MIT): packages/ui/src/components/ui, packages/ui/src/styles.css. License reference: https://raw.githubusercontent.com/shadcn-ui/ui/a87a63b2ca25143d26c8bd0903e4e9bc77b3f824/LICENSE.md. Original import revision: not recorded.
 
 - ai-elements (Apache-2.0): packages/ui/src/components/ai-elements, .agents/skills/ai-elements. License reference: https://raw.githubusercontent.com/vercel/ai-elements/6a9d5b1822ffb10bba4bd97175f01edd7d8651cd/LICENSE. Original import revision: not recorded.

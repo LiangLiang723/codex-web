@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { build } from "esbuild";
+import { prepareBotMaterials } from "./prepare-bot-materials.mjs";
 
 const revision = "debd41625da89b4c4fde43b3b1f0add6dc113c02";
 const [referenceArg, outputArg] = process.argv.slice(2);
@@ -34,6 +35,7 @@ const [recipesText, shapeText, originalPlayer, index] = await Promise.all([
   readFile(playerSource, "utf8"),
   readFile(indexPath, "utf8"),
 ]);
+const materials = await prepareBotMaterials(output);
 const recipes = JSON.parse(recipesText);
 const clips = recipes.clips.map(({ name }) => name);
 const clipDurations = new Map(recipes.clips.map(({ name, duration }) => [name, duration]));
@@ -192,7 +194,12 @@ adapt(
   `const frame = rt.frame();
     // 造型选择用正脸缩略图，播放器的会话帧仍使用原始朝向。
     if (opts.frontFacing) frame.quat = [1, 0, 0, 0];
-    renderer.render(buildModel(frame, theme, size, G, gE, trail, warnBody, opts.outline));`,
+    renderer.render(buildModel(frame, theme, size, G, gE, trail, warnBody, opts.outline));
+    opts.onFrame?.(renderer.geometry, frame.morph != null);`,
+);
+adapt(
+  "return { svg, render };",
+  "return { svg, render, geometry: { svg, zoom: zoomG, parts: partsG, head: headG, body: bodyP, holes: maskEyes, halo: haloP } };",
 );
 adapt(
   "createRuntime(G, { zoomMul: opts.zoomMul ?? 1, isGazeAlways:",
@@ -222,6 +229,11 @@ const bundle = await build({
       export const shapes = data.shapes.names;
       export const states = { ...data.states };
       export const stateDurations = ${JSON.stringify(stateDurations)};
+      export const materials = ${JSON.stringify(materials)};
+      export const materialOutline = (shape) => {
+        const points = outlines[shape]?.points;
+        return points ? "M" + points.map(([x, y]) => [50 + x * 32, 50 + y * 32].join(" ")).join("L") + "Z" : null;
+      };
       Object.assign(data.states, ${JSON.stringify(previewStates)});
       export const createBot = (host, options = {}) =>
         createGrokBot(host, { ...options, data, outline: outlines[options.shape] });

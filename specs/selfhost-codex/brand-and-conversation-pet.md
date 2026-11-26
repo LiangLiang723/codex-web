@@ -23,6 +23,8 @@ HTML 启动壳立即用当前主题的 Bot 播放轻微摆动。启用 Anatomy �
 - 本机 4310 动作预览直接挂载 [GrokBot Animation Anatomy](https://github.com/ArvinYin1/grokbot-animation-anatomy/tree/debd41625da89b4c4fde43b3b1f0add6dc113c02) 的 SVG 播放器与配套状态和轨道。圆形身体、镂空眼睛、眼球投影、眨眼、鼠标跟随、贝塞尔与形变沿用该版本。站点安装脚本从同一个播放器渲染两色标签图标。
 - 28 段原始轨道同时用于实际会话。53 个状态由轨道、表情、形变与转移规则组合而成。桌宠设置内的动作图鉴按参考项目的五组展示全部 53 个状态，说明每个状态在本应用中的自动、点击或手动试玩入口。卡片展示当前选定造型，选中后在同页播放，提供跳一下和重新播放。状态详情显示参考 ID 与所用原始轨道。减少动态效果启用时，会话中的桌宠保持静态并即时定位，用户仍可明确播放选择的预览。
 - 原版圆形与动作延用固定版 Anatomy 的 SVG 播放器。其它造型使用同版本形状页的轮廓与每种造型的眼宽、眼高、眼距和高度偏移。经球面投影得到的眼睛沿轮廓射线落到身体内，和身体一起挤压、移动，保留参考引擎转到背面、眨眼和无脸形变时的可见性。造型按钮使用正脸。动作卡按参考陈列馆的 96 单位视口连续播放，离屏自动休眠。设置提供颜色预设、自选颜色与跟随主题。品牌小图标与浏览器标签使用主题配色。
+- 「外观 → 材质」有纯色、绒毛和玻璃三档，默认纯色。已有偏好按纯色读取，恢复默认会恢复纯色。会话桌宠、外观大预览与选中动作的大预览使用当前材质。颜色、大小、朝向和减少动态效果继续参与实际绘制。
+- 绒毛和玻璃只在选用时加载对应的 WebGL2 材质模块。材质使用 [Open Bot Avatar](https://github.com/DominikScholz/open-bot-avatar/tree/646793af2c86604539e02faa344e9793ab2aefe8) 的原始着色器，以 Anatomy 真实轮廓约束每帧的像素。身体轮廓、镂空眼睛、形变图形和图层顺序均来自同一个 Anatomy 播放器。快速切换材质、换造型或关闭设置会取消已经过时的加载结果。借用材质前后的 SVG 使用同一动画时钟。加载期间及 WebGL2 不可用时保留纯色绘制。
 - 参考仓库说明提取资料用于学习研究。本机预览通过 `node selfhost/prepare-bot-anatomy.mjs <已检出的参考仓库> <已构建的 Web 目录>` 装入固定版本。自托管构建可通过 `CODEX_WEB_BOT_ANATOMY=1` 选择在 Docker 构建阶段取同一固定版本。服务器无法访问 GitHub 时，构建上下文可提供 `selfhost/.anatomy-reference.tgz`，内含同一已检出的目录内容及其 `.git`。打包脚本校验固定提交及未修改的参考素材。参考素材保留在构建产物中。默认构建继续使用仓库的品牌 SVG。动画模块使用站点自己的静态资源路径。
 
 ## 状态所有者与顺序
@@ -32,6 +34,7 @@ flowchart LR
   Settings[桌宠设置] --> Preference[浏览器的 UI store 与本地偏好]
   Preference --> Pane[主会话窗格]
   Preference --> Preview[设置页 SVG 播放器]
+  Preference --> Material[按需加载选中的材质]
   Runtime[既有 Thread 绑定与状态投影] --> Pane
   Pane --> Anchor[问候 / 右栏 / 输入区或只读提示锚点]
   Anchor --> Pet[同一个桌宠实例定位]
@@ -42,6 +45,9 @@ flowchart LR
   Activity --> Motion[审批与真实活动优先]
   Gesture[当前页面活动与空闲时间] --> Motion
   Motion --> Player[独立 SVG 播放器]
+  Player --> Geometry[当前轮廓、眼睛和图层]
+  Geometry --> Paint[合成材质画面]
+  Material --> Paint
   Activity --> Summary[工作与思考行]
   Preference --> Mood[当前页面的性格与短时心情]
   Gesture --> Mood
@@ -87,5 +93,6 @@ flowchart LR
 | SH-BOT-PERSONALITY | 调整性格，在静置、长时间工作和等待确认之间切换，切回页面及启用减少动态效果 | 保存的性格与开关继续生效。自主动作有随机间隔和不同选择，工作行继续显示当前状态，新活动接管桌宠。隐藏和减少动态效果期间暂停自主反应。 |
 | SH-BOT-FACING | 在草稿、右栏和紧凑布局切换，并在设置中选择三种朝向后刷新 | 朝向默认跟随会话框，手动朝向即时应用并保存，草稿下方的输入区使用原始方向。 |
 | SH-BOT-ALL-ACTIONS | 开启全部自主动作，在持续工作中推进实际桌宠的自主反应计时，然后等待桌宠小睡 | 53 个原生状态在当轮各播放一次，新会话活动可中断自主播放。工作行持续显示当前活动，桌宠醒来后继续自主播放。 |
+| SH-BOT-MATERIAL | 在桌面和手机设置依次选纯色、绒毛、玻璃，再刷新并切回纯色 | 纯色启动无需材质资源。选中材质才加载对应 WebGL2 模块，当前会话和大预览同步。两种材质沿用 Anatomy 的造型、眼睛、53 个状态和形变。禁用 WebGL2 时原画面继续播放。 |
 
 动作选择与触发条件参考 [VS Code Pets](https://github.com/tonybaloney/vscode-pets) 的候选状态、[oneko.js](https://github.com/adryd325/oneko.js) 的随机闲逛与休息，以及 [BongoCat](https://github.com/ayangweb/BongoCat) 的交互反馈。会话状态继续采用 [OpenMausBot](https://github.com/milind-soni/OpenMausBot#how-it-works) 的事件驱动思路。具体图形与片段沿用 Anatomy。

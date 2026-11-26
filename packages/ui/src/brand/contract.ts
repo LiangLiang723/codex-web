@@ -12,10 +12,13 @@ export const BOT_PERSONALITIES = ["curious", "playful", "calm"] as const;
 export type BotPersonality = (typeof BOT_PERSONALITIES)[number];
 export const BOT_FACING_MODES = ["auto", "mirrored", "original"] as const;
 export type BotFacingMode = (typeof BOT_FACING_MODES)[number];
+export const BOT_MATERIALS = ["flat", "fluffy", "glass"] as const;
+export type BotMaterial = (typeof BOT_MATERIALS)[number];
 
 export interface ConversationPetPreferences {
   shape: BotShape;
   color: string | null;
+  material: BotMaterial;
   size: keyof typeof BOT_SIZES;
   followPointer: boolean;
   idleMotion: boolean;
@@ -29,6 +32,7 @@ export interface ConversationPetPreferences {
 export const DEFAULT_PET_PREFERENCES: ConversationPetPreferences = {
   shape: "sphere",
   color: null,
+  material: "flat",
   size: "regular",
   followPointer: true,
   idleMotion: true,
@@ -48,6 +52,7 @@ export function normalizePetPreferences(value: unknown): ConversationPetPreferen
     color: typeof saved.color === "string" && /^#[0-9a-f]{6}$/iu.test(saved.color)
       ? saved.color.toLowerCase()
       : null,
+    material: saved.material === "fluffy" || saved.material === "glass" ? saved.material : "flat",
     size: saved.size && Object.hasOwn(BOT_SIZES, saved.size) ? saved.size : "regular",
     followPointer: saved.followPointer !== false,
     idleMotion: saved.idleMotion !== false,
@@ -91,6 +96,7 @@ export interface BotAvatarProps extends Omit<
   explicitPlayback?: boolean;
   shape?: BotShape;
   color?: string | null;
+  material?: BotMaterial;
   scale?: number;
   renderSize?: number;
   frontFacing?: boolean;

@@ -5,6 +5,7 @@ import { BotStateGallery } from "./BotStateGallery.js";
 import { chineseShapeNames } from "./botStateGuide.js";
 import {
   BOT_FACING_MODES,
+  BOT_MATERIALS,
   BOT_PERSONALITIES,
   BOT_SIZES,
   DEFAULT_PET_PREFERENCES,
@@ -70,6 +71,7 @@ export function BotStudio({ preferences, onChange, locale, format }: BotStudioPr
                 mirrored={preferences.facing === "mirrored"}
                 shape={preferences.shape}
                 color={preferences.color}
+                material={preferences.material}
                 renderSize={144}
                 scale={BOT_SIZES[preferences.size]}
                 pokeCount={poke}
@@ -108,6 +110,25 @@ export function BotStudio({ preferences, onChange, locale, format }: BotStudioPr
                 })}
               </div>
             </fieldset>
+            {profile?.materials ? (
+              <fieldset>
+                <legend className="mb-2 text-ui-sm font-medium">{format("material")}</legend>
+                <div className="flex flex-wrap gap-2">
+                  {BOT_MATERIALS.map((material) => (
+                    <button
+                      key={material}
+                      type="button"
+                      data-pet-material-option={material}
+                      aria-pressed={material === preferences.material}
+                      onClick={() => onChange({ material })}
+                      className={`${option} px-3 py-1.5`}
+                    >
+                      {format(`material.${material}`)}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+            ) : null}
             <fieldset>
               <legend className="mb-2 text-ui-sm font-medium">{format("color")}</legend>
               <div className="flex flex-wrap items-center gap-2">
