@@ -76,6 +76,8 @@ try {
           delta: "中",
         };
         let activations = 0;
+        let latestReads = 0;
+        let latestPage;
         let nextSnapshot = snapshot("前", "inProgress", 10);
         const gateway = {
           request: async (url, schema) =>
@@ -89,8 +91,12 @@ try {
           },
           onTerminal: () => () => {},
           async send() {},
-          async call(method) {
+          async call(method, input) {
             if (method === "thread.goal.get") return { goal: null };
+            if (method === "thread.timeline.load" && input.cursor === null) {
+              latestReads += 1;
+              return structuredClone(latestPage);
+            }
             if (method === "thread.timeline.load")
               return {
                 data: [
@@ -179,6 +185,60 @@ try {
           nextSnapshot.history.thread.turns[0].items[0] = { ...prompt, id: "real-native-item" };
           emit({ type: "thread.events.gap", hostId: 1, threadId, eventEpoch: "second" });
           const recovered = await waitFor((state) => reply(state)?.text === "前中中结束");
+          nextSnapshot = {
+            ...snapshot("只读开始", "inProgress", 0, "readonly"),
+            readOnly: true,
+            readOnlyReason: "activeWriter",
+          };
+          emit({ type: "thread.events.gap", hostId: 1, threadId, eventEpoch: "readonly" });
+          const observed = await waitFor((state) => reply(state)?.text === "只读开始");
+          const activationCount = activations;
+          const notifyHistory = (scope = {}) =>
+            emit({ type: "thread.history.changed", hostId: 1, threadId, eventEpoch: "readonly", ...scope });
+          await agent.conversationRowsRangeV4({ ...target, limit: 20 });
+          latestPage = {
+            data: [
+              { type: "item", turnId, position: 5, item: { ...assistant, text: "只读更新" } },
+              {
+                type: "item",
+                turnId,
+                position: 6,
+                item: {
+                  id: "native-reasoning",
+                  type: "reasoning",
+                  summary: ["Native history update"],
+                  startedAtMs: 2000,
+                  completedAtMs: 6800,
+                },
+              },
+              { type: "turnCompleted", turnId, position: 7, status: "completed" },
+            ],
+            nextCursor: "recent-page-older",
+          };
+          notifyHistory({ eventEpoch: "second" });
+          notifyHistory({ hostId: 2 });
+          notifyHistory({ threadId: "another-thread" });
+          // 让无关通知经过同一个订阅调度窗口，再核对确实没有触发读请求。
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          const isolated = latestReads === 0;
+          notifyHistory();
+          notifyHistory();
+          const updated = await waitFor((state) => reply(state)?.text === "只读更新");
+          const nativeReasoning = updated.snapshot.rows.window.find((row) => row.entityId === "native-reasoning");
+          const gapTurnId = "later-turn";
+          latestPage = {
+            data: [
+              { type: "turnStarted", turnId: gapTurnId, position: 300, startedAt: 200 },
+              { type: "item", turnId: gapTurnId, position: 301, item: {
+                id: "new-latest-item",
+                type: "agentMessage",
+                text: "最新页",
+              } },
+            ],
+            nextCursor: "native-gap-cursor",
+          };
+          notifyHistory();
+          const rebased = await waitFor((state) => reply(state)?.text === "最新页");
           return {
             activationsBeforeSubscribe,
             stableUser:
@@ -197,6 +257,20 @@ try {
             subscriptionPreserved:
               ack.subscriptionId === completed.subscriptionId &&
               recovered.subscriptionId === completed.subscriptionId,
+            readOnlyRefresh: {
+              isolated,
+              latestReads,
+              noWriterRetry: activations === activationCount,
+              oldPagePreserved: updated.snapshot.rows.window.some((row) => row.entityId === "earlier-item"),
+              stableRow: reply(updated).rowId === reply(observed).rowId,
+              phase: updated.snapshot.control.phase,
+              duration: nativeReasoning?.durationMs,
+              summary: nativeReasoning?.summary,
+              complete: nativeReasoning?.state === "complete",
+              gapReanchored:
+                rebased.snapshot.rows.window.every((row) => row.turnId === gapTurnId) &&
+                rebased.snapshot.rows.hasMoreBefore,
+            },
           };
         } finally {
           layer.dispose();
@@ -217,9 +291,21 @@ try {
       recoverableFailure: true,
       preservedAfterFailure: "前中中",
       subscriptionPreserved: true,
+      readOnlyRefresh: {
+        isolated: true,
+        latestReads: 2,
+        noWriterRetry: true,
+        oldPagePreserved: true,
+        stableRow: true,
+        phase: "completedSuccess",
+        duration: 4800,
+        summary: "Native history update",
+        complete: true,
+        gapReanchored: true,
+      },
     });
     process.stdout.write(
-      "PASS first activation, ordered replay, terminal paging and scoped recovery\n",
+      "PASS ordered replay, terminal paging, scoped recovery and read-only native activity\n",
     );
   } finally {
     await browser.close();

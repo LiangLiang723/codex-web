@@ -25,7 +25,7 @@ import {
 } from "./nativeInteractions.js";
 import { timelinePageToTurns, mergeThreadTurns } from "virtual:gateway-terminal-stream";
 import { turnFileHeader } from "./turnFileChanges.js";
-import { array, num, rec, str } from "./nativeValues.js";
+import { array, nativeItemDurationMs, num, rec, str } from "./nativeValues.js";
 import { projectNativeSubagents } from "./nativeSubagents.js";
 import { nativeUserImages } from "./attachments.js";
 import { restoreNativeTurnText } from "./nativeTurnInput.js";
@@ -155,6 +155,41 @@ function nativeHistoryRowKey(turnId: string, entityId: string, sourceCommandId =
     sourceCommandId ? [turnId, "input", sourceCommandId] : [turnId, "item", entityId],
   );
 }
+export function refreshNativeHistoryPage(info: Message, page: Message, threadId: string) {
+  const turns = timelinePageToTurns(page);
+  if (turns.length === 0) return false;
+  const previous = new Map(
+    array(rec(rec(info.history).thread).turns).map((turn) => [turn.id, turn]),
+  );
+  const cursor = str(page.nextCursor);
+  // 有续页时需要确认新旧窗口连续。同一轮可能长过整页，仅比较轮次 ID 会漏掉中间条目。
+  const overlaps = turns.some((turn) => {
+    const older = previous.get(turn.id);
+    if (!older) return false;
+    const olderItems = array(older.items);
+    const ids = new Set(olderItems.map((item) => item.id));
+    return olderItems.length === 0 || array(turn.items).some((item) => ids.has(item.id));
+  });
+  const reanchored = Boolean(cursor && previous.size && !overlaps);
+  const incoming = turns.map((turn) => {
+    const older = previous.get(turn.id);
+    return {
+      ...turn,
+      status: turn.status ?? older?.status ?? "inProgress",
+      startedAt: turn.startedAt ?? older?.startedAt,
+    };
+  });
+  info.history = mergeThreadTurns(
+    reanchored ? null : info.history,
+    reanchored ? null : info.thread,
+    threadId,
+    incoming,
+    "append",
+  );
+  if (reanchored || previous.size === 0) info.oldestTimelineCursor = cursor;
+  return reanchored;
+}
+
 export function prependNativeHistoryPage(
   info: Message,
   page: Message,
@@ -334,6 +369,7 @@ export function projectThread(
   revision: number,
   registry: RemoteModel[],
   rowIds: Map<string, number>,
+  rowIdStart = nativeHistoryRowStart,
 ): ConversationSnapshot {
   const history = rec(activation.history),
     stored = rec(history.thread),
@@ -415,7 +451,7 @@ export function projectThread(
     let rowId = rowIds.get(key) ?? rowIds.get(itemKey);
     if (rowId === undefined) {
       // 游标之后可能还有旧页，给更早的行保留编号空间且不移动已发布的行。
-      rowId = nativeHistoryRowStart + rowIds.size;
+      rowId = rowIdStart + rowIds.size;
     }
     rowIds.set(key, rowId);
     if (key !== itemKey) rowIds.set(itemKey, rowId);
@@ -503,11 +539,19 @@ export function projectThread(
         hasPlan = true;
       } else if (item.type === "reasoning") {
         // Codex 历史可能只保留完成时间，恢复运行中的轮次时仍要结束该条的思考提示。
+        const text = plain(item.summary);
+        const summary = Array.isArray(item.summary)
+          ? (item.summary.map((part) => plain([part])).findLast((part) => part.trim()) ?? "")
+          : text;
+        const durationMs = nativeItemDurationMs(item);
         rows.push({
           ...fields,
           kind: "reasoning",
-          text: plain(item.summary) || plain(item.content),
+          // 原生可读摘要走独立的流式通道，避免把 reasoningText 当作状态标题。
+          text,
+          summary,
           state: stream && item.completedAtMs == null ? "streaming" : "complete",
+          ...(durationMs === undefined ? {} : { durationMs }),
         });
       } else {
         const anchor = JSON.stringify([turnId, itemId]);

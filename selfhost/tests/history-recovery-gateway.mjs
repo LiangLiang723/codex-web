@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { build } from "esbuild";
 
 const repo = resolve(import.meta.dirname, "../..");
@@ -57,6 +58,7 @@ try {
         export { threadRuntimeEvents } from './server/utils/gateway/runtime/thread-runtime-events';
         export { threadSnapshotStore } from './server/utils/gateway/state/thread-snapshots';
         export { appServerThreadSchema } from './shared/runtime/app-server';
+        export { realtimeServerMessageSchema } from './shared/runtime/realtime/server-message-schema';
         export { timelinePageToTurns } from './shared/thread-history/app-server-timeline';
       `,
     },
@@ -140,6 +142,9 @@ try {
     durationMs: 10000,
   };
   const calls = [];
+  let remoteMetadata = async () => {
+    throw Error("fixture file metadata unavailable");
+  };
   let remoteTimeline = async () => {
     throw Error("fixture timeline unsupported for legacy");
   };
@@ -173,6 +178,8 @@ try {
             });
           case "thread/timeline/list":
             return parse(await remoteTimeline());
+          case "fs/getMetadata":
+            return parse(await remoteMetadata(params.path));
           default:
             throw Error(`Unexpected Codex request ${method}`);
         }
@@ -352,6 +359,72 @@ try {
   assert.equal(released, 2);
   gateway.unsubscribeThread(peer, { type: "thread.unsubscribe", hostId: host.id, threadId });
   process.stdout.write("PASS aligned cold and warm cursors and proactive SSH epoch gap\n");
+
+  const watchPath = "/fixture/rollout.jsonl";
+  threadFixture.path = watchPath;
+  threadFixture.historyMode = "paginated";
+  subscribed = false;
+  let writerAttempts = 0;
+  controller.resumeForHistory = async () => {
+    writerAttempts += 1;
+    throw new gateway.CodexRpcError("thread/resume", -32600, `thread ${threadId} already has an active writer`);
+  };
+  let output = "原生写入中";
+  remoteTimeline = async () => ({
+    data: [{
+      type: "item", turnId, position: 2, item: { ...assistant, text: output },
+    }],
+    nextCursor: null,
+    activeRealtimeSessionAtPageStart: null,
+  });
+  let modifiedAtMs = 1;
+  let metadataReads = 0;
+  let pendingRead;
+  const metadata = { isDirectory: false, isFile: true, isSymlink: false, createdAtMs: 1 };
+  remoteMetadata = async (path) => {
+    assert.equal(path, watchPath);
+    metadataReads += 1;
+    return pendingRead?.promise ?? { ...metadata, modifiedAtMs };
+  };
+  globalThis.historyRecoveryFixture.broker.getHostClient = registry.getHostClient;
+  const changes = () => peerMessages.filter((message) => message.type === "thread.history.changed");
+  const waitFor = async (condition) => {
+    const deadline = Date.now() + 8000;
+    while (!condition()) {
+      if (Date.now() >= deadline) throw Error("Timed out awaiting read-only metadata check");
+      await delay(20);
+    }
+  };
+  await activate();
+  assert.equal(peerMessages.findLast((message) => message.type === "thread.snapshot").readOnlyReason, "activeWriter");
+  assert.equal(writerAttempts, 1);
+  await waitFor(() => changes().length === 1);
+  const changed = changes()[0];
+  assert.deepEqual(changed, {
+    type: "thread.history.changed",
+    hostId: host.id,
+    threadId,
+    eventEpoch: gateway.gatewayEventStore.epoch(host.id),
+  });
+  assert.deepEqual(gateway.realtimeServerMessageSchema.parse(changed), changed);
+  await waitFor(() => metadataReads >= 2);
+  assert.equal(changes().length, 1, "An unchanged version must not invalidate the timeline");
+  output = "原生新条目";
+  modifiedAtMs += 1;
+  await waitFor(() => changes().length === 2);
+  const latestPage = await history.listTimelinePage(host, threadId, null, 100);
+  assert.equal(latestPage.data[0].item.text, output, "Newest history must bypass the activation cache");
+  assert.equal(writerAttempts, 1);
+  pendingRead = Promise.withResolvers();
+  await waitFor(() => metadataReads >= 4);
+  const count = peerMessages.length;
+  gateway.unsubscribeThread(peer, { type: "thread.unsubscribe", hostId: host.id, threadId });
+  pendingRead.resolve({ ...metadata, modifiedAtMs: modifiedAtMs + 1 });
+  await pendingRead.promise;
+  await delay(20);
+  assert.equal(peerMessages.length, count, "A released observation must not notify the former view");
+  assert.equal(gateway.stateFor(peer).threadUnsubscribers.size, 0);
+  process.stdout.write("PASS read-only file version changes, fresh pages and lease cleanup\n");
 } finally {
   delete globalThis.historyRecoveryFixture;
   await rm(work, { recursive: true, force: true });

@@ -17,6 +17,18 @@ import {
   toolCallResumeWorkflowRunDisplaySchema,
 } from "./workflow-observation-display.js";
 
+const nativeCommandActionSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("read"), name: z.string().min(1), path: z.string().optional() }),
+  z.object({ kind: z.literal("search"), query: z.string().optional(), path: z.string().optional() }),
+  z.object({ kind: z.literal("listFiles"), path: z.string().optional() }),
+]);
+export type NativeCommandAction = z.infer<typeof nativeCommandActionSchema>;
+
+export const nativeCommandActivitySchema = z.object({
+  actions: z.array(nativeCommandActionSchema),
+  durationMs: z.number().finite().nonnegative().optional(),
+});
+
 // toolCall 终态 output 的结构化展示模型（port 自 feat；CUA 工具靠 kind:"cua" 分支把
 // errorCode/suggestedAction/media(screenshot) 等结构化内容带到 renderer）。consume-main 之前
 // 缺这个 union + toolOutputSchema.display 字段——协议层 zod 校验会把 agent 下发的 display 整个

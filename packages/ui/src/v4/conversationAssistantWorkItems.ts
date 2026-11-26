@@ -5,6 +5,7 @@ import { isZCodeCuaToolName } from "@/lib/cuaPermissionAction.js";
 import { joinFilePath } from "@/lib/path.js";
 import { readRawToolCallFileSummaries } from "@/ToolCallBlocks/fileSummaries.js";
 import { resolveToolCallIdentity } from "@/lib/toolIdentity.js";
+import { formatNativeReasoningTitle } from "@/components/ai-elements/reasoning.js";
 import type { ConversationRow, SubagentRow, ToolCallRow } from "@zcode/shared/zcode-protocol-v4";
 import { isShellToolCallAwaitingCommand } from "@/lib/exploreToolCall.js";
 import {
@@ -322,7 +323,13 @@ export function getAssistantSummaryIconItem(items: readonly ConversationAssistan
       selectedPriority = priority;
     }
   }
-  return selected;
+  // 展开统计复用思考行图标，避免思考组展开时切换回旧图标。
+  return selected ?? items.findLast(({ row }) => row.kind === "reasoning" && row.summary !== undefined);
+}
+
+export function getNativeAssistantSummaryTitle(items: readonly ConversationAssistantWorkRenderItem[]) {
+  const item = items.findLast(({ row }) => row.kind === "reasoning" && row.summary?.trim());
+  return item?.row.kind === "reasoning" ? formatNativeReasoningTitle(item.row.summary ?? "") : "";
 }
 
 /** 仅 Change 的计数可展示文件；思考不计数，混合工具保留原统计。 */

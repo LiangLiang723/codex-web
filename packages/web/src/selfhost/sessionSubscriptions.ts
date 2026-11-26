@@ -16,6 +16,7 @@ import {
   prependNativeHistoryPage,
   projectThread,
   rec,
+  refreshNativeHistoryPage,
   str,
   threadName,
 } from "./threadProjection.js";
@@ -35,6 +36,7 @@ type Subscription = {
   rowIds: Map<string, number>;
   activation?: Message;
   needsActivation: boolean;
+  readOnlyHistoryEpoch?: string;
   recoveryError?: { message: string; at: number };
   lastId?: number;
   epochId?: string;
@@ -43,6 +45,7 @@ type Subscription = {
   generation: number;
   older?: Promise<void>;
   olderCursors: Set<string>;
+  rowIdStart: number;
   oldestRowId: number;
   controlsRequest?: object;
 };
@@ -82,6 +85,18 @@ export class SessionSubscriptions {
           }
           this.applyEvent(sub, event);
         }
+      } else if (msg.type === "thread.history.changed" && msg.hostId === this.hostId) {
+        const epoch = str(msg.eventEpoch);
+        if (!epoch) return;
+        for (const sub of this.subscriptions.values()) {
+          if (sub.kind !== "conversation" || sub.session !== msg.threadId) continue;
+          if (
+            !sub.needsActivation &&
+            (sub.epochId !== epoch || sub.activation?.readOnlyReason !== "activeWriter")
+          ) continue;
+          sub.readOnlyHistoryEpoch = epoch;
+          this.defer(sub);
+        }
       } else if (
         msg.type === "ready" ||
         msg.type === "thread.events.gap" ||
@@ -119,6 +134,7 @@ export class SessionSubscriptions {
     sub.generation += 1;
     if (sub.publishing) sub.dirty = true;
     sub.queued = [];
+    sub.readOnlyHistoryEpoch = undefined;
     sub.needsActivation = true;
   }
   private applyEvent(sub: Subscription, envelope: Message) {
@@ -222,6 +238,17 @@ export class SessionSubscriptions {
       }
       const info = sub.activation;
       if (!info) return;
+      const historyEpoch = sub.readOnlyHistoryEpoch;
+      sub.readOnlyHistoryEpoch = undefined;
+      if (
+        historyEpoch &&
+        historyEpoch === sub.epochId &&
+        !sub.needsActivation &&
+        info.readOnlyReason === "activeWriter"
+      ) {
+        await this.refreshReadOnlyHistory(sub, info, id);
+        if (sub.needsActivation || !this.subscriptions.has(sub.subscriptionId)) return;
+      }
       info.followupMode = this.followupMode;
       const turns = array(rec(rec(info.history).thread).turns);
       this.refreshFileSummaries(sub, info, turns).catch(() => {});
@@ -237,6 +264,7 @@ export class SessionSubscriptions {
         sub.ordinal + 1,
         this.models,
         sub.rowIds,
+        sub.rowIdStart,
       );
       const visible = projection.rows.window.slice(-100);
       projection.rows.window = visible;
@@ -348,6 +376,37 @@ export class SessionSubscriptions {
       })
       .catch(() => {});
   }
+  private async refreshReadOnlyHistory(sub: Subscription, info: Message, threadId: string) {
+    const generation = sub.generation;
+    const isCurrent = () =>
+      sub.activation === info &&
+      sub.generation === generation &&
+      this.subscriptions.has(sub.subscriptionId);
+    try {
+      const page = await this.gateway.call("thread.timeline.load", {
+        hostId: this.hostId,
+        threadId,
+        cursor: null,
+        limit: 100,
+      });
+      if (!isCurrent()) return;
+      if (refreshNativeHistoryPage(info, page, threadId)) {
+        // 断开的原生页不能接在旧窗口后。保留订阅，重建新窗口的 ID 与向前翻页边界。
+        sub.rowIdStart += sub.rowIds.size + 1;
+        sub.oldestRowId = sub.rowIdStart;
+        sub.rowIds.clear();
+        sub.older = undefined;
+        sub.olderCursors.clear();
+      }
+      sub.recoveryError = undefined;
+    } catch (error: unknown) {
+      if (isCurrent())
+        sub.recoveryError = {
+          message: error instanceof Error ? error.message : String(error),
+          at: Date.now(),
+        };
+    }
+  }
   private loadOlder(sub: Subscription, info: Message, threadId: string) {
     if (sub.older) return sub.older;
     const cursor = str(info.oldestTimelineCursor);
@@ -361,6 +420,7 @@ export class SessionSubscriptions {
       .then(async (page) => {
         if (
           sub.activation !== info ||
+          sub.older !== pending ||
           sub.needsActivation ||
           !this.subscriptions.has(sub.subscriptionId)
         )
@@ -446,6 +506,7 @@ export class SessionSubscriptions {
         seq,
         this.models,
         sub?.rowIds ?? new Map(),
+        sub?.rowIdStart,
       );
       const versions = { atSeq: seq, atRevision: seq, atLogEpoch: epoch };
       if (method === "conversationRowsRangeV4") {
@@ -453,15 +514,17 @@ export class SessionSubscriptions {
           (r) => typeof p.beforeRowId !== "number" || r.rowId < p.beforeRowId,
         );
         const limit = Math.max(1, num(p.limit, 100));
+        const rowIdStart = sub?.rowIdStart;
         while (sub && rows.length < limit && info.oldestTimelineCursor) {
           await this.loadOlder(sub, info, session);
           if (
             !this.subscriptions.has(sub.subscriptionId) ||
             sub.activation !== info ||
+            sub.rowIdStart !== rowIdStart ||
             sub.needsActivation
           )
             throw Error("Codex 历史快照已更新");
-          snapshot = projectThread(info, session, epoch, seq, this.models, sub.rowIds);
+          snapshot = projectThread(info, session, epoch, seq, this.models, sub.rowIds, sub.rowIdStart);
           rows = snapshot.rows.window.filter(
             (r) => typeof p.beforeRowId !== "number" || r.rowId < p.beforeRowId,
           );
@@ -513,6 +576,7 @@ export class SessionSubscriptions {
         generation: 0,
         olderCursors: new Set(),
         oldestRowId: nativeHistoryRowStart,
+        rowIdStart: nativeHistoryRowStart,
       };
       this.subscriptions.set(sub.subscriptionId, sub);
       if (kind === "conversation") {

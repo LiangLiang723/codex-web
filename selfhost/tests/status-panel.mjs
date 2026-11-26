@@ -738,6 +738,7 @@ async function verifyMobile(page, origin, screenshots) {
   await sheet.waitFor({ state: "hidden" });
   await page.waitForFunction(() => document.activeElement?.hasAttribute("data-session-status-toggle"));
   assert.equal(await timelineScrollTop(page), reading);
+  await verifyBotStatus(page, sessionPane(page, threadId).locator("[data-codex-pet]"), fixture.emit);
   await editor.click();
   await editor.pressSequentially("draft");
   assert((await editor.innerText()).includes("draft"));

@@ -1,0 +1,227 @@
+diff --git a/server/utils/gateway/realtime/handlers/thread-events.ts b/server/utils/gateway/realtime/handlers/thread-events.ts
+index 5a95fae..b7d8509 100644
+--- a/server/utils/gateway/realtime/handlers/thread-events.ts
++++ b/server/utils/gateway/realtime/handlers/thread-events.ts
+@@ -1,9 +1,11 @@
+ import type { GatewayEvent, HostRecord, RealtimeClientMessage } from "~~/shared/types";
++import { parseFsFileVersion } from "~~/shared/runtime/app-server/file-system";
+ import { requireRecord } from "../../http/validation/common";
+ import { threadOpenSchema, threadStartSchema } from "../../http/validation/threads";
+ import { buildThreadStartParams } from "../../protocol/thread-payload";
+ import { threadBroker } from "../../runtime/broker";
+ import type { ThreadSubscriptionLease } from "../../runtime/controller-registry";
++import { gatewayLog } from "../../logging";
+ import { threadRuntimeEvents } from "../../runtime/thread-runtime-events";
+ import { hostSessionEvents } from "../../runtime/host-session-events";
+ import { hostLifecycleBus } from "../../state/host-events";
+@@ -20,6 +22,8 @@ import {
+   type RealtimePeer,
+ } from "../peer-state";
+ 
++const HISTORY_FILE_CHECK_MS = 1500;
++
+ export async function subscribeThread(
+   peer: RealtimePeer,
+   message: Extract<RealtimeClientMessage, { type: "thread.subscribe" }>,
+@@ -110,7 +114,9 @@ export async function activateThread(
+       });
+       leaseTransferred = true;
+     } else {
+-      subscribeThreadEvents(peer, host, input.threadId, lastEventId, eventEpoch, undefined, true);
++      subscribeThreadEvents(peer, host, input.threadId, lastEventId, eventEpoch, undefined, {
++        historyPath: result.readOnlyReason === "activeWriter" ? result.thread.path : null,
++      });
+     }
+     if (
+       result.readOnly !== true &&
+@@ -266,7 +272,7 @@ function subscribeThreadEvents(
+     lease: ThreadSubscriptionLease;
+     controller: Awaited<ThreadSubscriptionLease["ready"]>;
+   },
+-  readOnly = false,
++  readOnly?: { historyPath: string | null },
+ ) {
+   const hostId = host.id;
+   const eventEpoch = gatewayEventStore.epoch(hostId);
+@@ -361,16 +367,54 @@ function subscribeThreadEvents(
+           sendOnce(event);
+         }),
+       );
++  let historyCheck: ReturnType<typeof setTimeout> | undefined;
+   releaseSubscription = () => {
+     stopClose();
+     stopConnect();
+     unsubscribe?.();
+     upstreamLease?.release();
++    clearTimeout(historyCheck);
+     if (state.threadUnsubscribers.get(key) === releaseSubscription) {
+       state.threadUnsubscribers.delete(key);
+     }
+   };
+   state.threadUnsubscribers.set(key, releaseSubscription);
++  const historyPath = readOnly?.historyPath;
++  if (historyPath) {
++    const isCurrent = () =>
++      !interrupted && !invalidated && state.threadUnsubscribers.get(key) === releaseSubscription;
++    let version: string | undefined;
++    let failed = false;
++    // 实测原生写入者保持文件打开时 fs/watch 会漏报追加。用远端文件版本判断
++    // 是否补读，完成上一条元数据查询后再安排下一条。
++    const checkHistory = async () => {
++      if (!isCurrent()) return;
++      const current = gatewayEventStore.epoch(hostId);
++      if (current !== eventEpoch) {
++        invalidate(current);
++        return;
++      }
++      try {
++        const client = await threadBroker.getHostClient(host);
++        if (!isCurrent()) return;
++        const file = await client.request("fs/getMetadata", { path: historyPath }, 10_000, parseFsFileVersion);
++        if (!isCurrent() || !file.isFile) return;
++        failed = false;
++        const next = `${file.createdAtMs}:${file.modifiedAtMs}`;
++        if (next === version) return;
++        version = next;
++        sendRealtimePeerMessage(peer, { type: "thread.history.changed", hostId, threadId, eventEpoch });
++      } catch {
++        if (isCurrent() && !failed) {
++          failed = true;
++          gatewayLog("warn", "gateway", "Read-only thread history metadata unavailable", { hostId, threadId });
++        }
++      } finally {
++        if (isCurrent()) historyCheck = setTimeout(checkHistory, HISTORY_FILE_CHECK_MS);
++      }
++    };
++    void runPeerScoped(peer, checkHistory);
++  }
+   if (upstreamLease === undefined) return;
+   void runPeerScoped(peer, () =>
+     (activation === undefined
+diff --git a/server/utils/gateway/runtime/thread-history-reader.ts b/server/utils/gateway/runtime/thread-history-reader.ts
+index ea4ac39..095ae32 100644
+--- a/server/utils/gateway/runtime/thread-history-reader.ts
++++ b/server/utils/gateway/runtime/thread-history-reader.ts
+@@ -25,10 +25,11 @@ export class ThreadHistoryReader {
+     host: HostRecord,
+     thread: AppServerThread,
+     limit = INITIAL_TIMELINE_PAGE_LIMIT,
++    fresh = false,
+   ) {
+     return thread.historyMode === "legacy"
+-      ? this.fetchLegacyPage(host, thread.id, null, limit)
+-      : this.fetchTimelinePage(host, thread.id, null, limit);
++      ? this.fetchLegacyPage(host, thread.id, null, limit, fresh)
++      : this.fetchTimelinePage(host, thread.id, null, limit, fresh);
+   }
+ 
+   async listTimelinePage(
+@@ -54,7 +55,8 @@ export class ThreadHistoryReader {
+             parseThreadReadResult,
+           )
+         ).thread;
+-      return this.loadInitialTimelinePage(host, thread, limit ?? DEFAULT_TIMELINE_PAGE_LIMIT);
++      // 只读监听来自另一进程，变更不会进入当前写入控制器的时间线缓存。
++      return this.loadInitialTimelinePage(host, thread, limit ?? DEFAULT_TIMELINE_PAGE_LIMIT, true);
+     }
+     return this.fetchTimelinePage(host, threadId, cursor, limit);
+   }
+@@ -76,9 +78,10 @@ export class ThreadHistoryReader {
+     threadId: string,
+     cursor: string | null,
+     limit = DEFAULT_TIMELINE_PAGE_LIMIT,
++    fresh = false,
+   ) {
+     const client = await this.registry.getHostClient(host);
+-    const cached = threadTimelinePageStore.get(host.id, threadId, cursor, limit);
++    const cached = fresh ? null : threadTimelinePageStore.get(host.id, threadId, cursor, limit);
+     if (cached !== null) return cached;
+     const page = await client.request(
+       "thread/timeline/list",
+@@ -86,7 +89,7 @@ export class ThreadHistoryReader {
+       120_000,
+       parseThreadTimelinePage,
+     );
+-    threadTimelinePageStore.set(host.id, threadId, cursor, limit, page);
++    if (!fresh) threadTimelinePageStore.set(host.id, threadId, cursor, limit, page);
+     return page;
+   }
+ 
+@@ -95,10 +98,11 @@ export class ThreadHistoryReader {
+     threadId: string,
+     cursor: string | null,
+     limit = DEFAULT_TIMELINE_PAGE_LIMIT,
++    fresh = false,
+   ) {
+     const pageLimit = Math.min(limit, SERVER_TURN_CACHE_LIMIT);
+     const client = await this.registry.getHostClient(host);
+-    const cached = threadTimelinePageStore.get(host.id, threadId, cursor, pageLimit);
++    const cached = fresh ? null : threadTimelinePageStore.get(host.id, threadId, cursor, pageLimit);
+     if (cached !== null) return cached;
+     const turns = await client.request(
+       "thread/turns/list",
+@@ -113,7 +117,7 @@ export class ThreadHistoryReader {
+       parseThreadTurnsPage,
+     );
+     const page = legacyTimelinePage(turns.data, turns.nextCursor);
+-    threadTimelinePageStore.set(host.id, threadId, cursor, pageLimit, page);
++    if (!fresh) threadTimelinePageStore.set(host.id, threadId, cursor, pageLimit, page);
+     return page;
+   }
+ }
+diff --git a/shared/runtime/app-server/file-system.ts b/shared/runtime/app-server/file-system.ts
+index efef022..1c008e4 100644
+--- a/shared/runtime/app-server/file-system.ts
++++ b/shared/runtime/app-server/file-system.ts
+@@ -32,6 +32,16 @@ export function parseFsWatchResponse(value: unknown) {
+   return fsWatchResponseSchema.parse(value);
+ }
+ 
++const fsFileVersionSchema = z.object({
++  isFile: z.boolean(),
++  createdAtMs: z.number().int().nonnegative(),
++  modifiedAtMs: z.number().int().nonnegative(),
++});
++
++export function parseFsFileVersion(value: unknown) {
++  return fsFileVersionSchema.parse(value);
++}
++
+ export function fsChangedNotificationFromUnknown(value: unknown) {
+   const result = fsChangedNotificationSchema.safeParse(value);
+   return result.success ? result.data : null;
+diff --git a/shared/runtime/realtime/server-message-schema.ts b/shared/runtime/realtime/server-message-schema.ts
+index 11713a9..951713c 100644
+--- a/shared/runtime/realtime/server-message-schema.ts
++++ b/shared/runtime/realtime/server-message-schema.ts
+@@ -646,6 +646,13 @@ export const realtimeServerMessageSchema: z.ZodType<RealtimeServerMessage> = z.d
+         eventEpoch: nonEmptyString,
+       })
+       .strict(),
++    z
++      .object({
++        type: z.literal("thread.history.changed"),
++        ...threadScopeFields,
++        eventEpoch: nonEmptyString,
++      })
++      .strict(),
+     z
+       .object({
+         type: z.literal("thread.snapshot"),
+diff --git a/shared/types/realtime.ts b/shared/types/realtime.ts
+index 408c557..2c14d27 100644
+--- a/shared/types/realtime.ts
++++ b/shared/types/realtime.ts
+@@ -507,6 +507,12 @@ export type RealtimeServerMessage =
+       lastEventId: number;
+       eventEpoch: string;
+     }
++  | {
++      type: "thread.history.changed";
++      hostId: number;
++      threadId: string;
++      eventEpoch: string;
++    }
+   | ({
+       type: "thread.snapshot";
+       requestId: string;

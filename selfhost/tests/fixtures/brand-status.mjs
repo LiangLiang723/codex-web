@@ -105,12 +105,24 @@ export async function verifyBotStatus(page, pet, emit) {
     id: "bot-activity-reasoning",
     turnId: activityTurnId,
     type: "reasoning",
-    summary: ["正在核对当前分支"],
+    summary: [],
+    startedAtMs: 1000,
     status: "inProgress",
   };
   emit({ type: "timeline.item.upsert", item: reasoningItem });
+  const nativeCaption = "Checking App Server watch APIs";
+  emit({
+    type: "timeline.item.delta",
+    turnId: activityTurnId,
+    itemId: reasoningItem.id,
+    channel: "reasoningSummary",
+    summaryIndex: 0,
+    delta: "**" + nativeCaption + "**",
+  });
   const thinking = page.locator('[data-summary-leading-icon][data-codex-bot="thinking"]');
   await thinking.waitFor();
+  await page.getByText(nativeCaption, { exact: true }).waitFor();
+  if (anatomyEnabled) await verifyAnatomyMotion(thinking);
   if (styled) await verifyPaintedBots(thinking, "fluffy", 1, "#c74ef3");
   const command = {
     id: "bot-activity-command",
@@ -118,6 +130,10 @@ export async function verifyBotStatus(page, pet, emit) {
     type: "commandExecution",
     command: "printf fixture",
     status: "inProgress",
+    startedAtMs: 6000,
+    commandActions: ["status-panel.mjs", "status-panel.mjs", "brand-status.mjs", "BotActivity.tsx"].map(
+      (name) => ({ type: "read", name, path: "/fixture/" + name, command: "cat " + name }),
+    ),
   };
   const computer = {
     id: "bot-activity-computer",
@@ -131,8 +147,48 @@ export async function verifyBotStatus(page, pet, emit) {
     await pet.locator('[data-bot-engine="anatomy"][data-bot-motion="thinking"]').waitFor();
     assert.equal(await pet.and(page.locator('[data-pet-reaction="spontaneous"]')).count(), 0);
     await page.locator('[data-summary-leading-icon][data-bot-motion="curious"]').waitFor();
-    emit({ type: "timeline.item.upsert", item: command });
+  }
+  const completedReasoning = {
+    ...reasoningItem,
+    summary: ["**" + nativeCaption + "**"],
+    completedAtMs: 5800,
+    status: "completed",
+  };
+  emit({ type: "timeline.item.upsert", item: completedReasoning });
+  await page.getByText(/持续了.*5.*秒/).waitFor();
+  await page.getByText("正在思考", { exact: true }).waitFor({ state: "hidden" });
+  emit({ type: "timeline.item.upsert", item: {
+    ...completedReasoning,
+    id: "bot-activity-reasoning-next",
+    summary: ["Checking gallery card selection"],
+  } });
+  const group = page.locator("[data-consecutive-summary-group]").filter({
+    hasText: "Checking gallery card selection",
+  });
+  const groupTrigger = group.locator("[data-summary-group-trigger]");
+  await groupTrigger.locator('[data-codex-bot="thinking"]').waitFor();
+  await groupTrigger.click();
+  await groupTrigger.locator('[data-codex-bot="thinking"]').waitFor();
+  assert.equal(await groupTrigger.locator(".lucide-brain").count(), 0);
+  emit({ type: "timeline.item.upsert", item: command });
+  const reads = group.locator("[data-native-command-action]");
+  await reads.last().waitFor();
+  assert.deepEqual(await reads.allTextContents(), [
+    "正在读取 status-panel.mjs",
+    "正在读取 status-panel.mjs",
+    "正在读取 brand-status.mjs",
+    "正在读取 BotActivity.tsx",
+  ]);
+  if (anatomyEnabled) {
     await pet.locator('[data-bot-engine="anatomy"][data-bot-motion="running"]').waitFor();
+  }
+  const completedCommand = { ...command, status: "completed", completedAtMs: 8000, aggregatedOutput: "fixture command stdout" };
+  emit({ type: "timeline.item.upsert", item: completedCommand });
+  await group.locator("[data-native-command-duration]").getByText("2 秒", { exact: true }).waitFor();
+  await reads.filter({ hasText: "已读取 BotActivity.tsx" }).waitFor();
+  await group.getByTestId(`tool-summary-trigger-${command.id}`).click();
+  await group.getByTestId("execute-detail").getByText("fixture command stdout", { exact: true }).waitFor();
+  if (anatomyEnabled) {
     emit({ type: "timeline.item.upsert", item: computer });
     await pet.locator('[data-bot-engine="anatomy"][data-bot-motion="controlling"]').waitFor();
   }
@@ -158,10 +214,9 @@ export async function verifyBotStatus(page, pet, emit) {
       status: "completed",
       items: [
         activityUser,
-        reasoningItem,
-        ...(anatomyEnabled
-          ? [{ ...command, status: "completed" }, { ...computer, status: "completed" }]
-          : []),
+        completedReasoning,
+        completedCommand,
+        ...(anatomyEnabled ? [{ ...computer, status: "completed" }] : []),
       ],
     },
   });

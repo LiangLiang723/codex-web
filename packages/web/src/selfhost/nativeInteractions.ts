@@ -1,11 +1,13 @@
 import {
   nativeCodexQuestionsSchema,
   type ConversationRow,
+  type NativeCommandAction,
   type PendingInteraction,
   type PermissionRequestPayload,
 } from "@zcode/shared/zcode-protocol-v4";
 import { COMMAND_APPROVAL_METHOD, commandApprovalChoices } from "./commandApproval.js";
 import type { Message } from "./gateway.js";
+import { nativeItemDurationMs, num } from "./nativeValues.js";
 
 const FILE_APPROVAL_METHOD = "item/fileChange/requestApproval";
 const PERMISSIONS_METHOD = "item/permissions/requestApproval";
@@ -105,12 +107,33 @@ export function isToolApproval(request: NativeRequest) {
   return request.method === COMMAND_APPROVAL_METHOD || request.method === FILE_APPROVAL_METHOD;
 }
 
+function projectNativeCommandAction(action: Message): NativeCommandAction[] {
+  const path = string(action.path).trim() || undefined;
+  switch (action.type) {
+    case "read": {
+      const name = string(action.name).trim() || path?.split(/[/\\]/u).at(-1);
+      return name ? [{ kind: "read", name, path }] : [];
+    }
+    case "search":
+      return [{ kind: "search", path, query: string(action.query).trim() || undefined }];
+    case "listFiles":
+      return [{ kind: "listFiles", path }];
+    default:
+      return [];
+  }
+}
+
 export function projectNativeToolRow(item: Message, cwd: string, approvalInteractionId?: string) {
   const command = string(item.command);
   const input = command
     ? { command, cwd: string(item.cwd) || cwd }
     : (item.arguments ?? item.changes ?? item.input ?? {});
   const output = item.aggregatedOutput ?? item.result ?? item.output;
+  const durationMs = nativeItemDurationMs(item);
+  // 一个 shell 条目可以有多条原生解析动作。作为同一工具行的明细保留顺序与重复项。
+  const actions = records(item.commandActions).flatMap(projectNativeCommandAction);
+  const startedAt = num(item.startedAtMs, -1);
+  const endedAt = num(item.completedAtMs, -1);
   // 审批回执只表示请求已处理，工具状态由原生条目终态决定。
   const status: Extract<ConversationRow, { kind: "toolCall" }>["status"] =
     item.status === "declined" || item.status === "cancelled" || item.status === "interrupted"
@@ -129,6 +152,11 @@ export function projectNativeToolRow(item: Message, cwd: string, approvalInterac
     inputText: typeof input === "string" ? input : JSON.stringify(input),
     input,
     status,
+    ...(command && (actions.length || durationMs !== undefined)
+      ? { nativeCommandActivity: { actions, durationMs } }
+      : {}),
+    ...(startedAt >= 0 ? { startedAt } : {}),
+    ...(endedAt >= 0 ? { endedAt } : {}),
     ...(output != null
       ? { output: { text: typeof output === "string" ? output : JSON.stringify(output) } }
       : {}),

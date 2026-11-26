@@ -9,6 +9,7 @@ import {
   type ComponentProps,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -16,12 +17,15 @@ import {
   useState,
 } from "react";
 import {
+  BookOpenIcon,
   CheckIcon,
   Clock,
   CopyIcon,
   FileIcon,
+  FolderOpenIcon,
   InfoIcon,
   PencilIcon,
+  SearchIcon,
   ThumbsDownIcon,
   ThumbsUpIcon,
   TrendingUpDownIcon,
@@ -115,9 +119,11 @@ import {
 import { resolveToolCallIdentity } from "@/lib/toolIdentity.js";
 import {
   isConversationReasoningRowVisible,
+  SummaryPreviewContext,
   type ConversationRowRenderContext,
 } from "@/v4/conversationRowContext.js";
 import { toolCallRowToLegacyNode } from "@/v4/toolCallRowAdapter.js";
+import { formatConversationWorkDuration } from "@/v4/conversationWorkDuration.js";
 import { CodeCommentAttachmentChip } from "@/v4/composer/CodeCommentAttachmentChip.js";
 import {
   countComposerPromptContexts,
@@ -1732,10 +1738,10 @@ const ReasoningRowView = memo(function ReasoningRowView({
         className="w-full"
         isStreaming={streaming}
         autoCollapseKey={streaming ? null : row.state}
+        measureDuration={row.summary === undefined}
         {...(durationSeconds !== undefined ? { duration: durationSeconds } : {})}
       >
-        {/* Bug 原因：附件重构合并时误丢了 streamingText 接线，导致摘要组件仍在但永远收到空文本。 */}
-        <ReasoningTrigger streamingText={row.text} />
+        <ReasoningTrigger streamingText={row.text} nativeSummary={row.summary} />
         <div data-conversation-selectable="true">
           <ReasoningContent variant={contentVariant}>{row.text}</ReasoningContent>
         </div>
@@ -1778,6 +1784,79 @@ const TimelineMarkerRowView = memo(function TimelineMarkerRowView({
     />
   );
 });
+
+function NativeCommandActivity({
+  row,
+  context,
+}: {
+  row: ToolCallRow;
+  context: ConversationRowRenderContext;
+}) {
+  const preview = useContext(SummaryPreviewContext);
+  const { intl, locale } = useZCodeIntl();
+  const activity = row.nativeCommandActivity;
+  if (preview || !activity) return null;
+  const readLabel = row.status === "success"
+    ? "chat.toolCall.read.read"
+    : row.status === "running" || row.status === "inputStreaming"
+      ? "chat.toolCall.read.reading"
+      : "chat.toolCall.kind.read";
+  const duration = formatConversationWorkDuration(activity.durationMs, intl, locale);
+  return (
+    <div className="mt-1 grid min-w-0 gap-1 pl-6 text-ui-sm text-foreground-subtle">
+      {duration ? <span data-native-command-duration>{duration}</span> : null}
+      {activity.actions.map((action, index) => {
+        const path = action.path;
+        let content: React.ReactNode;
+        let Icon;
+        switch (action.kind) {
+          case "read": {
+            Icon = BookOpenIcon;
+            const openFile = context.onOpenFileLink;
+            content = (
+              <>
+                {intl.formatMessage({ id: readLabel })}{" "}
+                {openFile && path ? (
+                  <button
+                    type="button"
+                    className="underline decoration-dotted underline-offset-2 hover:text-foreground"
+                    onClick={() => openFile({ path, label: action.name, workspacePath: context.workspacePath })}
+                  >
+                    {action.name}
+                  </button>
+                ) : action.name}
+              </>
+            );
+            break;
+          }
+          case "search":
+            Icon = SearchIcon;
+            content = action.query
+              ? intl.formatMessage({ id: "chat.toolCall.search.findWithQuery" }, { query: action.query })
+              : intl.formatMessage({ id: "chat.toolCall.search.find" });
+            break;
+          case "listFiles":
+            Icon = FolderOpenIcon;
+            content = path
+              ? intl.formatMessage({ id: "chat.toolCall.search.listIn" }, { cwd: path })
+              : intl.formatMessage({ id: "chat.toolCall.search.list" });
+            break;
+        }
+        return (
+          <div
+            key={index}
+            className="flex min-w-0 items-center gap-2"
+            data-native-command-action={action.kind}
+            title={path}
+          >
+            <Icon aria-hidden className="size-4 shrink-0" />
+            <span className="min-w-0 truncate">{content}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 const ToolCallRowView = memo(function ToolCallRowView({
   row,
@@ -2000,6 +2079,7 @@ const ToolCallRowView = memo(function ToolCallRowView({
           workflowRun={workflowRun}
           workflowDraft={context.workflowDraftByToolCallId?.get(row.toolCallId)}
         />
+        {row.nativeCommandActivity ? <NativeCommandActivity row={row} context={context} /> : null}
       </div>
     </RowShell>
   );

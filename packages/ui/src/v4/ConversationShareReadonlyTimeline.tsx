@@ -77,6 +77,7 @@ import {
   getAssistantSummaryTailRowId,
   getActiveAssistantSummaryItem,
   getAssistantSummaryIconItem,
+  getNativeAssistantSummaryTitle,
   getAssistantSummaryChangeFiles,
   type ConversationAssistantWorkRenderItem,
 } from "@/v4/conversationAssistantWorkItems.js";
@@ -596,7 +597,7 @@ const ReasoningPresentation = memo(function ReasoningPresentation({ row }: { row
         autoCollapseKey={row.state}
         {...(durationSeconds === undefined ? {} : { duration: durationSeconds })}
       >
-        <ReasoningTrigger streamingText={row.text} />
+        <ReasoningTrigger streamingText={row.text} nativeSummary={row.summary} />
         <div data-conversation-selectable="true">
           <ReasoningContent>{row.text}</ReasoningContent>
         </div>
@@ -905,6 +906,7 @@ function ReadonlyAssistantWorkItems({
           <ConsecutiveSummaryGroup
             key={group.key}
             statistics={statistics}
+            summaryTitle={changes ? undefined : getNativeAssistantSummaryTitle(group.items)}
             collapsedStatistics={
               changes ? (
                 <CollapsedChangeSummary

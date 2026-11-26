@@ -194,12 +194,18 @@ export const reasoningRowSchema = z.object({
   assistantResponseId: z.string().min(1).optional(),
   text: z.string(),
   state: z.enum(["streaming", "complete", "interrupted"]),
+  summary: z.string().optional(),
   durationMs: z.number().optional(),
 });
 export type ReasoningRow = z.infer<typeof reasoningRowSchema>;
 
 // toolCall 展示层 schema 已拆至 ./toolDisplay.ts（rows.ts 受 max-lines 约束）。
-import { toolCallDisplaySchema, toolOutputSchema, toolProgressSchema } from "./toolDisplay.js";
+import {
+  nativeCommandActivitySchema,
+  toolCallDisplaySchema,
+  toolOutputSchema,
+  toolProgressSchema,
+} from "./toolDisplay.js";
 
 export const cuaAppIdentitySchema = z
   .object({
@@ -220,6 +226,7 @@ export const toolCallRowSchema = z.object({
   status: z.enum(["inputStreaming", "pendingApproval", "running", "success", "error", "cancelled"]),
   inputText: z.string(),
   input: z.unknown().optional(),
+  nativeCommandActivity: nativeCommandActivitySchema.optional().catch(undefined),
   cuaApp: cuaAppIdentitySchema.optional(),
   output: toolOutputSchema.optional(),
   // display 解析失败只丢这张卡的载荷，不拒整条 row（理由见 toolDisplay.ts 的 toolOutputSchema

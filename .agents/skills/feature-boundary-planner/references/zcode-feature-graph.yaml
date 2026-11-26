@@ -5709,7 +5709,7 @@ nodes:
   - id: "capability.selfhost-codex-continuity"
     kind: "capability"
     label: "Native Codex projects, history and first-turn titles through the SSH gateway"
-    aliases: ["Web Mac 项目归属", "active writer", "Codex 自动命名", "SSH 模型重连"]
+    aliases: ["Web Mac 项目归属", "active writer", "Codex 自动命名", "SSH 模型重连", "思考摘要", "会话活动明细"]
     docs: ["specs/selfhost-codex/README.md", "packages/web/src/selfhost/CONTRACT.md"]
     codeSeeds:
       - symbol: "refreshProjects"
@@ -5718,9 +5718,14 @@ nodes:
         file: "selfhost/gateway/overlay/utils/selfhost-thread-title.ts"
       - symbol: "SessionBridge"
         file: "packages/web/src/selfhost/sessionBridge.ts"
+      - symbol: "SessionSubscriptions"
+        file: "packages/web/src/selfhost/sessionSubscriptions.ts"
+      - symbol: "projectThread"
+        file: "packages/web/src/selfhost/threadProjection.ts"
     invariants:
       - "The selected Codex host owns threads, writers and saved names. The browser projects the current host catalog and replayable history."
-      - "A writer conflict allows stored history. Browser pagination only queries older pages after the initial snapshot."
+      - "After a writer conflict the Gateway checks the saved conversation file version through App Server and refreshes persisted timeline pages when that version changes."
+      - "Native reasoning titles and durations derive from App Server items. Command details retain the order and identity of the native timeline."
       - "Title sampling runs after the accepted first turn completes. The native name is reread before an automatic write."
 
   - id: "surface.selfhost-codex-conversation"
@@ -5731,6 +5736,10 @@ nodes:
         file: "packages/web/src/selfhost/services.ts"
       - symbol: "SessionPane"
         file: "packages/ui/src/v4/SessionPane.tsx"
+      - symbol: "ReasoningTrigger"
+        file: "packages/ui/src/components/ai-elements/reasoning.tsx"
+      - symbol: "NativeCommandActivity"
+        file: "packages/ui/src/v4/ConversationRowView.tsx"
 
   - id: "capability.selfhost-brand-pet"
     kind: "capability"

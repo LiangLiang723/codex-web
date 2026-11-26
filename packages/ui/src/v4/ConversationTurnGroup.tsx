@@ -83,6 +83,7 @@ import {
   getAssistantSummaryTailRowId,
   getActiveAssistantSummaryItem,
   getAssistantSummaryIconItem,
+  getNativeAssistantSummaryTitle,
   getAssistantSummaryChangeFiles,
   type ConversationAssistantWorkRenderItem,
 } from "@/v4/conversationAssistantWorkItems.js";
@@ -342,6 +343,7 @@ function ConversationAssistantWorkContent({
             <ConsecutiveSummaryGroup
               key={groupKeys[index]}
               statistics={statistics}
+              summaryTitle={changes ? undefined : getNativeAssistantSummaryTitle(group.items)}
               collapsedStatistics={
                 changes ? (
                   <CollapsedChangeSummary

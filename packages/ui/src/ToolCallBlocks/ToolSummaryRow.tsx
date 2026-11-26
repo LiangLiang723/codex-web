@@ -265,6 +265,7 @@ export function ConsecutiveSummaryGroup({
   refreshVersion,
   statistics,
   statisticsIcon,
+  summaryTitle,
   collapsedStatistics,
   lastRowId,
   hasActiveItem,
@@ -275,6 +276,7 @@ export function ConsecutiveSummaryGroup({
   refreshVersion: unknown;
   statistics: string;
   statisticsIcon?: ReactNode;
+  summaryTitle?: string;
   collapsedStatistics?: ReactNode;
   lastRowId: number;
   hasActiveItem: boolean;
@@ -301,14 +303,14 @@ export function ConsecutiveSummaryGroup({
           aria-expanded={open}
           aria-controls={contentId}
           data-summary-group-trigger
-          aria-label={statistics}
+          aria-label={summaryTitle ? `${summaryTitle}, ${statistics}` : statistics}
           onKeyDown={(event) =>
             handleToolSummaryActionKeyDown(event, () => setOpen((value) => !value))
           }
           className="summary-hover-text group/tool-summary flex w-fit max-w-full min-w-0 cursor-pointer items-center gap-2 text-ui-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-input-border-focused"
         >
           {/* 无活动项只是工具间隙；收起时保留末尾摘要，结构闭合后才切换统计。 */}
-          {open || !groupRunning ? (
+          {summaryTitle || open || !groupRunning ? (
             <>
               <span
                 data-summary-group-icon
@@ -324,14 +326,15 @@ export function ConsecutiveSummaryGroup({
                 // 统计文本允许收缩但不能换行，避免窄屏组头高度增加并挤动图标和箭头。
                 className={cn(
                   "min-w-0 truncate text-foreground-subtle",
-                  groupRunning &&
+                  !summaryTitle &&
+                    groupRunning &&
                     !hasActiveItem &&
                     "animated-gradient-text animated-gradient-text-foreground",
                 )}
                 data-summary-group-statistics
-                title={statistics}
+                title={summaryTitle || statistics}
               >
-                {open ? statistics : (collapsedStatistics ?? statistics)}
+                {summaryTitle || (open ? statistics : (collapsedStatistics ?? statistics))}
               </span>
             </>
           ) : (

@@ -6,7 +6,7 @@
  */
 "use client";
 
-import { SummaryPreviewContext } from "@/v4/conversationRowContext.js";
+import { SummaryIconOnlyContext, SummaryPreviewContext } from "@/v4/conversationRowContext.js";
 
 import { useControllableState } from "@radix-ui/react-use-controllable-state";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible.js";
@@ -54,6 +54,7 @@ export type ReasoningProps = ComponentProps<typeof Collapsible> & {
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
   duration?: number;
+  measureDuration?: boolean;
 };
 
 const MS_IN_S = 1000;
@@ -80,6 +81,7 @@ export const Reasoning = memo(
     defaultOpen = false,
     onOpenChange,
     duration: durationProp,
+    measureDuration = true,
     children,
     ...props
   }: ReasoningProps) => {
@@ -90,10 +92,8 @@ export const Reasoning = memo(
       onChange: onOpenChange,
       prop: preview ? false : open,
     });
-    const [duration, setDuration] = useControllableState<number | undefined>({
-      defaultProp: undefined,
-      prop: durationProp,
-    });
+    const [measuredDuration, setMeasuredDuration] = useState<number>();
+    const duration = durationProp ?? (measureDuration ? measuredDuration : undefined);
 
     const startTimeRef = useRef<number | null>(null);
     const contentUnmountDelayRef = useRef<number | null>(null);
@@ -112,9 +112,10 @@ export const Reasoning = memo(
     );
 
     useEffect(() => {
+      if (!measureDuration || durationProp !== undefined) return;
       if (!isStreaming) {
         if (startTimeRef.current !== null) {
-          setDuration(Math.ceil((Date.now() - startTimeRef.current) / MS_IN_S));
+          setMeasuredDuration(Math.ceil((Date.now() - startTimeRef.current) / MS_IN_S));
         }
         startTimeRef.current = null;
         return;
@@ -134,13 +135,13 @@ export const Reasoning = memo(
         if (startTimeRef.current === null) {
           return;
         }
-        setDuration(Math.max(1, Math.ceil((Date.now() - startTimeRef.current) / MS_IN_S)));
+        setMeasuredDuration(Math.max(1, Math.ceil((Date.now() - startTimeRef.current) / MS_IN_S)));
       };
 
       updateDuration();
       const durationTimer = window.setInterval(updateDuration, MS_IN_S);
       return () => window.clearInterval(durationTimer);
-    }, [isOpen, isStreaming, setDuration]);
+    }, [durationProp, isOpen, isStreaming, measureDuration]);
 
     useEffect(() => {
       const previousAutoCollapseKey = previousAutoCollapseKeyRef.current;
@@ -223,6 +224,7 @@ export const Reasoning = memo(
 export type ReasoningTriggerProps = ComponentProps<typeof CollapsibleTrigger> & {
   getThinkingMessage?: (isStreaming: boolean, duration?: number) => ReactNode;
   streamingText?: string;
+  nativeSummary?: string;
 };
 
 export function scrollReasoningSummaryToEnd(
@@ -251,6 +253,13 @@ export function resolveReasoningStreamingSummary(
   return null;
 }
 
+export function formatNativeReasoningTitle(summary: string): string {
+  const firstLine = summary.trimStart().split(/\r?\n/u, 1)[0]?.trim() ?? "";
+  // 原生分段通常以 Markdown 的粗体标题开头。状态行保留标题，正文仍由思考详情渲染。
+  const title = /^\*\*([^*]+)(?:\*\*|$)/u.exec(firstLine)?.[1];
+  return title?.trim() ?? resolveReasoningStreamingSummary(summary)?.text ?? "";
+}
+
 const REASONING_SUMMARY_MASK =
   "linear-gradient(to right, transparent 0, black 16px, black calc(100% - 16px), transparent 100%)";
 
@@ -274,14 +283,20 @@ export const ReasoningTrigger = memo(
     children,
     getThinkingMessage,
     streamingText = "",
+    nativeSummary,
     ...props
   }: ReasoningTriggerProps) => {
     const preview = useContext(SummaryPreviewContext);
+    const iconOnly = useContext(SummaryIconOnlyContext);
     const { isStreaming, isOpen, duration } = useReasoning();
     const { intl } = useZCodeIntl();
     const botActivity = useBotActivity();
+    const native = nativeSummary !== undefined;
+    const nativeTitle = native ? formatNativeReasoningTitle(nativeSummary) : "";
     const streamingSummary =
-      isStreaming && !isOpen ? resolveReasoningStreamingSummary(streamingText) : null;
+      isStreaming && !isOpen
+        ? resolveReasoningStreamingSummary(native ? nativeTitle : streamingText)
+        : null;
     const streamingSummaryRef = useRef<HTMLSpanElement | null>(null);
     const streamingSummaryTextRef = useRef<HTMLSpanElement | null>(null);
     const [isStreamingSummaryOverflowing, setIsStreamingSummaryOverflowing] = useState(false);
@@ -320,11 +335,11 @@ export const ReasoningTrigger = memo(
     // 末尾思考完成后，未闭合的收起组头仍需扫光；保留真实完成文案和耗时。
     const thoughtLabelClassName = cn(
       "font-normal text-foreground-subtle",
-      preview && "animated-gradient-text animated-gradient-text-foreground",
+      preview && !native && "animated-gradient-text animated-gradient-text-foreground",
     );
     const thinkingMessage =
       getThinkingMessage?.(isStreaming, duration) ??
-      (isStreaming && !isOpen ? (
+      (isStreaming && (!isOpen || native) ? (
         <span className="animated-gradient-text animated-gradient-text-foreground font-normal text-foreground-subtle">
           {intl.formatMessage({ id: "chat.reasoning.thinking" })}
         </span>
@@ -333,9 +348,11 @@ export const ReasoningTrigger = memo(
           <span className={thoughtLabelClassName}>
             {intl.formatMessage({ id: "chat.reasoning.thought" })}
           </span>
-          <span className="font-normal text-foreground-subtlest">
-            {intl.formatMessage({ id: "chat.reasoning.durationFewSeconds" })}
-          </span>
+          {!native ? (
+            <span className="font-normal text-foreground-subtlest">
+              {intl.formatMessage({ id: "chat.reasoning.durationFewSeconds" })}
+            </span>
+          ) : null}
         </span>
       ) : (
         <span className="inline-flex items-center gap-2">
@@ -355,18 +372,22 @@ export const ReasoningTrigger = memo(
       "summary-hover-text group/reasoning inline-flex max-w-full min-w-0 items-center gap-2 self-start text-ui-base transition-colors",
       className,
     );
+    const icon = (
+      <BotAvatar
+        data-summary-leading-icon
+        className="size-5"
+        mood="thinking"
+        renderSize={20}
+        animated={isStreaming && (native || Boolean(botActivity))}
+        motion={isStreaming && botActivity?.activity === "thinking" ? botActivity.motion : "thinking"}
+      />
+    );
+    if (iconOnly) return icon;
     const summaryContent = (
       <>
         {children ?? (
           <>
-            <BotAvatar
-              data-summary-leading-icon
-              className="size-5"
-              mood="thinking"
-              renderSize={20}
-              animated={Boolean(isStreaming && botActivity)}
-              motion={isStreaming && botActivity?.activity === "thinking" ? botActivity.motion : "thinking"}
-            />
+            {icon}
             {/* 右侧流式摘要是可伸缩内容；如果左侧标签也参与 flex shrink，
                 长摘要会把思考状态标签挤成多行。固定语义标签宽度，只让摘要占剩余空间。 */}
             <span className="shrink-0 whitespace-nowrap" data-reasoning-label="true">
@@ -375,7 +396,10 @@ export const ReasoningTrigger = memo(
             {streamingSummary ? (
               <span
                 ref={streamingSummaryRef}
-                className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-foreground-subtlest"
+                className={cn(
+                  "min-w-0 flex-1 overflow-hidden whitespace-nowrap",
+                  native ? "text-foreground-subtle" : "text-foreground-subtlest",
+                )}
                 data-reasoning-streaming-mask={isStreamingSummaryOverflowing ? "both" : "none"}
                 data-reasoning-streaming-line="true"
                 data-reasoning-streaming-roll="true"
@@ -395,6 +419,10 @@ export const ReasoningTrigger = memo(
                   }
                   enabled={!preview}
                 />
+              </span>
+            ) : nativeTitle ? (
+              <span className="min-w-0 truncate text-foreground-subtle" title={nativeTitle}>
+                {nativeTitle}
               </span>
             ) : null}
             {!preview ? (
