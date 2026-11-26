@@ -449,6 +449,25 @@ sequenceDiagram
 
 SH-RESYNC 验收在浏览器已有部分回复时制造帧装配故障，观察原订阅恢复、同轮后续内容和完成状态。另核对索引与配置的恢复确认，并验证已经关闭的订阅返回明确的归属错误。
 
+### 单条思考状态
+
+远端 Codex 持有每条思考的生命周期。原生时间线在 `completedAtMs` 记录该条的完成时间，条目可以省略 `status`。实时完成通知由 Gateway 转为同一条目的 `status: "completed"` 更新。桌面和手机 Web 通过同一投影使用这两类完成凭据，仅在轮次运行中且条目尚未完成时显示「正在思考」。整轮的「工作中」由轮次状态决定。
+
+```mermaid
+sequenceDiagram
+    participant C as Codex App Server
+    participant G as Gateway
+    participant W as Web 会话投影
+    C-->>G: 时间线包含仍在运行的轮次和已完成条目的 completedAtMs
+    G-->>W: 激活或恢复快照
+    Note over W: 已完成条目结束流式展示，仍在进行的条目继续显示「正在思考」
+    C-->>G: 当前条目 item/completed
+    G-->>W: 按轮次和条目 ID 更新为 completed
+    Note over W: 该条结束，整轮仍显示「工作中」
+```
+
+浏览器回归 `node selfhost/tests/session-resync.mjs` 在桌面和手机宽度打开进行中的轮次，核对带完成时间的历史思考、仍在进行的思考、同一订阅补同步及单条实时完成后的状态。
+
 ## 连接异常提示
 
 Codex App Server 持有模型请求及当前轮次状态。Web 收到当前轮次首条 `error` 通知且 `willRetry` 为真时，立即在回复区显示模型重连。Codex 提供次数时按原通知展示，次数缺失时显示纯文本进度。收到当前线程的 WebSocket 回退告警时显示正在通过 HTTPS 连接。同轮再次产生模型内容、下一轮开始或轮次结束时清除进度。最终失败从 `turn/completed` 或原生历史中读取，模型超时与其他模型连接失败使用输入框上方现有错误横幅，聊天记录与继续发送入口保留。

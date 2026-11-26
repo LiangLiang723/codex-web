@@ -502,11 +502,12 @@ export function projectThread(
         result.plan = projectNativePlan(item, at);
         hasPlan = true;
       } else if (item.type === "reasoning") {
+        // Codex 历史可能只保留完成时间，恢复运行中的轮次时仍要结束该条的思考提示。
         rows.push({
           ...fields,
           kind: "reasoning",
           text: plain(item.summary) || plain(item.content),
-          state: stream ? "streaming" : "complete",
+          state: stream && item.completedAtMs == null ? "streaming" : "complete",
         });
       } else {
         const anchor = JSON.stringify([turnId, itemId]);

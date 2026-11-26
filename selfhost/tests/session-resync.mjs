@@ -36,10 +36,25 @@ try {
             const { SessionDataLayer } = await import(`${ui}/sessionDataLayer.ts`);
             const threadId = "resync-fixture";
             const cwd = "/resync-fixture";
+            const previousReasoning = {
+              id: "reasoning-before-recovery",
+              type: "reasoning",
+              summary: ["已核对分支"],
+              startedAtMs: 1000,
+              completedAtMs: 2000,
+            };
+            const activeReasoning = {
+              id: "reasoning-in-progress",
+              type: "reasoning",
+              summary: ["正在检查命令结果"],
+              startedAtMs: 3000,
+              completedAtMs: null,
+            };
+            const assistant = { id: "reply-1", type: "agentMessage", text: "前半段" };
             const turn = {
               id: "turn-1",
               status: "inProgress",
-              items: [{ id: "reply-1", type: "agentMessage", text: "前半段" }],
+              items: [previousReasoning, assistant, activeReasoning],
             };
             const thread = { id: threadId, cwd, status: { type: "active" }, turns: [turn] };
             const watchers = new Set();
@@ -68,7 +83,7 @@ try {
             const transport = createAgentConversationTransport(agent, { workspacePath: cwd });
             const layer = new SessionDataLayer({ transport });
             const { store } = layer.acquire(threadId);
-            const waitForState = (predicate) =>
+            const waitForState = (description, predicate) =>
               new Promise((done, reject) => {
                 const read = () => {
                   const state = store.getState();
@@ -77,7 +92,7 @@ try {
                 };
                 const off = store.subscribe(read);
                 const deadline = setTimeout(
-                  () => finish(new Error("Timed out waiting for projection")),
+                  () => finish(new Error(`Timed out waiting for ${description}`)),
                   10000,
                 );
                 function finish(error, state) {
@@ -90,27 +105,54 @@ try {
               });
             const reply = (state) =>
               state.snapshot?.rows.window.find((row) => row.kind === "assistantText");
+            const reasoningStates = (state) =>
+              state.snapshot?.rows.window
+                .filter((row) => row.kind === "reasoning")
+                .map((row) => row.state);
             const emit = (event, id) => {
               for (const listener of watchers)
                 listener({ type: "thread.event", event: { hostId: 1, threadId, event, id } });
             };
             try {
-              const first = await waitForState((state) => reply(state)?.text === "前半段");
+              const first = await waitForState(
+                "the initial reply",
+                (state) => reply(state)?.text === "前半段",
+              );
               // 从真实帧装配故障进入同订阅恢复路径，保留原生在途轮次。
               store.handleAssemblyFault(first.subscriptionId, "online");
-              await waitForState((state) => state.snapshot.seq > first.snapshot.seq);
+              const resynced = await waitForState(
+                "the recovery snapshot",
+                (state) => state.snapshot.seq > first.snapshot.seq,
+              );
+              emit(
+                {
+                  type: "timeline.item.upsert",
+                  item: {
+                    ...activeReasoning,
+                    turnId: turn.id,
+                    status: "completed",
+                    completedAtMs: 4000,
+                  },
+                },
+                1,
+              );
+              const reasoningCompleted = await waitForState(
+                "the completed reasoning item",
+                (state) => reasoningStates(state)?.at(-1) === "complete",
+              );
               emit(
                 {
                   type: "turn.completed",
                   turn: {
                     ...turn,
                     status: "completed",
-                    items: [{ ...turn.items[0], text: "前半段，接着完成" }],
+                    items: [{ ...assistant, text: "前半段，接着完成" }],
                   },
                 },
-                1,
+                2,
               );
               const final = await waitForState(
+                "the completed turn",
                 (state) => reply(state)?.text === "前半段，接着完成",
               );
 
@@ -145,6 +187,10 @@ try {
                 final: final.subscriptionId,
                 status: final.status,
                 replyState: reply(final).state,
+                firstReasoning: reasoningStates(first),
+                resyncedReasoning: reasoningStates(resynced),
+                completedReasoning: reasoningStates(reasoningCompleted),
+                phaseAtReasoningCompletion: reasoningCompleted.snapshot.control.phase,
                 recoveryChecks,
                 expired,
               };
@@ -158,6 +204,10 @@ try {
         assert.equal(result.final, result.first);
         assert.equal(result.status, "live");
         assert.equal(result.replyState, "complete");
+        assert.deepEqual(result.firstReasoning, ["complete", "streaming"]);
+        assert.deepEqual(result.resyncedReasoning, ["complete", "streaming"]);
+        assert.deepEqual(result.completedReasoning, ["complete", "complete"]);
+        assert.equal(result.phaseAtReasoningCompletion, "running");
         for (const { initial, recovered } of result.recoveryChecks)
           assert.deepEqual(recovered, { ...initial, mode: "snapshot" });
         assert.match(result.expired, /fault\.subscription\.notOwned/);
