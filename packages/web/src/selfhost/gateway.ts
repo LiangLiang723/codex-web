@@ -2,6 +2,7 @@
 import { z } from "zod";
 
 const record = z.record(z.string(), z.unknown());
+export const workspaceSettingsSchema = record;
 export const hostSchema = z.object({
   id: z.number(),
   avatar: z.string().default("server"),
@@ -48,6 +49,15 @@ export type RemoteModel = z.infer<typeof modelSchema>;
 export type Message = Record<string, unknown>;
 export function object(value: unknown): Message {
   return record.parse(value);
+}
+export function readWorkspaceSettings(gateway: Gateway, signal?: AbortSignal) {
+  return gateway.request(
+    "/api/selfhost/settings",
+    workspaceSettingsSchema,
+    "GET",
+    undefined,
+    signal,
+  );
 }
 export function wireId() {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
@@ -267,13 +277,13 @@ export class Gateway {
     clearTimeout(this.timer);
     this.socket?.close();
   }
-  hosts() {
-    return this.request("/api/hosts", z.array(hostSchema));
+  hosts(signal?: AbortSignal) {
+    return this.request("/api/hosts", z.array(hostSchema), "GET", undefined, signal);
   }
-  async config() {
+  async config(signal?: AbortSignal) {
     const [hosts, projects] = await Promise.all([
-      this.hosts(),
-      this.request("/api/selfhost/projects", z.array(projectSchema)),
+      this.hosts(signal),
+      this.request("/api/selfhost/projects", z.array(projectSchema), "GET", undefined, signal),
     ]);
     return { hosts, projects };
   }

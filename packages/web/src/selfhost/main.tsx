@@ -1,5 +1,14 @@
 import "./bootstrap.js";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from "react";
 import { createRoot } from "react-dom/client";
 import { AppErrorBoundary } from "@zcode/ui/error-boundary";
 import { Button } from "@zcode/ui/button";
@@ -7,10 +16,19 @@ import { Input } from "@zcode/ui/input";
 import { z } from "zod";
 import { WebLoginPage } from "../auth/index.js";
 import { Gateway, accountProfileSchema, type AccountProfile } from "./gateway.js";
+import { prepareWorkspaceStartup, type WorkspaceStartup } from "./workspaceStartup.js";
 import "../styles.css";
 
 const tokenKey = "selfhost.auth";
-const loadWorkbench = () => import("./Workbench.js");
+const loadWorkspaceLocale = () =>
+  import("@zcode/ui/i18n")
+    .then(({ preloadPreferredLocaleMessages }) => preloadPreferredLocaleMessages())
+    .catch(() => {});
+let workbenchModule: Promise<typeof import("./Workbench.js")> | undefined;
+const loadWorkbench = () =>
+  (workbenchModule ??= Promise.all([import("./Workbench.js"), loadWorkspaceLocale()]).then(
+    ([route]) => route,
+  ));
 const loadPrivateShare = () => import("./PrivateShare.js");
 const Workbench = lazy(loadWorkbench);
 const PrivateShare = lazy(loadPrivateShare);
@@ -27,6 +45,10 @@ const loadingWorkspace = (
     </span>
   </div>
 );
+
+function removeStartupScreen() {
+  document.getElementById("zcode-boot-screen")?.remove();
+}
 
 function Login({ onLogin }: { onLogin: (token: string) => void }) {
   const [error, setError] = useState(""),
@@ -89,6 +111,20 @@ function App() {
     setAccountOpen(false);
   }, [token]);
   const gateway = useMemo(() => (token ? new Gateway(token, logout) : null), [token, logout]);
+  const share = new URLSearchParams(location.search).get("share");
+  const [workspaceStartup, setWorkspaceStartup] = useState<WorkspaceStartup>();
+  useLayoutEffect(() => {
+    if (!gateway) removeStartupScreen();
+  }, [gateway]);
+  useEffect(() => {
+    if (!gateway || share) return;
+    // 路由模块和词典尚在加载时，当前登录已可并行读取启动数据。
+    const startup = prepareWorkspaceStartup(gateway, location.search);
+    void loadWorkbench().catch(() => {});
+    setWorkspaceStartup(startup);
+    return () => startup.dispose();
+  }, [gateway, share]);
+
   useEffect(() => {
     const changed = (event: StorageEvent) => {
       if (event.key === tokenKey) {
@@ -127,7 +163,6 @@ function App() {
     };
   }, [gateway]);
   const currentAccount = accountResult?.gateway === gateway ? accountResult : undefined;
-  const share = new URLSearchParams(location.search).get("share");
   if (gateway && share) {
     return (
       <Suspense fallback={loadingWorkspace}>
@@ -138,13 +173,18 @@ function App() {
   return gateway ? (
     <>
       <Suspense fallback={loadingWorkspace}>
-        <Workbench
-          gateway={gateway}
-          logout={endSession}
-          account={showAccount}
-          profile={currentAccount?.profile}
-          fallback={loadingWorkspace}
-        />
+        {workspaceStartup?.gateway === gateway ? (
+          <Workbench
+            gateway={gateway}
+            startup={workspaceStartup}
+            logout={endSession}
+            account={showAccount}
+            profile={currentAccount?.profile}
+            fallback={loadingWorkspace}
+          />
+        ) : (
+          loadingWorkspace
+        )}
       </Suspense>
       {accountOpen && (
         <Suspense fallback={null}>
@@ -174,19 +214,15 @@ function App() {
     />
   );
 }
-function renderApp() {
-  createRoot(document.getElementById("root")!).render(
-    <AppErrorBoundary>
-      <App />
-    </AppErrorBoundary>,
-  );
-}
-
-// 已登录的冷访问在加载路由期间继续显示 HTML 中的 Bot 启动画面。
+// 首次 React 提交先发出已认证请求，HTML 启动壳继续播放到路由资源准备完成。
 if (localStorage.getItem(tokenKey)) {
   const share = new URLSearchParams(location.search).get("share");
   const loadRoute = share ? loadPrivateShare : loadWorkbench;
-  void loadRoute().then(renderApp, renderApp);
-} else {
-  renderApp();
+  void loadRoute().then(removeStartupScreen, removeStartupScreen);
 }
+
+createRoot(document.getElementById("zcode-web-app")!).render(
+  <AppErrorBoundary>
+    <App />
+  </AppErrorBoundary>,
+);

@@ -2,7 +2,14 @@ import { RemoteServiceAccess } from "@zcode/client";
 import { appSettingsSchema, type AgentsListResult } from "@zcode/shared";
 import type { IChannel, IChannelClient } from "@zcode/rpc";
 import { z } from "zod";
-import { Gateway, type Message, type Project, type RemoteModel } from "./gateway.js";
+import {
+  Gateway,
+  readWorkspaceSettings,
+  workspaceSettingsSchema as settingsSchema,
+  type Message,
+  type Project,
+  type RemoteModel,
+} from "./gateway.js";
 import { rec, str, array, num, providerId } from "./threadProjection.js";
 import { codexRequest, extensionRequest } from "./capabilities.js";
 import { createCodexAppsService } from "./codexApps.js";
@@ -15,7 +22,6 @@ import {
   decodeTerminalTextPayload,
 } from "virtual:gateway-terminal-stream";
 
-const settingsSchema = z.record(z.string(), z.unknown());
 const remoteChannels = new Set(["file", "system", "git", "memory", "commands", "output-style"]);
 function modelView(models: RemoteModel[], preference: unknown, hostDefault: Message = {}) {
   const input = rec(preference);
@@ -99,10 +105,6 @@ function projectRow(project: Project, position: number) {
     createdAt: 0,
     updatedAt: 0,
   };
-}
-
-export function readWorkspaceSettings(gateway: Gateway) {
-  return gateway.request("/api/selfhost/settings", settingsSchema);
 }
 
 export async function openWorkspace(

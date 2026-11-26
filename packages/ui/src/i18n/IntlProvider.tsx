@@ -65,6 +65,21 @@ export interface IntlInstance {
 const LOCALE_PREFERENCE_KEY = "zcode-locale-preference";
 const STATE_LOCALE_CHANNEL = "state:locale";
 
+function resolveNavigatorSystemLocale(): Locale {
+  const language = readNavigatorLanguage();
+  return language ? resolveLocaleFromLanguageTag(language) : DEFAULT_LOCALE;
+}
+
+function readStoredPreference(): LocalePreference | null {
+  const raw = readSafeLocalStorage(LOCALE_PREFERENCE_KEY);
+  return isLocalePreference(raw) ? raw : null;
+}
+
+export function preloadPreferredLocaleMessages() {
+  const preference = readStoredPreference();
+  return loadLocaleMessages(isLocale(preference) ? preference : resolveNavigatorSystemLocale());
+}
+
 interface LocaleBroadcastPayload {
   preference: LocalePreference;
   resolvedLocale: Locale;
@@ -187,29 +202,13 @@ export function ZCodeIntlProvider({
   const applyingBroadcastRef = useRef(false);
   const ignoredLocalLocaleBroadcastPayloadRef = useRef<LocaleBroadcastPayload | null>(null);
   const localePreferenceOperationSeqRef = useRef(0);
-  const resolveNavigatorSystemLocale = useCallback((): Locale => {
-    const language = readNavigatorLanguage();
-    if (!language) {
-      return DEFAULT_LOCALE;
-    }
-
-    return resolveLocaleFromLanguageTag(language);
-  }, []);
   const resolveSystemLocale = useCallback(async (): Promise<Locale> => {
     const resolvedLocale = await resolveHostSystemLocale?.();
     if (isLocale(resolvedLocale)) {
       return resolvedLocale;
     }
     return resolveNavigatorSystemLocale();
-  }, [resolveHostSystemLocale, resolveNavigatorSystemLocale]);
-
-  const readStoredPreference = useCallback((): LocalePreference | null => {
-    const raw = readSafeLocalStorage(LOCALE_PREFERENCE_KEY);
-    if (isLocalePreference(raw)) {
-      return raw;
-    }
-    return null;
-  }, []);
+  }, [resolveHostSystemLocale]);
 
   const persistLocalePreference = useCallback((preference: LocalePreference) => {
     writeSafeLocalStorage(LOCALE_PREFERENCE_KEY, preference);
@@ -304,7 +303,6 @@ export function ZCodeIntlProvider({
   }, [
     persistLocalePreference,
     preferSettingServiceLocale,
-    readStoredPreference,
     enqueueLocalePreferenceUpdate,
     resolveSystemLocale,
     settingService,

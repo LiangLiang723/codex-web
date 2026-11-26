@@ -5,14 +5,21 @@ import { z } from "zod";
 import { createWebPlatform } from "#src/platform/index.js";
 import { WebLoginPage } from "../auth/index.js";
 import { Catalog } from "./Catalog.js";
-import { type Gateway, type AccountProfile, type Host, type Project } from "./gateway.js";
+import {
+  readWorkspaceSettings,
+  type Gateway,
+  type AccountProfile,
+  type Host,
+  type Project,
+} from "./gateway.js";
 import {
   hostConnectionMessages,
   hostConnectionPending,
   HostMfaDialog,
   useHostConnections,
 } from "./HostConnection.js";
-import { openWorkspace, readWorkspaceSettings } from "./services.js";
+import { openWorkspace } from "./services.js";
+import type { WorkspaceStartup } from "./workspaceStartup.js";
 
 type WorkspaceDraft = NonNullable<Parameters<typeof Root>[0]["initialTaskDraft"]>;
 type DraftHandoff = { identity: string; draft: WorkspaceDraft };
@@ -33,12 +40,14 @@ function workspaceKey(host: Host, cwd: string) {
 
 function Workbench({
   gateway,
+  startup,
   logout,
   account,
   profile,
   fallback,
 }: {
   gateway: Gateway;
+  startup: WorkspaceStartup;
   logout: () => void;
   account: () => void;
   profile?: AccountProfile;
@@ -97,20 +106,23 @@ function Workbench({
   const opened =
     mounted?.gateway === gateway && mounted.identity === identity ? mounted.workspace : null;
   const { current: catalogReads } = useRef({ generation: 0 });
-  const refresh = useCallback(async () => {
-    const version = ++catalogReads.generation;
-    try {
-      const next = await gateway.config();
-      if (version === catalogReads.generation) {
-        setCatalogSnapshot({ gateway, ...next });
-        setCatalogIssue("");
+  const refresh = useCallback(
+    async (initial?: ReturnType<Gateway["config"]>) => {
+      const version = ++catalogReads.generation;
+      try {
+        const next = await (initial ?? gateway.config());
+        if (version === catalogReads.generation) {
+          setCatalogSnapshot({ gateway, ...next });
+          setCatalogIssue("");
+        }
+      } catch (cause) {
+        if (version === catalogReads.generation)
+          setCatalogIssue(cause instanceof Error ? cause.message : String(cause));
+        throw cause;
       }
-    } catch (cause) {
-      if (version === catalogReads.generation)
-        setCatalogIssue(cause instanceof Error ? cause.message : String(cause));
-      throw cause;
-    }
-  }, [gateway, catalogReads]);
+    },
+    [gateway, catalogReads],
+  );
   const navigate = useCallback((params: URLSearchParams, handoff: DraftHandoff | null = null) => {
     navigationVersion.current++;
     setDraftHandoff(handoff);
@@ -190,46 +202,50 @@ function Workbench({
   }, []);
   useEffect(() => {
     let disposed = false;
+    let subscribed = false;
     let disconnected = false;
-    const initialRoute = new URLSearchParams(location.search);
-    if (!location.search || (initialRoute.has("host") && initialRoute.get("cwd"))) {
-      const result = readWorkspaceSettings(gateway);
+    const reads = startup.take();
+    const result = reads?.route === location.search ? reads.preferences : undefined;
+    if (result) {
       startupSettings.current = { gateway, navigation: navigationVersion.current, result };
       void result.catch(() => {
         // 弱网导致首次读取失败时，后续导航或重试应重新读取。
         if (startupSettings.current?.result === result) startupSettings.current = null;
       });
     }
-    const initialCatalog = refresh();
+    const initialCatalog = refresh(reads?.catalog);
     void initialCatalog.catch(() => {});
+    const onReady = () => {
+      if (disposed || subscribed) return;
+      subscribed = true;
+      setWebReconnecting(false);
+      if (disconnected) {
+        disconnected = false;
+        void refresh().catch(() => {});
+      } else {
+        void initialCatalog.catch(() => {
+          if (!disposed) void refresh().catch(() => {});
+        });
+      }
+      void gateway.send({ type: "host.lifecycle.subscribe" }).catch(() => {});
+    };
     const off = gateway.on((message) => {
       if (message.type === "config.catalog.changed") void refresh().catch(() => {});
       else if (message.type === "disconnected") {
+        subscribed = false;
         disconnected = true;
         setWebReconnecting(true);
-      } else if (message.type === "ready") {
-        setWebReconnecting(false);
-        if (disconnected) {
-          disconnected = false;
-          void refresh().catch(() => {});
-        } else {
-          // 首次连接和 HTTP 目录读取同时开始，成功时复用这次读取。
-          void initialCatalog.catch(() => {
-            if (!disposed) void refresh().catch(() => {});
-          });
-        }
-        void gateway.send({ type: "host.lifecycle.subscribe" }).catch(() => {});
-      }
+      } else if (message.type === "ready") onReady();
     });
-    // 已打开的工作区应在实时连接恢复时继续使用原会话。
-    void gateway.connect().catch(() => {});
+    // 启动层可能已连上。接手已就绪的连接与监听后续重连走同一个订阅入口。
+    void gateway.connect().then(onReady, () => {});
     return () => {
       disposed = true;
       if (startupSettings.current?.gateway === gateway) startupSettings.current = null;
       catalogReads.generation++;
       off();
     };
-  }, [gateway, refresh, catalogReads]);
+  }, [gateway, refresh, catalogReads, startup]);
   useEffect(() => {
     if (route || !catalog) return;
     let canceled = false;

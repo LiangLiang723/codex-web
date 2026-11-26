@@ -142,6 +142,20 @@
         background: var(--color-background, var(--zcode-bootstrap-bg, #f8f8f8)) !important;
       }
 
+      #zcode-web-app {
+        display: contents;
+      }
+
+      #zcode-boot-screen {
+        position: fixed;
+        inset: 0;
+        z-index: 1;
+      }
+
+      #zcode-boot-screen + #zcode-web-app .zcode-boot-loading {
+        visibility: hidden;
+      }
+
       .zcode-boot-loading {
         display: flex;
         align-items: center;
@@ -206,6 +220,7 @@
     <div id="root">
       <!-- Bugfix: 远程控制跨 workspace 时会整页跳转；在 JS 入口执行前先给出 loading 壳，避免出现白屏空档。 -->
       <div
+        id="zcode-boot-screen"
         class="zcode-boot-loading"
         role="status"
         aria-live="polite"
@@ -217,6 +232,7 @@
           <span class="zcode-boot-loading__anatomy"></span>
         </span>
       </div>
+      <div id="zcode-web-app"></div>
     </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

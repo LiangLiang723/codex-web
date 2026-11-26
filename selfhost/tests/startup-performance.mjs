@@ -23,20 +23,17 @@ const thread = {
 
 async function fixture(page, base) {
   const reads = { catalog: 0, hosts: 0, settings: 0, connections: 0 };
-  const firstSettings = Promise.withResolvers();
-  const firstCatalog = Promise.withResolvers();
   const initialCatalog = Promise.withResolvers();
+  const online = Promise.withResolvers();
   await page.route(new URL("/api/**", base).href, async (route) => {
     const request = route.request();
     const { pathname, search } = new URL(request.url());
     if (pathname === "/api/selfhost/settings" && request.method() === "GET") {
       reads.settings++;
-      firstSettings.resolve();
       return route.fulfill({ json: { locale: "zh-CN", selfhostLastProject: { hostId, cwd } } });
     }
     if (pathname === "/api/selfhost/projects" && !search) {
       reads.catalog++;
-      firstCatalog.resolve();
       await initialCatalog.promise;
       return route.fulfill({ json: [project] });
     }
@@ -98,6 +95,7 @@ async function fixture(page, base) {
       if (call.type === "auth.authenticate") {
         reads.connections++;
         reply({ type: "ready" });
+        online.resolve();
       } else if (call.type === "project.defaults.read") {
         reply({ defaults: { model: model.id } });
       } else if (call.type === "ping") {
@@ -109,9 +107,11 @@ async function fixture(page, base) {
   });
   return {
     reads,
-    firstSettings,
-    firstCatalog,
     initialCatalog,
+    async catalogChanged() {
+      await online.promise;
+      liveSocket.send(JSON.stringify({ type: "config.catalog.changed" }));
+    },
     disconnect: () => liveSocket.close(),
   };
 }
@@ -155,14 +155,41 @@ try {
       const loginMs = await page.evaluate(() => Math.round(performance.now()));
       assert.equal(setup.reads.catalog, 0);
       assert.equal(setup.reads.settings, 0);
-      await page.locator("input[name=password]").fill("fixture-password");
-      await page.getByRole("button", { name: "登录" }).click();
-      // 目录请求仍人为挂起。设置已经开始读取，才能保证它没有串行排在目录之后。
-      await Promise.race([
-        Promise.all([setup.firstCatalog.promise, setup.firstSettings.promise]),
-        page.waitForURL((url) => url.searchParams.get("cwd") === cwd, { timeout: 15000 }),
-      ]);
-      setup.initialCatalog.resolve();
+      const workbenchDownload = Promise.withResolvers();
+      await page.route("**/assets/Workbench-*.js", async (route) => {
+        await workbenchDownload.promise;
+        await route.continue();
+      });
+      try {
+        const requestStart = (matches) =>
+          page.waitForRequest(
+            (request) => matches(new URL(request.url())) && request.method() === "GET",
+            { timeout: 15000 },
+          );
+        const initialRequests = Promise.all([
+          requestStart((url) => /\/Workbench-.*\.js$/.test(url.pathname)),
+          requestStart((url) => /\/zh-CN-.*\.js$/.test(url.pathname)),
+          requestStart((url) => url.pathname === "/api/selfhost/settings"),
+          requestStart((url) => url.pathname === "/api/hosts"),
+          requestStart((url) => url.pathname === "/api/selfhost/projects" && !url.search),
+        ]);
+        await page.locator("input[name=password]").fill("fixture-password");
+        await page.getByRole("button", { name: "登录" }).click();
+        // 工作台模块与项目请求仍挂起，词典、主机和设置读取已并行开始。
+        await initialRequests;
+        if (width === 1480) {
+          const firstCatalog = page.waitForResponse((response) => {
+            const url = new URL(response.url());
+            return url.pathname === "/api/selfhost/projects" && !url.search && response.ok();
+          });
+          await setup.catalogChanged();
+          setup.initialCatalog.resolve();
+          await firstCatalog;
+        }
+      } finally {
+        workbenchDownload.resolve();
+        setup.initialCatalog.resolve();
+      }
       await page.waitForURL((url) => url.searchParams.get("cwd") === cwd);
       // 手机默认展示项目和会话列表，显式打开草稿才能实际使用输入框。
       if (width === 390) {
@@ -170,7 +197,14 @@ try {
       }
       await page.locator("[contenteditable=true]").first().waitFor();
       const workspaceMs = await page.evaluate(() => Math.round(performance.now()));
-      assert.deepEqual(setup.reads, { catalog: 1, hosts: 1, settings: 1, connections: 1 });
+      // 桌面分支在模块挂起时注入目录变动。旧结果作废，手机分支复用首次读取。
+      const catalogReads = width === 1480 ? 2 : 1;
+      assert.deepEqual(setup.reads, {
+        catalog: catalogReads,
+        hosts: catalogReads,
+        settings: 1,
+        connections: 1,
+      });
       assert(assets.some((path) => /\/zh-CN-/.test(path)));
       assert(
         !assets.some((path) =>
@@ -183,7 +217,7 @@ try {
       });
       setup.disconnect();
       await refreshed;
-      assert.equal(setup.reads.catalog, 2);
+      assert.equal(setup.reads.catalog, catalogReads + 1);
       if (width === 1480) {
         await page.getByRole("button", { name: "设置", exact: true }).first().click();
         await page.locator('[data-settings-section-nav="general"]').click();
