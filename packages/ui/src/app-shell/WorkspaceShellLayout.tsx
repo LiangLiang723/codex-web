@@ -17,6 +17,7 @@ import { TID_APP_HEADER } from "@zcode/shared/test-ids";
 // 对称下侧 Terminal.tsx 的 openWorkspaceKeys 回收。
 import { sidePaneTerminalSessionRegistry } from "@/terminal/sidePaneTerminalSessionRegistry.js";
 import { V4ChatPane } from "@/v4/V4ChatPane.js";
+import { SelfhostStatusTriggerSlotContext } from "@/v4/ConversationStatusPanel.js";
 import { V4WorkspaceChatArea } from "@/v4/V4WorkspaceChatArea.js";
 import { V4SplitPaneEntryProvider } from "@/v4/splitPaneEntryContext.js";
 import {
@@ -547,6 +548,7 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
   const [isWebRemoteControlMobileViewport, setIsWebRemoteControlMobileViewport] = useState(
     getIsWebRemoteControlMobileViewport,
   );
+  const [statusTriggerTarget, setStatusTriggerTarget] = useState<HTMLDivElement | null>(null);
   const [isWebRemoteControlNavigationDragging, setIsWebRemoteControlNavigationDragging] =
     useState(false);
   const webRemoteControlNavigationHeightRef = useRef(webRemoteControlNavigationHeightPx);
@@ -2516,6 +2518,7 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
                 isSidebarVisible={isSidebarVisible}
                 isTerminalOpen={isTerminalOpen}
                 isSidePaneOpen={isSidePaneOpen}
+                statusTriggerRef={selfHostedBuild ? setStatusTriggerTarget : undefined}
                 onRefreshGit={handleRefreshGit}
                 onToggleTerminal={handleToggleTerminal}
                 onToggleBrowser={handleToggleBrowser}
@@ -2927,6 +2930,7 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
                             isSidebarVisible={isSidebarVisible}
                             isTerminalOpen={isTerminalOpen}
                             isSidePaneOpen={isSidePaneOpen}
+                            statusTriggerRef={selfHostedBuild ? setStatusTriggerTarget : undefined}
                             onRefreshGit={handleRefreshGit}
                             onToggleTerminal={handleToggleTerminal}
                             onToggleBrowser={handleToggleBrowser}
@@ -3253,7 +3257,9 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
       isWindowsDesktop={isWindowsDesktop}
       headerTestId={TID_APP_HEADER}
     >
-      {isWebRemoteControlShell ? renderRemoteShell(wideContent) : wideContent}
+      <SelfhostStatusTriggerSlotContext value={statusTriggerTarget}>
+        {isWebRemoteControlShell ? renderRemoteShell(wideContent) : wideContent}
+      </SelfhostStatusTriggerSlotContext>
     </DesktopWindowFrame>
   );
 });

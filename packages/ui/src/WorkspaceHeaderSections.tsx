@@ -10,6 +10,7 @@ import {
 } from "@/lib/remoteConnectionPresentation.js";
 import { WorkspaceContextPath } from "@/WorkspaceHeaderSections/WorkspaceContextPath.js";
 import { WorkspaceLastActivity } from "@/WorkspaceHeaderSections/WorkspaceLastActivity.js";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 /* eslint-disable max-lines -- Header 标题区当前同时承载 task 菜单、路径上下文和 workspace 级状态提示，先保持单文件收口，避免菜单链路迁移时再引入回归。 */
 import {
   parseRemoteWorkspaceIdentity,
@@ -497,8 +498,12 @@ export function WorkspaceHeaderTitleSection({
         <h1
           data-testid={TID_WORKSPACE_TITLE}
           className={cn(
-            "flex min-w-12 max-w-100 shrink items-center gap-2 truncate font-semibold text-foreground @max-[560px]/workspace-header:max-w-[30vw] @max-[420px]/workspace-header:max-w-[22vw]",
-            simplifyForNarrowRemote && "max-md:max-w-[42vw]",
+            "flex shrink items-center gap-2 truncate font-semibold text-foreground",
+            // 自托管标题按两侧实际控件宽度收缩，固定百分比会提前截断手机标题。
+            selfHostedBuild
+              ? "min-w-0"
+              : "min-w-12 max-w-100 @max-[560px]/workspace-header:max-w-[30vw] @max-[420px]/workspace-header:max-w-[22vw]",
+            !selfHostedBuild && simplifyForNarrowRemote && "max-md:max-w-[42vw]",
             compact ? "text-[0.92rem]" : "text-ui-base",
           )}
           title={activeTaskTitle}

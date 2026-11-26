@@ -158,16 +158,47 @@
         color: var(--zcode-bootstrap-fg, var(--color-foreground, #334155));
       }
 
-      .zcode-boot-loading__logo {
-        display: block;
+      .zcode-boot-loading__mark {
+        display: grid;
         width: 72px;
         height: 72px;
-        background: #fff;
-        mask: url("/codex-bot-dark.svg") center / contain no-repeat;
+        color: #fff;
       }
 
-      html[data-zcode-bootstrap-theme="light"] .zcode-boot-loading__logo {
-        background: #161616;
+      html[data-zcode-bootstrap-theme="light"] .zcode-boot-loading__mark {
+        color: #161616;
+      }
+
+      .zcode-boot-loading__mark > span {
+        grid-area: 1 / 1;
+      }
+
+      .zcode-boot-loading__logo {
+        background: currentColor;
+        mask: url("/codex-bot-dark.svg") center / contain no-repeat;
+        animation: zcode-boot-bob 1.5s ease-in-out infinite;
+      }
+
+      .zcode-boot-loading__anatomy {
+        visibility: hidden;
+      }
+
+      .zcode-boot-loading__mark[data-bot-engine="anatomy"] .zcode-boot-loading__anatomy {
+        visibility: visible;
+      }
+
+      .zcode-boot-loading__mark[data-bot-engine="anatomy"] .zcode-boot-loading__logo {
+        visibility: hidden;
+        animation: none;
+      }
+
+      @keyframes zcode-boot-bob {
+        0%, 100% { transform: translateY(2px) rotate(-7deg); }
+        50% { transform: translateY(-4px) rotate(7deg); }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .zcode-boot-loading__logo { animation: none; }
       }
     </style>
   </head>
@@ -181,7 +212,10 @@
         aria-busy="true"
         aria-label="Loading..."
       >
-        <span class="zcode-boot-loading__logo" aria-hidden="true"></span>
+        <span class="zcode-boot-loading__mark" aria-hidden="true">
+          <span class="zcode-boot-loading__logo"></span>
+          <span class="zcode-boot-loading__anatomy"></span>
+        </span>
       </div>
     </div>
     <script type="module" src="/src/main.tsx"></script>

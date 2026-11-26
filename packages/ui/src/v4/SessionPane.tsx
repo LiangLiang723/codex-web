@@ -6398,6 +6398,7 @@ export function SessionPane({
     <StatusPanel
       key={selfHostedBuild ? `selfhost-status:${sessionId}` : undefined}
       mobile={compactForRemoteControl}
+      useWorkspaceHeader={paneId === V4_PRIMARY_PANE_ID && !isFloatingPresentation}
       sources={snapshot?.sources}
       writtenPlan={sessionId && writtenPlan?.kind === "toolCall" && writtenPlan.output?.text
         ? {
@@ -6820,13 +6821,12 @@ export function SessionPane({
     },
     [attachmentPut, effectiveSessionId],
   );
-  // 分享浮窗不再替换输入区，保持 Composer 与对话滚动位置稳定。
+  // 主会话的桌宠跟随可查看的会话。另一端持有写锁时只限制输入，仍可展示桌宠。
   const showConversationPet =
     selfHostedBuild &&
-    paneId === "workspace-main" &&
+    paneId === V4_PRIMARY_PANE_ID &&
     petEnabled &&
-    remoteAvailable &&
-    !readOnly &&
+    (!isDraft || (remoteAvailable && !readOnly)) &&
     !errored &&
     !isFloatingPresentation &&
     !shareSelectionPanelVisible;
@@ -6875,18 +6875,19 @@ export function SessionPane({
   else if (showConversationPet && (draftRuntimeRebuilding || modelSelectionPending)) petActivity = "loading";
   else if (showConversationPet && visibleQueue?.items.length) petActivity = "waiting";
   const conversationBottomDock = conversationBottomDockContent ? (
-    <>
+    <div className="relative">
       {showConversationPet && !isDraft ? (
         <div
           aria-hidden="true"
           data-codex-pet-anchor="composer"
-          className="pointer-events-none mr-3 ml-auto h-[var(--codex-pet-compact-size,2.25rem)] w-9"
+          // 锚点原在文档流中，窄屏会为桌宠多留一整行。定位在输入区或只读提示的上边缘。
+          className="pointer-events-none absolute right-3 bottom-full h-[var(--codex-pet-compact-size,2.25rem)] w-9"
         />
       ) : null}
       <ConversationBottomDockTransition mode="chat">
         {conversationBottomDockContent}
       </ConversationBottomDockTransition>
-    </>
+    </div>
   ) : null;
 
   const { agents: presentationAgents } = useSubagents(

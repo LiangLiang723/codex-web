@@ -22,6 +22,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   createLucideIcon,
   ArrowRightIcon,
@@ -1711,6 +1712,7 @@ type SelfhostConversationStatusProps = Pick<
   | "onOpenSubagentDirectory"
 > & {
   mobile: boolean;
+  useWorkspaceHeader?: boolean;
   sources?: readonly ConversationSource[];
   writtenPlan?: OpenPlanDetailSideTabRequest;
   onOpenPlan?: (request: OpenPlanDetailSideTabRequest) => void;
@@ -2029,10 +2031,15 @@ function SelfhostStatusSources({ sources }: { sources: readonly ConversationSour
   );
 }
 
+export const SelfhostStatusTriggerSlotContext = createContext<HTMLDivElement | null>(null);
+
 export function SelfhostConversationStatusPanel(props: SelfhostConversationStatusProps) {
   const { intl } = useZCodeIntl();
   const root = useRef<HTMLElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
   const focusToggle = useRef(false);
+  const headerSlot = useContext(SelfhostStatusTriggerSlotContext);
+  const headerTarget = props.useWorkspaceHeader ? headerSlot : null;
   const [wide, setWide] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const [open, setOpen] = useState(false);
@@ -2068,7 +2075,7 @@ export function SelfhostConversationStatusPanel(props: SelfhostConversationStatu
   useLayoutEffect(() => {
     if (!focusToggle.current) return;
     focusToggle.current = false;
-    root.current?.querySelector<HTMLButtonElement>("[data-session-status-toggle]")?.focus();
+    toggle.current?.focus();
   }, [inline]);
 
   if (!hasContent) return null;
@@ -2156,12 +2163,13 @@ export function SelfhostConversationStatusPanel(props: SelfhostConversationStatu
   );
   const trigger = (
     <Button
+      ref={toggle}
       type="button"
-      variant="outline"
+      variant={headerTarget ? "ghost" : "outline"}
       size="icon-md"
       aria-label={openLabel}
       title={openLabel}
-      className="bg-surface shadow-xs"
+      className={headerTarget ? "text-foreground-subtle" : "bg-surface shadow-xs"}
       data-session-status-toggle=""
       onClick={
         wide && !mobile
@@ -2175,17 +2183,19 @@ export function SelfhostConversationStatusPanel(props: SelfhostConversationStatu
       <MonitorActivityIcon aria-hidden className="size-4" />
     </Button>
   );
+  const placeTrigger = (node: ReactNode) =>
+    headerTarget ? createPortal(node, headerTarget) : node;
   return (
     <aside
       ref={root}
       aria-label={title}
-      data-status-placement={inline ? "inline" : "trigger"}
+      data-status-placement={inline ? "inline" : headerTarget ? "header" : "trigger"}
       // 桌面浮层和锚点一起向内留出对话滚动条的命中空间。
       className={cn("peer/session-status absolute top-2 z-30", mobile ? "right-3" : "right-6")}
     >
       {mobile ? (
         <BottomSheet open={open} onOpenChange={setOpen}>
-          <BottomSheetTrigger asChild>{trigger}</BottomSheetTrigger>
+          {placeTrigger(<BottomSheetTrigger asChild>{trigger}</BottomSheetTrigger>)}
           <BottomSheetContent aria-describedby={undefined}>
             <BottomSheetHeader className="flex items-center justify-between gap-2">
               <BottomSheetTitle>{title}</BottomSheetTitle>
@@ -2208,6 +2218,7 @@ export function SelfhostConversationStatusPanel(props: SelfhostConversationStatu
           className="relative max-h-[min(80dvh,40rem)] w-[19rem] overflow-y-auto overscroll-contain rounded-2xl border border-border bg-popover px-1.5 pt-1 text-popover-foreground shadow-[var(--shadow-status-panel)]"
         >
           <Button
+            ref={toggle}
             size="icon-sm"
             variant="ghost"
             className="absolute right-2 top-1.5 z-10"
@@ -2224,10 +2235,10 @@ export function SelfhostConversationStatusPanel(props: SelfhostConversationStatu
           <div className="[&>section:first-child>div:first-child]:pr-8">{sections}</div>
         </div>
       ) : wide ? (
-        trigger
+        placeTrigger(trigger)
       ) : (
         <Popover open={open} onOpenChange={setOpen}>
-          <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+          {placeTrigger(<PopoverTrigger asChild>{trigger}</PopoverTrigger>)}
           <PopoverContent
             align="end"
             aria-label={title}

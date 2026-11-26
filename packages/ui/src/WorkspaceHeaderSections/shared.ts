@@ -7,6 +7,7 @@ import type {
   RemoteTarget,
   UserInfo,
 } from "@zcode/shared";
+import type { Ref } from "react";
 
 export interface WorkspaceHeaderState {
   selectedProvider: ZCodeProvider;
@@ -72,6 +73,7 @@ export interface WorkspaceHeaderActionSectionProps {
   isDesktop?: boolean;
   isTerminalOpen: boolean;
   isSidePaneOpen: boolean;
+  statusTriggerRef?: Ref<HTMLDivElement>;
   onToggleTerminal: () => void;
   onToggleSidePane: () => void;
   toggleSidePaneShortcutLabel?: string;

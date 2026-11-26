@@ -21,6 +21,7 @@ export function WorkspaceHeaderActionSection({
   isDesktop,
   isTerminalOpen,
   isSidePaneOpen,
+  statusTriggerRef,
   onToggleTerminal,
   onToggleSidePane,
   toggleSidePaneShortcutLabel,
@@ -57,6 +58,13 @@ export function WorkspaceHeaderActionSection({
         <ConversationShareMenu
           taskId={activeTaskId}
           useWindowsCaptionSpacing={useWindowsCaptionSpacing}
+        />
+      ) : null}
+      {statusTriggerRef ? (
+        <div
+          ref={statusTriggerRef}
+          className="empty:hidden"
+          inert={simplifyForNarrowRemote && isSidePaneOpen}
         />
       ) : null}
       {!simplifyForNarrowRemote ? (

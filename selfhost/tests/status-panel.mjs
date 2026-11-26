@@ -1,4 +1,14 @@
-import { verifyBotStatus } from "./fixtures/brand-status.mjs";
+import {
+  verifyBotStatus,
+  verifyBrowserStartup,
+  verifyCompactPet,
+  verifyReadOnlyPet,
+} from "./fixtures/brand-status.mjs";
+import {
+  statusTrigger,
+  verifyHeaderStatusTrigger,
+  verifyTableInset,
+} from "./fixtures/status-panel-layout.mjs";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -23,7 +33,7 @@ const makeThread = (id, name) => ({
   updatedAt: 20,
   status: { type: "idle" },
 });
-const parent = makeThread(threadId, "工作区状态栏测试");
+const parent = makeThread(threadId, "工作区状态栏测试，检查会话标题应尽量利用手机和桌面的整行可用空间");
 const other = makeThread(otherId, "第二个任务");
 const child = {
   ...makeThread(childId, "子智能体详情"),
@@ -176,8 +186,6 @@ const timelineSelector = `[data-session-id="${threadId}"] [data-v4-timeline-scro
 const desktopStatusScroller = '[data-testid="selfhost-status-panel"]';
 const mobileStatusScroller =
   '[data-slot="bottom-sheet-content"] > div:has(> [data-status-section])';
-const statusTrigger = (page, id = threadId) =>
-  sessionPane(page, id).getByRole("button", { name: "打开会话状态", exact: true });
 
 async function installFixture(page, origin) {
   let goal = initialGoal;
@@ -311,6 +319,7 @@ async function installFixture(page, origin) {
             },
             lastEventId: cursor,
             eventEpoch: "status-fixture",
+            ...(selected === other ? { readOnly: true, readOnlyReason: "activeWriter" } : {}),
             ...(selected?.parentThreadId ? { readOnly: true, readOnlyReason: "subagent" } : {}),
             ...(selected === parent && page.viewportSize().width >= 768
               ? { oldestTimelineCursor: "archived-agent-history" }
@@ -521,32 +530,6 @@ async function verifyIndependentStatusScroll(page, selector) {
   await scroller.evaluate((element) => (element.scrollTop = 0));
 }
 
-async function verifyTableInset(page, statusLeft) {
-  const selector = "[data-markdown-table-virtual-scroll-track]";
-  const track = page.locator(selector);
-  const expand = page.getByRole("button", { name: "展开表格滚动区域", exact: true });
-  await expand.waitFor();
-  const before = await track.boundingBox();
-  await expand.click();
-  await page.waitForFunction(
-    ({ selector, before }) => {
-      const track = document.querySelector(selector);
-      return (
-        track &&
-        track.getBoundingClientRect().width > before &&
-        track.parentElement.getAnimations().every((animation) => animation.playState !== "running")
-      );
-    },
-    { selector, before: before.width },
-  );
-  const box = await track.boundingBox();
-  assert(
-    box.x + box.width <= statusLeft,
-    "The expanded table track must stop before the status panel",
-  );
-  await page.getByRole("button", { name: "收回表格滚动区域", exact: true }).click();
-}
-
 async function verifyDesktop(page, origin, width, screenshots) {
   const fixture = await installFixture(page, origin);
   const status = panel(page);
@@ -609,6 +592,8 @@ async function verifyDesktop(page, origin, width, screenshots) {
   await collapse.focus();
   await collapse.press("Enter");
   await status.waitFor({ state: "hidden" });
+  await verifyHeaderStatusTrigger(page, parent.name);
+  await verifyCompactPet(sessionPane(page, threadId));
   await verifyMainTrack(page);
   assert.equal(await timelineScrollTop(page), reading);
   assert(await statusTrigger(page).evaluate((button) => button === document.activeElement));
@@ -645,6 +630,8 @@ async function verifyDesktop(page, origin, width, screenshots) {
   if (width === 1236) {
     await page.setViewportSize({ width: 950, height: viewportHeight });
     await status.waitFor({ state: "hidden" });
+    await verifyHeaderStatusTrigger(page, parent.name);
+    await verifyCompactPet(sessionPane(page, threadId));
     await verifyMainTrack(page);
     await statusTrigger(page).click();
     await status.waitFor();
@@ -708,7 +695,11 @@ async function verifyDesktop(page, origin, width, screenshots) {
   await verifyBotStatus(page, pet, fixture.emit);
   const otherTask = sidebar.getByText("第二个任务", { exact: true });
   await otherTask.click();
-  await page.getByText("另一会话内容", { exact: true }).waitFor();
+  const otherPane = sessionPane(page, otherId);
+  await otherPane.getByTestId("v4-workspace-readonly-notice").waitFor();
+  const closeSidePane = page.getByRole("button", { name: "收起侧边面板", exact: true });
+  if (await closeSidePane.isVisible()) await closeSidePane.click();
+  await verifyReadOnlyPet(otherPane, "rail");
   assert.equal(await status.getByText(objective, { exact: true }).count(), 0);
   assert.equal(await status.locator(`a[href="${typedLink}"]`).count(), 0);
   const otherStatus = sessionPane(page, otherId).getByRole("complementary", { name: "会话状态" });
@@ -723,7 +714,8 @@ async function verifyMobile(page, origin, screenshots) {
   await editor.waitFor();
   await panel(page).waitFor({ state: "hidden" });
   await verifyMainTrack(page, { label: "390px mobile" });
-  await page.locator('[data-codex-pet][data-pet-placement="composer"]').waitFor();
+  await verifyHeaderStatusTrigger(page, parent.name);
+  await verifyCompactPet(sessionPane(page, threadId));
   if (screenshots)
     await page.screenshot({
       path: join(screenshots, "status-390-closed.png"),
@@ -746,6 +738,7 @@ async function verifyMobile(page, origin, screenshots) {
     });
   await sheet.getByRole("button", { name: "关闭会话状态", exact: true }).click();
   await sheet.waitFor({ state: "hidden" });
+  await page.waitForFunction(() => document.activeElement?.hasAttribute("data-session-status-toggle"));
   assert.equal(await timelineScrollTop(page), reading);
   await editor.click();
   await editor.pressSequentially("draft");
@@ -754,8 +747,12 @@ async function verifyMobile(page, origin, screenshots) {
   await sheet.getByRole("button", { name: /项目审阅/ }).click();
   await sheet.waitFor({ state: "hidden" });
   await verifyChildDetails(page, child);
+  assert.equal(await sessionPane(page, childId).locator("[data-codex-pet]").count(), 0);
   if (screenshots)
     await page.screenshot({ path: join(screenshots, "subagent-390.png"), animations: "disabled" });
+  await page.getByRole("button", { name: "返回任务首页", exact: true }).click();
+  await page.getByTestId(`task-item-${otherId}`).click();
+  await verifyReadOnlyPet(sessionPane(page, otherId), "composer");
   fixture.verifyClean();
 }
 
@@ -783,6 +780,7 @@ try {
     ignoreDefaultArgs: ["--hide-scrollbars"],
   });
   try {
+    await verifyBrowserStartup(browser, origin);
     for (const width of [1236, 1480, 390]) {
       const page = await browser.newPage({
         viewport: { width, height: viewportHeight },

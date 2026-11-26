@@ -7,7 +7,7 @@ import type {
   RemoteTarget,
   UserInfo,
 } from "@zcode/shared";
-import { useState } from "react";
+import { type Ref, useState } from "react";
 import { TID_WORKSPACE_HEADER } from "@zcode/shared/test-ids";
 import type { ConversationDropTargetController } from "@/v4/composer/conversationDropTarget.js";
 import { cn } from "@/components/lib/utils.js";
@@ -82,6 +82,7 @@ export function WorkspaceHeader({
   isSidebarVisible,
   isTerminalOpen,
   isSidePaneOpen,
+  statusTriggerRef,
   onRefreshGit,
   onToggleTerminal,
   onToggleSidePane,
@@ -130,6 +131,7 @@ export function WorkspaceHeader({
   isSidebarVisible: boolean;
   isTerminalOpen: boolean;
   isSidePaneOpen: boolean;
+  statusTriggerRef?: Ref<HTMLDivElement>;
   onRefreshGit: () => void;
   onToggleTerminal: () => void;
   onToggleBrowser: () => void;
@@ -236,6 +238,7 @@ export function WorkspaceHeader({
           isDesktop={isDesktop}
           isTerminalOpen={isTerminalOpen}
           isSidePaneOpen={isSidePaneOpen}
+          statusTriggerRef={variant === "task" ? statusTriggerRef : undefined}
           onToggleTerminal={onToggleTerminal}
           onToggleSidePane={onToggleSidePane}
           toggleSidePaneShortcutLabel={toggleSidePaneShortcutLabel}

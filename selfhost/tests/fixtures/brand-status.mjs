@@ -104,3 +104,79 @@ export async function verifyBotStatus(page, pet, emit) {
     await pet.locator('[data-bot-engine="anatomy"][data-bot-motion="finished"]').waitFor();
   }
 }
+
+async function verifyStartup(page, origin, reducedMotion) {
+  await page.emulateMedia({ reducedMotion });
+  const app = Promise.withResolvers();
+  await page.route(/\/assets\/index-[^/]+\.js$/, async (route) => {
+    await app.promise;
+    await route.continue();
+  });
+  try {
+    await page.goto(origin, { waitUntil: "commit" });
+    const splash = page.locator(".zcode-boot-loading");
+    await splash.waitFor();
+    const anatomy = (await page.locator('meta[name="codex-bot-anatomy"]').count()) === 1;
+    if (anatomy) {
+      await splash.locator("svg path[d]").first().waitFor({ state: "attached" });
+    }
+    const frames = await splash.evaluate(async (element) => {
+      const read = () => {
+        const paths = Array.from(element.querySelectorAll("svg path[d]"));
+        return paths.length
+          ? JSON.stringify(paths.map((path) => path.getAttribute("d")))
+          : getComputedStyle(element.querySelector(".zcode-boot-loading__logo")).transform;
+      };
+      const samples = new Set();
+      const start = performance.now();
+      while (performance.now() - start < 450) {
+        await new Promise(requestAnimationFrame);
+        samples.add(read());
+      }
+      return samples.size;
+    });
+    assert.equal(frames > 1, reducedMotion === "no-preference", "The initial splash follows motion preferences");
+  } finally {
+    app.resolve();
+  }
+  await page.locator(".zcode-boot-loading").waitFor({ state: "detached" });
+}
+
+export async function verifyBrowserStartup(browser, origin) {
+  for (const reducedMotion of ["no-preference", "reduce"]) {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(10000);
+    try {
+      await verifyStartup(page, origin, reducedMotion);
+      console.log(`PASS initial splash (${reducedMotion})`);
+    } finally {
+      await page.close();
+    }
+  }
+}
+
+export async function verifyCompactPet(pane) {
+  const pet = pane.locator('[data-codex-pet][data-pet-placement="composer"]');
+  await pet.waitFor();
+  const anchor = pane.locator('[data-codex-pet-anchor="composer"]');
+  const dock = pane.locator("[data-v4-composer-dock-content]");
+  const transition = pane.getByTestId("conversation-bottom-dock-transition");
+  const [slot, dockBox, transitionBox] = await Promise.all(
+    [anchor, dock, transition].map((element) => element.boundingBox()),
+  );
+  assert.equal(await anchor.evaluate((element) => getComputedStyle(element).position), "absolute");
+  assert(Math.abs(dockBox.height - transitionBox.height) <= 1, "The compact pet adds no dock height");
+  assert(Math.abs(slot.y + slot.height - dockBox.y) <= 2, "Its anchor touches the top edge of the dock");
+  assert(slot.x + slot.width <= dockBox.x + dockBox.width, "The pet is at the upper right of the dock");
+}
+
+export async function verifyReadOnlyPet(pane, placement) {
+  await pane.getByText("另一会话内容", { exact: true }).waitFor();
+  const notice = pane.getByTestId("v4-workspace-readonly-notice");
+  await notice.getByText(/此会话由另一端持有/).waitFor();
+  assert.equal(await pane.getByTestId("v4-composer-input").count(), 0);
+  assert(await notice.getByRole("button", { name: "重新连接", exact: true }).isEnabled());
+  if (placement === "composer") await verifyCompactPet(pane);
+  else await pane.locator('[data-codex-pet][data-pet-placement="rail"]').waitFor();
+  assert.equal(await pane.locator("[data-codex-pet]").count(), 1);
+}

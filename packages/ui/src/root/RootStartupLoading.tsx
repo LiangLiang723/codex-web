@@ -19,7 +19,7 @@ export function RootStartupLoading({ label, children, busy = true }: RootStartup
       aria-label={label}
       data-testid="root-startup-loading"
     >
-      <ZCodeStartupLogoBadge />
+      <ZCodeStartupLogoBadge animated={busy} loading={busy} />
       {children}
     </div>
   );
@@ -28,9 +28,11 @@ export function RootStartupLoading({ label, children, busy = true }: RootStartup
 /** 初始化与引导共用品牌图标，使用与浏览器一致的桌宠轮廓。 */
 export function ZCodeStartupLogoBadge({
   animated = true,
+  loading = false,
   size = "default",
 }: {
   animated?: boolean;
+  loading?: boolean;
   size?: "default" | "titlebar";
 }) {
   return (
@@ -41,7 +43,12 @@ export function ZCodeStartupLogoBadge({
         size === "titlebar" ? "size-5" : "size-24",
       )}
     >
-      <BotAvatar className={size === "titlebar" ? "size-4" : "size-16"} animated={animated} />
+      <BotAvatar
+        className={size === "titlebar" ? "size-4" : "size-16"}
+        animated={animated}
+        mood={loading ? "working" : "idle"}
+        motion={loading ? "loading" : "idle"}
+      />
     </div>
   );
 }

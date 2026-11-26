@@ -209,6 +209,40 @@ const bundle = await build({
       Object.assign(data.states, ${JSON.stringify(previewStates)});
       export const createBot = (host, options = {}) =>
         createGrokBot(host, { ...options, data, outline: outlines[options.shape] });
+
+      // HTML 启动壳早于 React 出现。独立加载同一模块，首帧就绪后再替换主题标志。
+      const bootHost = globalThis.document?.querySelector(".zcode-boot-loading__anatomy");
+      const root = bootHost?.closest("#root");
+      if (bootHost && root) {
+        const media = matchMedia("(prefers-reduced-motion: reduce)");
+        let player;
+        const mount = () => {
+          player?.destroy();
+          const next = createBot(bootHost, {
+            size: 72,
+            state: media.matches ? "idle" : "loading",
+            reducedMotion: media.matches,
+            maxFps: 30,
+            seed: "startup",
+            theme: { inkPaint: "currentColor", spotPaint: "currentColor", cutout: true },
+          });
+          player = next;
+          void next.ready.then(() => {
+            if (player === next && next.el && bootHost.isConnected) {
+              bootHost.parentElement.dataset.botEngine = "anatomy";
+            }
+          });
+        };
+        const observer = new MutationObserver(() => {
+          if (bootHost.isConnected) return;
+          player.destroy();
+          media.removeEventListener("change", mount);
+          observer.disconnect();
+        });
+        observer.observe(root, { childList: true });
+        media.addEventListener("change", mount);
+        mount();
+      }
     `,
   },
   format: "esm",
@@ -253,5 +287,10 @@ await Promise.all([
   writeFile(join(output, "codex-bot-light.svg"), favicon("#161616")),
   writeFile(join(output, "codex-bot-dark.svg"), favicon("#ffffff")),
 ]);
-await writeFile(indexPath, index.replace("<head>", `<head>\n    <meta name="codex-bot-anatomy" content="assets/${filename}">`));
+await writeFile(
+  indexPath,
+  index
+    .replace("<head>", `<head>\n    <meta name="codex-bot-anatomy" content="assets/${filename}">`)
+    .replace("</body>", `  <script type="module" async src="/assets/${filename}"></script>\n  </body>`),
+);
 console.log(`Anatomy preview: ${clips.length} clips, ${Object.keys(recipes.states).length} states, ${shapes.length} shapes.`);
