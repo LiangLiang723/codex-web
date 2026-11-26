@@ -59,9 +59,9 @@ export function mapSkillsToMentionItemsForTest(
     const codexSource =
       skill.pluginId ??
       (skill.codexScope === "system"
-        ? messages["settings.skills.codexSystem"]
+        ? messages?.["settings.skills.codexSystem"]
         : skill.codexScope === "admin"
-          ? messages["settings.skills.codexAdmin"]
+          ? messages?.["settings.skills.codexAdmin"]
           : undefined);
     const sourceLabel =
       (selfHostedBuild ? codexSource : undefined) ?? resolveSkillSourceLabel(skill.scope, locale);

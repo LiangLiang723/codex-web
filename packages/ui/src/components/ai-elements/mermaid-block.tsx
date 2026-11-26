@@ -1,6 +1,6 @@
 "use client";
 
-import { createMermaidPlugin, type MermaidConfig } from "@streamdown/mermaid";
+import type { MermaidConfig } from "@streamdown/mermaid";
 import { LoaderCircle } from "lucide-react";
 import type { HTMLAttributes } from "react";
 import { useEffect, useId, useMemo, useState } from "react";
@@ -33,7 +33,6 @@ export interface MermaidBlockProps extends HTMLAttributes<HTMLDivElement> {
   onPreviewSvgChange?: (svg: string | null) => void;
 }
 
-const mermaidPlugin = createMermaidPlugin();
 let mermaidRenderQueue = Promise.resolve();
 const MERMAID_COLOR_CANVAS_SENTINEL = "#010203";
 
@@ -256,10 +255,6 @@ export function MermaidBlock({
   const trimmedCode = code.trim();
   const resolvedTheme = resolveBrowserTheme(theme);
   const themeKey = `${theme}:${resolvedTheme}:${systemThemeRevision}`;
-  const mermaidConfig = useMemo(
-    () => createMermaidConfig(resolvedTheme),
-    [resolvedTheme, themeKey],
-  );
   const renderKey = useMemo(
     () => `${themeKey}:${hashMermaidCode(trimmedCode)}`,
     [themeKey, trimmedCode],
@@ -281,10 +276,14 @@ export function MermaidBlock({
 
     setRenderState({ status: "loading" });
     onPreviewSvgChange?.(null);
+    const mermaidConfig = createMermaidConfig(resolvedTheme);
     const renderId = `zcode-mermaid-${renderIdPrefix}-${hashMermaidCode(renderKey)}`;
 
     void enqueueMermaidRender(async () => {
-      const renderer = mermaidPlugin.getMermaid(mermaidConfig);
+      // 代码块和文件预览共用这条渲染队列，普通正文不提前加载 Mermaid 引擎。
+      const { mermaid } = await import("@streamdown/mermaid");
+      if (cancelled) return { svg: "" };
+      const renderer = mermaid.getMermaid(mermaidConfig);
       return renderer.render(renderId, trimmedCode);
     })
       .then(({ svg }) => {
@@ -311,7 +310,7 @@ export function MermaidBlock({
       cancelled = true;
       onPreviewSvgChange?.(null);
     };
-  }, [intl, mermaidConfig, onPreviewSvgChange, renderIdPrefix, renderKey, trimmedCode]);
+  }, [intl, onPreviewSvgChange, renderIdPrefix, renderKey, resolvedTheme, trimmedCode]);
 
   return (
     <div

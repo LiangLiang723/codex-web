@@ -1,8 +1,27 @@
-import { useEffect } from "react";
-import { SettingsPage } from "@/SettingsPage.js";
+import { lazy, Suspense, useEffect, type ComponentProps } from "react";
+import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { ServiceProvider } from "@/hooks/useServices.js";
 import { logger } from "@/logger.js";
 import type { WorkspaceSettingsLayerProps } from "@/root/types.js";
+
+const SettingsPageContent = lazy(() =>
+  import("@/SettingsPage.js").then(({ SettingsPage }) => ({ default: SettingsPage })),
+);
+
+export function SettingsPage(props: ComponentProps<typeof SettingsPageContent>) {
+  const { intl } = useZCodeIntl();
+  return (
+    <Suspense
+      fallback={
+        <div role="status" className="p-3 text-ui-base text-foreground-subtle">
+          {intl.formatMessage({ id: "common.loading" })}
+        </div>
+      }
+    >
+      <SettingsPageContent {...props} />
+    </Suspense>
+  );
+}
 
 export function WorkspaceSettingsLayer({
   workspaceScopedServices,

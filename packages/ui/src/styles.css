@@ -3,7 +3,6 @@
 @import "tailwind-scrollbar-hide/v4";
 @import "shadcn/tailwind.css";
 @import "@xterm/xterm/css/xterm.css";
-@import "katex/dist/katex.min.css";
 @import "./highspeed/highspeed-activation.css";
 @import "./highspeed/highspeed-share.css";
 @import "./nativeMediaControls.css";
@@ -34,9 +33,6 @@
 .cloud-content-dialog [data-slot="dialog-close"]:hover {
   background-color: var(--media-close-surface-hover);
 }
-
-/* Bugfix: KaTeX 会同时输出 MathML 辅助层和 HTML 视觉层；缺少 katex CSS 时两层都会显示，
- * 行内公式和块级公式就会看起来“渲染一遍又普通文本一遍”。 */
 
 /* Bugfix: Linux desktop 的窗口标题栏由 renderer 自绘，部分 overlay 需要只在该平台避开标题栏点击区。 */
 @custom-variant platform-linux-desktop (&:where(.platform-linux-desktop, .platform-linux-desktop *));

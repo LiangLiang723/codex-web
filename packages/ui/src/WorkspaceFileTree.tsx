@@ -1,8 +1,15 @@
 import { usePanelRef } from "react-resizable-panels";
 import { logger } from "@/logger.js";
-import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+} from "react";
 import { FolderOpenIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
-import { PreviewPane } from "@/PreviewPane.js";
 import { WorkspaceFileTree } from "@/workspace-file-tree/WorkspaceFileTree.js";
 import { Button } from "@/components/ui/button.js";
 import { cn } from "@/components/lib/utils.js";
@@ -19,6 +26,10 @@ import {
 } from "@/components/ui/resizable.js";
 
 export { WorkspaceFileTree };
+
+const PreviewPane = lazy(() =>
+  import("@/PreviewPane.js").then(({ PreviewPane }) => ({ default: PreviewPane })),
+);
 const FILE_MANAGER_PANEL_IDS = ["directory", "preview"];
 
 type FileManagerPaneProps = Omit<ComponentProps<typeof PreviewPane>, "source"> & {
@@ -195,7 +206,15 @@ export function FileManagerPane({
           className="min-h-0 min-w-0"
         >
           {source ? (
-            <PreviewPane {...previewProps} source={source} headerContainer={headerContainer} />
+            <Suspense
+              fallback={
+                <div role="status" className="p-3 text-ui-base text-foreground-subtle">
+                  {intl.formatMessage({ id: "common.loading" })}
+                </div>
+              }
+            >
+              <PreviewPane {...previewProps} source={source} headerContainer={headerContainer} />
+            </Suspense>
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-ui-base text-foreground-subtle">
               <FolderOpenIcon className="size-6" />

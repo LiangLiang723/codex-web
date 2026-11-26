@@ -16,14 +16,7 @@ import {
 } from "virtual:gateway-terminal-stream";
 
 const settingsSchema = z.record(z.string(), z.unknown());
-const remoteChannels = new Set([
-  "file",
-  "system",
-  "git",
-  "memory",
-  "commands",
-  "output-style",
-]);
+const remoteChannels = new Set(["file", "system", "git", "memory", "commands", "output-style"]);
 function modelView(models: RemoteModel[], preference: unknown, hostDefault: Message = {}) {
   const input = rec(preference);
   const model =
@@ -108,15 +101,20 @@ function projectRow(project: Project, position: number) {
   };
 }
 
+export function readWorkspaceSettings(gateway: Gateway) {
+  return gateway.request("/api/selfhost/settings", settingsSchema);
+}
+
 export async function openWorkspace(
   gateway: Gateway,
   hostId: number,
   cwd: string,
   manage: () => void,
   onThreadDeleted?: (threadId: string) => void,
+  initialPreferences?: Promise<Message>,
 ) {
   // 模型目录可单独失败，文件和可读历史不以 model/list 成功作为工作区挂载条件。
-  let preferences = await gateway.request("/api/selfhost/settings", settingsSchema);
+  let preferences = await (initialPreferences ?? readWorkspaceSettings(gateway));
   const models: RemoteModel[] = [];
   const catalogs = new Map<string, Promise<RemoteModel[]>>();
   function catalog(provider = "") {
@@ -291,8 +289,7 @@ export async function openWorkspace(
           publishDeletion(deleted.threadId);
         else bridge.tasks.invalidate();
         emit("broadcast", "onMessage", { channel: "state:projects", payload: {} });
-        void gateway
-          .request("/api/selfhost/settings", settingsSchema)
+        void readWorkspaceSettings(gateway)
           .then((v) => {
             preferences = v;
             emit("setting", "onDidChange", appSettingsSchema.parse(v));

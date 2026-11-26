@@ -39,11 +39,13 @@ export default defineConfig(({ mode, command }) => {
         {
           name: "selfhost-web-entry",
           resolveId(id: string) {
+            if (id === "virtual:selfhost-locale-messages") return "\0selfhost-locale-messages.js";
             if (id === "virtual:zcode-projection-state") return "\0zcode-projection-state.js";
             if (id === "virtual:gateway-terminal-stream") return "\0gateway-terminal-stream.js";
             if (id === "virtual:selfhost-workspace-icons") return "\0selfhost-workspace-icons.js";
           },
           async load(id: string) {
+            if (id === "\0selfhost-locale-messages.js") return "export const LOCALE_MESSAGES = {};";
             if (id === "\0selfhost-workspace-icons.js") {
               const metadata = parseYaml(
                 await readFile(
@@ -140,6 +142,11 @@ export default defineConfig(({ mode, command }) => {
     ],
     resolve: {
       alias: [
+        // 自托管入口让 IntlProvider 从空表按需装配词典，其他构建沿用同步文案表。
+        {
+          find: /^@\/i18n\/localeMessages\.js$/,
+          replacement: "virtual:selfhost-locale-messages",
+        },
         // 修复 UI 组件库中的 @ 别名解析失败。
         // 问题原因：packages/ui 的源码直接被 web 应用交给 Vite 打包，但 web 自己没声明 @ -> packages/ui/src，
         // 所以像 "@/components/lib/utils" 这类导入会在运行时构建阶段报找不到模块。

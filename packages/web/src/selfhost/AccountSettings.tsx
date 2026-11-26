@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { z } from "zod";
-import { useZCodeIntl } from "@zcode/ui";
+import { useZCodeIntl, ZCodeIntlProvider } from "@zcode/ui/i18n";
 import { Button } from "@zcode/ui/button";
 import { Input } from "@zcode/ui/input";
 import { WorkspaceAvatar } from "@zcode/ui/workspace-avatar";
@@ -220,5 +220,13 @@ export function AccountSettings({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+export function AccountSettingsRoute(props: Parameters<typeof AccountSettings>[0]) {
+  return (
+    <ZCodeIntlProvider>
+      <AccountSettings {...props} />
+    </ZCodeIntlProvider>
   );
 }

@@ -11,8 +11,7 @@ import { ButtonGroup, ButtonGroupText } from "../ui/button-group.js";
 import { cn } from "../lib/utils.js";
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
-import { createMathPlugin } from "@streamdown/math";
-import { mermaid } from "@streamdown/mermaid";
+import type { MathPlugin } from "@streamdown/math";
 import type { EditorInfo, FileStat, OpenInEditorOptions } from "@zcode/shared";
 import type { UIMessage } from "ai";
 import {
@@ -418,9 +417,24 @@ export interface MessageFileLinkTarget {
   lineRanges?: readonly MarkdownFileLinkLineRange[];
 }
 
-// @streamdown/math 默认不解析 `$...$` 行内公式，导致客户消息里块级 `$$...$$`
-// 能渲染而 `$c(\mathbf{r})$` 会原样显示；聊天消息需要兼容常见 Markdown/LaTeX 输出。
-const messageMathPlugin = createMathPlugin({ singleDollarTextMath: true });
+let loadedMessageMath: MathPlugin | undefined;
+let messageMathRequest: Promise<MathPlugin> | undefined;
+
+function loadMessageMath() {
+  // KaTeX 样式与渲染器一同就绪，避免公式的视觉层和 MathML 辅助层同时显示。
+  return (messageMathRequest ??= Promise.all([
+    import("@streamdown/math"),
+    import("katex/dist/katex.min.css"),
+  ])
+    .then(([{ createMathPlugin }]) => {
+      loadedMessageMath = createMathPlugin({ singleDollarTextMath: true });
+      return loadedMessageMath;
+    })
+    .catch((error: unknown) => {
+      messageMathRequest = undefined;
+      throw error;
+    }));
+}
 
 function disableSingleTilde(plugin: Pluggable): Pluggable {
   if (!Array.isArray(plugin)) {
@@ -446,7 +460,7 @@ const messageCjkPlugin: typeof cjk = {
   remarkPlugins: [...cjk.remarkPluginsBefore, ...messageCjkRemarkPluginsAfter],
   remarkPluginsAfter: messageCjkRemarkPluginsAfter,
 };
-const streamdownPlugins = { cjk: messageCjkPlugin, code, math: messageMathPlugin, mermaid };
+const streamdownPlugins = { cjk: messageCjkPlugin, code };
 const messageLinkSafety = { enabled: false } as const;
 // `decoration-dashed` 会把原有的细圆点下划线绘制成短线段；这里只改变下划线的
 // 出现时机，继续使用 `dotted` 保留原视觉形态。
@@ -718,6 +732,15 @@ function normalizeMessageSingleDollarMath(markdown: string): string {
   }
 
   return output;
+}
+
+function hasMessageMath(markdown: string): boolean {
+  if (/(?:`{3,}|~{3,})[ \t]*math(?:\s|$)/i.test(markdown)) return true;
+  let delimiters = 0;
+  for (let index = markdown.indexOf("$"); index !== -1; index = markdown.indexOf("$", index + 1)) {
+    if (!isEscapedMarkdownCharacter(markdown, index) && ++delimiters === 2) return true;
+  }
+  return false;
 }
 
 export function resolveMessageStreamdownMode(renderStreaming: boolean): MessageStreamdownMode {
@@ -1985,6 +2008,30 @@ export const MessageResponse = memo(
         ),
       [projectedCitationMarkdown],
     );
+    const needsMath = useMemo(() => hasMessageMath(targetMarkdown), [targetMarkdown]);
+    const [mathPlugin, setMathPlugin] = useState(() => loadedMessageMath);
+    useEffect(() => {
+      if (!needsMath || mathPlugin) return;
+      let active = true;
+      void loadMessageMath().then(
+        (plugin) => {
+          if (active) setMathPlugin(plugin);
+        },
+        (error: unknown) => {
+          logger.warn("[MessageResponse] 数学公式渲染器加载失败", {
+            error: normalizeMarkdownRenderError(error).message,
+          });
+        },
+      );
+      return () => {
+        active = false;
+      };
+    }, [mathPlugin, needsMath]);
+    const math = needsMath ? mathPlugin : undefined;
+    const plugins = useMemo(
+      () => (math ? { ...streamdownPlugins, math } : streamdownPlugins),
+      [math],
+    );
     const streamdownMode = resolveMessageStreamdownMode(renderStreaming);
     // 逐词浮现：插件实例按消息挂一次，引用必须稳定——Streamdown 的 Block 比较器
     // 按引用比 rehypePlugins 数组，换引用会让所有块失效重解析。
@@ -2278,7 +2325,7 @@ export const MessageResponse = memo(
         scope={boundaryScope}
       >
         <Streamdown
-          key={streamdownRenderKey}
+          key={math ? streamdownRenderKey + ":math" : streamdownRenderKey}
           className={responseClassName}
           // Streamdown 自身是 memo，比较函数不看 components。app light/dark 切换时
           // codeBlockTheme 只存在于自定义 code renderer 闭包里，若不改 key，当前 task 已挂载的
@@ -2299,7 +2346,7 @@ export const MessageResponse = memo(
           // 说明：这里继续关掉 Streamdown 默认链接行为，统一改由上面的自定义 a 渲染器接管。
           // 这样工作区文件链接和 http/https 外链都能走我们自己的安全分流，其它协议仍保持不可点击。
           linkSafety={messageLinkSafety}
-          plugins={streamdownPlugins}
+          plugins={plugins}
           controls={STREAMDOWN_CONTROLS}
           // Streamdown 的 harden 插件会在自定义 a renderer 之前把 file:// 标成 [blocked]。
           // 这里先把 file URI 规整成本地路径 href，让后续 resolveMarkdownFileLink 统一走预览/文件树打开逻辑。

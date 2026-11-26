@@ -84,10 +84,24 @@ function resolveBoundaryLocale(): Locale {
   return DEFAULT_LOCALE;
 }
 
+// 登录入口和词典下载失败时，错误边界也需要可同步显示的恢复操作。
+const startupErrorMessages: Record<string, string> = {
+  "appError.title": "The app ran into a problem",
+  "appError.description": "Try again or reload the app.",
+  "appError.retry": "Try again",
+  "appError.reload": "Reload app",
+  "appError.hint": "Reloading also retrieves the current version of the app.",
+  "appError.details": "View component stack",
+  "appError.unknown": "Unknown error",
+  "appError.sectionTitle": "This section ran into a problem",
+  "appError.sectionDescription": "Try opening this section again.",
+  "appError.sectionRetry": "Try this section again",
+  "appError.sectionHint": "You can reload the app if the problem persists.",
+};
+
 function formatBoundaryMessage(id: string): string {
   const locale = resolveBoundaryLocale();
-  const messages = LOCALE_MESSAGES[locale];
-  return messages[id] ?? id;
+  return LOCALE_MESSAGES[locale]?.[id] ?? startupErrorMessages[id] ?? id;
 }
 
 function haveResetKeysChanged(

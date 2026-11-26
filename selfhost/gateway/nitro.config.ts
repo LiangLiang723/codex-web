@@ -4,7 +4,19 @@ import { defineNitroConfig } from "nitropack/config";
 export default defineNitroConfig({
   srcDir: "server",
   preset: "node-server",
-  publicAssets: [{ dir: fileURLToPath(new URL("./public", import.meta.url)), maxAge: 0 }],
+  publicAssets: [
+    {
+      dir: fileURLToPath(new URL("./public/assets", import.meta.url)),
+      baseURL: "/assets",
+      maxAge: 31_536_000,
+    },
+    { dir: fileURLToPath(new URL("./public", import.meta.url)), maxAge: 0 },
+  ],
+  compressPublicAssets: { gzip: true, brotli: true },
+  routeRules: {
+    "/": { headers: { "cache-control": "no-cache" } },
+    "/index.html": { headers: { "cache-control": "no-cache" } },
+  },
   compatibilityDate: "2025-07-15",
   alias: { "~~": fileURLToPath(new URL(".", import.meta.url)) },
   experimental: { websocket: true, tasks: true },
