@@ -36,6 +36,15 @@ const [recipesText, shapeText, originalPlayer, index] = await Promise.all([
 ]);
 const recipes = JSON.parse(recipesText);
 const clips = recipes.clips.map(({ name }) => name);
+const clipDurations = new Map(recipes.clips.map(({ name, duration }) => [name, duration]));
+const stateDurations = Object.fromEntries(
+  Object.entries(recipes.states).map(([name, state]) => {
+    const cycle = state.clips.reduce((total, clip) => total + clipDurations.get(clip), 0);
+    const duration = Math.min(cycle, state.holdSeconds ?? cycle);
+    assert(Number.isFinite(duration) && duration > 0, `Missing clip duration for ${name}`);
+    return [name, Math.round(duration * 1_000)];
+  }),
+);
 assert.equal(new Set(clips).size, 28);
 assert.equal(Object.keys(recipes.states).length, 53);
 assert(index.includes("<head>") && !index.includes('name="codex-bot-anatomy"'));
@@ -189,6 +198,12 @@ adapt(
   "createRuntime(G, { zoomMul: opts.zoomMul ?? 1, isGazeAlways:",
   "createRuntime(G, { body: opts.outline ? opts.shape : undefined, zoomMul: opts.zoomMul ?? 1, isGazeAlways:",
 );
+adapt(
+  "rt.setGaze(ex(rect, { x: e.clientX, y: e.clientY }));",
+  `// SVG 镜像后将指针换算回绘图坐标，桌宠仍朝实际指针看。
+    const x = opts.isMirrored?.() ? rect.left + rect.right - e.clientX : e.clientX;
+    rt.setGaze(ex(rect, { x, y: e.clientY }));`,
+);
 
 // 预览选项直接使用原始轨道。新增的是播放入口，原有状态与数据始终保持原样。
 const previewStates = {
@@ -206,6 +221,7 @@ const bundle = await build({
       export const lifecycleGroups = data.lifecycleGroups;
       export const shapes = data.shapes.names;
       export const states = { ...data.states };
+      export const stateDurations = ${JSON.stringify(stateDurations)};
       Object.assign(data.states, ${JSON.stringify(previewStates)});
       export const createBot = (host, options = {}) =>
         createGrokBot(host, { ...options, data, outline: outlines[options.shape] });

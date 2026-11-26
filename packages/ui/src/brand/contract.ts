@@ -10,6 +10,8 @@ export type BotShape = (typeof BOT_SHAPE_NAMES)[number];
 export const BOT_SIZES = { small: 0.8, regular: 1, large: 1.22 } as const;
 export const BOT_PERSONALITIES = ["curious", "playful", "calm"] as const;
 export type BotPersonality = (typeof BOT_PERSONALITIES)[number];
+export const BOT_FACING_MODES = ["auto", "mirrored", "original"] as const;
+export type BotFacingMode = (typeof BOT_FACING_MODES)[number];
 
 export interface ConversationPetPreferences {
   shape: BotShape;
@@ -20,6 +22,8 @@ export interface ConversationPetPreferences {
   clickReactions: boolean;
   personality: BotPersonality;
   spontaneous: boolean;
+  facing: BotFacingMode;
+  allActions: boolean;
 }
 
 export const DEFAULT_PET_PREFERENCES: ConversationPetPreferences = {
@@ -31,6 +35,8 @@ export const DEFAULT_PET_PREFERENCES: ConversationPetPreferences = {
   clickReactions: true,
   personality: "curious",
   spontaneous: true,
+  facing: "auto",
+  allActions: false,
 };
 
 export function normalizePetPreferences(value: unknown): ConversationPetPreferences {
@@ -50,6 +56,10 @@ export function normalizePetPreferences(value: unknown): ConversationPetPreferen
       ? saved.personality
       : DEFAULT_PET_PREFERENCES.personality,
     spontaneous: saved.spontaneous !== false,
+    facing: saved.facing && BOT_FACING_MODES.includes(saved.facing)
+      ? saved.facing
+      : DEFAULT_PET_PREFERENCES.facing,
+    allActions: saved.allActions === true,
   };
 }
 
@@ -76,6 +86,7 @@ export interface BotAvatarProps extends Omit<
   mood?: BotMood;
   animated?: boolean;
   followPointer?: boolean;
+  mirrored?: boolean;
   motion?: string;
   explicitPlayback?: boolean;
   shape?: BotShape;

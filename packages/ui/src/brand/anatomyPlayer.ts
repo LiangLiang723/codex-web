@@ -7,11 +7,12 @@ interface AnatomyPlayer {
   destroy: () => void;
 }
 
-interface AnatomyProfile {
+export interface AnatomyProfile {
   clips: string[];
   lifecycleGroups: { label: string; states: string[] }[];
   shapes: BotShape[];
   states: Record<string, { clips: string[]; face?: string; morph?: string; next?: string; holdSeconds?: number }>;
+  stateDurations?: Readonly<Record<string, number>>;
   createBot: (
     container: SVGElement,
     options: {
@@ -20,6 +21,7 @@ interface AnatomyProfile {
       compact: boolean;
       seed: string;
       follow: boolean;
+      isMirrored?: () => boolean;
       staticMode: boolean;
       reducedMotion: boolean;
       shape: BotShape;

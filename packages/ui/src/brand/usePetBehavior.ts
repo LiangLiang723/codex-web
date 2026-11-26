@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
+import type { AnatomyProfile } from "./anatomyPlayer.js";
 import type { ConversationPetActivity, ConversationPetProps } from "./contract.js";
 import {
   choosePetGesture,
@@ -27,17 +28,18 @@ const priorityActivities = new Set<ConversationPetActivity>([
 
 export function usePetBehavior(
   pet: RefObject<HTMLDivElement | null>,
-  enabled: boolean,
+  anatomy: AnatomyProfile | null,
   activity: ConversationPetProps["activity"],
   completion: ConversationPetProps["completion"],
   conversationKey: ConversationPetProps["conversationKey"],
   onComposerActivity: ConversationPetProps["onComposerActivity"],
-  { idleMotion, clickReactions, personality, spontaneous }: ConversationPetProps["preferences"],
+  { idleMotion, clickReactions, personality, spontaneous, allActions }: ConversationPetProps["preferences"],
 ) {
   const [displayed, setDisplayed] = useState<DisplayedCue | null>(null);
   const last = useRef({ activity, conversationKey, activeSince: 0 });
   const emotion = useRef<{ kind: PetEmotion; until: number }>({ kind: "settled", until: 0 });
   const previousGesture = useRef<string | undefined>(undefined);
+  const remainingActions = useRef<string[]>([]);
   const interact = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -52,10 +54,13 @@ export function usePetBehavior(
     };
 
     const pane = pet.current?.parentElement;
-    if (!enabled || !pane) {
+    if (!allActions) remainingActions.current = [];
+    if (!anatomy || !pane) {
       setDisplayed(null);
       return;
     }
+    const fullCatalogue = allActions ? Object.keys(anatomy.states) : [];
+    const stateDurations = anatomy.stateDurations;
 
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
     const timing = petTiming[personality];
@@ -107,6 +112,13 @@ export function usePetBehavior(
       const drowsyAt = sleepAt - 5_000;
       if (time >= sleepAt) {
         show("sleeping");
+        if (ambientAllowed && fullCatalogue.length > 0) {
+          // 全部动作模式的小睡有结束时间，避免桌宠在前台无限睡眠、停在半轮。
+          timer = window.setTimeout(() => {
+            resetSleep();
+            play("waking", 1_700, "session");
+          }, randomPetDelay(ambientDelay));
+        }
         return;
       }
       if (time >= drowsyAt) {
@@ -116,9 +128,26 @@ export function usePetBehavior(
       }
       if (time >= ambientAt) {
         const choices = idle ? petGestures.idle : petGestures.active;
-        const gesture = choosePetGesture(choices, personality, mood(), previousGesture.current);
+        const fullRound = fullCatalogue.length > 0;
+        if (fullRound && remainingActions.current.length === 0) {
+          remainingActions.current = [...fullCatalogue];
+        }
+        const candidates = fullRound
+          ? remainingActions.current.map((motion) => {
+              const affinity = choices.find((item) => item.motion === motion) ??
+                petGestures.touch.find((item) => item.motion === motion);
+              return { ...affinity, motion, duration: stateDurations?.[motion] ?? affinity?.duration ?? 4_000 };
+            })
+          : choices;
+        const gesture = choosePetGesture(candidates, personality, mood(), previousGesture.current);
         previousGesture.current = gesture.motion;
-        play(gesture.motion, gesture.duration, "spontaneous");
+        play(gesture.motion, gesture.duration, "spontaneous", () => {
+          // 被真实会话活动打断的动作仍留在当轮，等下一次自主播放机会。
+          if (fullRound) {
+            remainingActions.current = remainingActions.current.filter((motion) => motion !== gesture.motion);
+          }
+          resume();
+        });
         return;
       }
       show(null);
@@ -202,10 +231,11 @@ export function usePetBehavior(
     };
   }, [
     activity,
+    allActions,
+    anatomy,
     clickReactions,
     completion,
     conversationKey,
-    enabled,
     idleMotion,
     onComposerActivity,
     personality,
@@ -214,7 +244,7 @@ export function usePetBehavior(
   ]);
 
   const cue =
-    enabled &&
+    anatomy &&
     displayed?.activity === activity &&
     displayed.conversationKey === conversationKey &&
     (displayed.reaction !== "spontaneous" || spontaneous)

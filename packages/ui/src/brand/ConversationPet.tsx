@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useBotAnatomy } from "./anatomyPlayer.js";
 import { BotAvatar } from "./BotAvatar.js";
 import { useBotActivity } from "./BotActivity.js";
@@ -17,11 +17,13 @@ export function ConversationPet({
 }: ConversationPetProps) {
   const petRef = useRef<HTMLDivElement>(null);
   const flight = useRef<Animation | null>(null);
-  const hasAnatomy = Boolean(useBotAnatomy());
+  const anatomy = useBotAnatomy();
+  const hasAnatomy = Boolean(anatomy);
+  const [autoMirrored, setAutoMirrored] = useState(false);
   const activityMotion = useBotActivity()?.motion;
   const { cue, interact } = usePetBehavior(
     petRef,
-    hasAnatomy,
+    anatomy,
     activity,
     completion,
     conversationKey,
@@ -38,7 +40,10 @@ export function ConversationPet({
     const selector = draft
       ? '[data-codex-pet-anchor="draft"]'
       : '[data-codex-pet-anchor]:not([data-codex-pet-anchor="draft"])';
+    const dockSelector = "[data-v4-composer-dock-content]";
+    const layoutSelector = `${selector}, ${dockSelector}`;
     let slots: HTMLElement[] = [];
+    let dock: HTMLElement | null = null;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
     let statusPanel: HTMLElement | null = null;
@@ -68,6 +73,9 @@ export function ConversationPet({
       }
       const left = rect.left - frame.left + (rect.width - size) / 2;
       const top = rect.bottom - frame.top - size;
+      const chat = dock?.getBoundingClientRect() ?? frame;
+      // 输入区中心落在桌宠左边缘外时镜像，中心位于桌宠下方时使用原始方向。
+      setAutoMirrored((chat.left + chat.right) / 2 < frame.left + left);
       const previousPlacement = pet.dataset.petPlacement;
       const previousRect = pet.getBoundingClientRect();
       // 使用提交后的锚点确定终点，以当前动画帧为起点，连续切换时可立即反向。
@@ -97,12 +105,19 @@ export function ConversationPet({
     const observer = new ResizeObserver(place);
     const observeAnchors = () => {
       const next = [...pane.querySelectorAll<HTMLElement>(selector)];
-      if (next.length === slots.length && next.every((slot, index) => slot === slots[index])) {
+      const nextDock = pane.querySelector<HTMLElement>(dockSelector);
+      if (
+        nextDock === dock &&
+        next.length === slots.length &&
+        next.every((slot, index) => slot === slots[index])
+      ) {
         return;
       }
       observer.disconnect();
       observer.observe(pane);
       slots = next;
+      dock = nextDock;
+      if (dock) observer.observe(dock);
       for (const slot of slots) {
         observer.observe(slot);
         if (slot.parentElement) observer.observe(slot.parentElement);
@@ -117,7 +132,7 @@ export function ConversationPet({
           [...addedNodes, ...removedNodes].some(
             (node) =>
               node instanceof HTMLElement &&
-              (node.matches(selector) || node.querySelector(selector)),
+              (node.matches(layoutSelector) || node.querySelector(layoutSelector)),
           ),
         )
       )
@@ -159,6 +174,7 @@ export function ConversationPet({
           motion={cue?.motion ?? activityMotion ?? activity}
           animated
           followPointer={preferences.followPointer}
+          mirrored={preferences.facing === "mirrored" || (preferences.facing === "auto" && autoMirrored)}
           shape={preferences.shape}
           color={preferences.color}
           scale={BOT_SIZES[preferences.size]}

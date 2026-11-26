@@ -2106,12 +2106,13 @@ export function SettingsPage({
                                     />
                                   }
                                 />
-                                {(["followPointer", "idleMotion", "spontaneous", "clickReactions"] as const).map((key) => {
+                                {(["followPointer", "idleMotion", "spontaneous", "allActions", "clickReactions"] as const).map((key) => {
                                   const label = intl.formatMessage({ id: `settings.botStudio.${key}` });
                                   return (
                                     <SettingsRow
                                       key={key}
                                       label={label}
+                                      description={key === "allActions" ? intl.formatMessage({ id: "settings.botStudio.allActionsDescription" }) : undefined}
                                       control={
                                         <Switch
                                           data-testid={`bot-studio-${key}`}

@@ -24,6 +24,7 @@ export function BotStateGallery({
   const chinese = locale.startsWith("zh");
   const label = (name: string) => chinese ? botStateGuide[name]?.[1] ?? name : name.replaceAll("-", " ");
   const [use, , zh, english] = botStateGuide[motion] ?? [];
+  const autonomous = use === "manual" && preferences.spontaneous && preferences.allActions;
   const details = profile.states[motion];
   const select = (name: string) => {
     setPoke(0);
@@ -44,6 +45,7 @@ export function BotStateGallery({
             renderSize={128}
             animated
             explicitPlayback
+            mirrored={preferences.facing === "mirrored"}
             pokeCount={poke}
             className="size-32"
           />
@@ -55,8 +57,8 @@ export function BotStateGallery({
           </div>
           {use ? (
             <p data-testid="bot-studio-trigger" className="text-ui-sm text-foreground-subtle">
-              <span className="mr-2 font-medium text-foreground">{format(`use.${use}`)}</span>
-              {chinese ? zh : english}
+              <span className="mr-2 font-medium text-foreground">{format(autonomous ? "use.automatic" : `use.${use}`)}</span>
+              {autonomous ? format("allActionsDescription") : chinese ? zh : english}
             </p>
           ) : null}
           {details ? (
@@ -116,6 +118,7 @@ export function BotStateGallery({
               renderSize={96}
               seed={`gallery-${name}`}
               animated
+              mirrored={preferences.facing === "mirrored"}
               className="size-14"
             />
             <span className="max-w-full truncate text-ui-sm font-medium">{label(name)}</span>

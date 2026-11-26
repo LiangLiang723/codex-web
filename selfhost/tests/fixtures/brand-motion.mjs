@@ -40,6 +40,15 @@ export async function verifyMotionPreview(page, activate) {
   await activate(studio.locator('[data-pet-color-option="#3289ff"]'));
   await activate(studio.locator('[data-pet-size-option="large"]'));
   await activate(studio.locator('[data-pet-personality-option="playful"]'));
+  await studio.locator('[data-pet-facing-option="auto"][aria-pressed="true"]').waitFor();
+  await activate(studio.locator('[data-pet-facing-option="mirrored"]'));
+  await preview.locator("[data-bot-mirrored]").waitFor();
+  assert.equal(await preview.locator("[data-bot-mirrored]").evaluate((svg) => getComputedStyle(svg).scale), "-1 1");
+  await activate(studio.locator('[data-pet-facing-option="original"]'));
+  await preview.locator("[data-bot-mirrored]").waitFor({ state: "detached" });
+  const allActions = page.getByTestId("bot-studio-allActions");
+  assert.equal(await allActions.getAttribute("aria-checked"), "false");
+  await activate(allActions);
   await activate(page.getByTestId("bot-studio-followPointer"));
   await activate(page.getByTestId("bot-studio-spontaneous"));
   await preview.locator('[data-bot-shape="cloud"]').waitFor();
@@ -71,12 +80,15 @@ export async function verifySavedAppearance(page) {
   await studio.locator('[data-pet-color-option="#3289ff"][aria-pressed="true"]').waitFor();
   await studio.locator('[data-pet-size-option="large"][aria-pressed="true"]').waitFor();
   await studio.locator('[data-pet-personality-option="playful"][aria-pressed="true"]').waitFor();
+  await studio.locator('[data-pet-facing-option="original"][aria-pressed="true"]').waitFor();
+  assert.equal(await page.getByTestId("bot-studio-allActions").getAttribute("aria-checked"), "true");
   assert.equal(await page.getByTestId("bot-studio-followPointer").getAttribute("aria-checked"), "false");
   assert.equal(await page.getByTestId("bot-studio-spontaneous").getAttribute("aria-checked"), "false");
 }
 
 export async function verifyPetPresence(page, pet, editor, activate) {
   const pose = (motion) => pet.locator(`[data-bot-engine="anatomy"][data-bot-motion="${motion}"]`);
+  assert.equal(await pet.locator("[data-bot-mirrored]").count(), 0, "The centered draft uses the original facing");
   if (process.env.SELFHOST_ANATOMY_CLOCK_TEST && page.viewportSize().width > 600) {
     await page.clock.fastForward(18_000);
     await pet.and(page.locator('[data-pet-reaction="spontaneous"]')).waitFor();
@@ -233,5 +245,8 @@ export async function verifyBrandSettings(page, { activate, showTaskList, origin
   }
   await dockedPet.waitFor();
   assert.equal(await canvas.evaluate((node) => getComputedStyle(node).color), anatomyEnabled ? "rgb(50, 137, 255)" : "rgb(22, 22, 22)");
-  if (anatomyEnabled) assert.equal(await canvas.getAttribute("data-bot-shape"), "cloud");
+  if (anatomyEnabled) {
+    assert.equal(await canvas.getAttribute("data-bot-shape"), "cloud");
+    assert.equal(await canvas.getAttribute("data-bot-mirrored"), null);
+  }
 }

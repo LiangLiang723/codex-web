@@ -3,7 +3,14 @@ import { useBotAnatomy } from "./anatomyPlayer.js";
 import { BotAvatar } from "./BotAvatar.js";
 import { BotStateGallery } from "./BotStateGallery.js";
 import { chineseShapeNames } from "./botStateGuide.js";
-import { BOT_PERSONALITIES, BOT_SIZES, DEFAULT_PET_PREFERENCES, type BotShape, type BotStudioProps } from "./contract.js";
+import {
+  BOT_FACING_MODES,
+  BOT_PERSONALITIES,
+  BOT_SIZES,
+  DEFAULT_PET_PREFERENCES,
+  type BotShape,
+  type BotStudioProps,
+} from "./contract.js";
 
 const swatches = [
   ["white", "#ffffff"], ["neutral", "#161616"], ["brown", "#9c6b45"],
@@ -60,6 +67,7 @@ export function BotStudio({ preferences, onChange, locale, format }: BotStudioPr
               <BotAvatar
                 animated
                 followPointer={preferences.followPointer}
+                mirrored={preferences.facing === "mirrored"}
                 shape={preferences.shape}
                 color={preferences.color}
                 renderSize={144}
@@ -150,6 +158,23 @@ export function BotStudio({ preferences, onChange, locale, format }: BotStudioPr
                     onClick={() => onChange({ size })}
                   >
                     {format(`size.${size}`)}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+            <fieldset>
+              <legend className="mb-2 text-ui-sm font-medium">{format("facing")}</legend>
+              <div className="flex flex-wrap gap-2">
+                {BOT_FACING_MODES.map((facing) => (
+                  <button
+                    key={facing}
+                    type="button"
+                    data-pet-facing-option={facing}
+                    aria-pressed={facing === preferences.facing}
+                    onClick={() => onChange({ facing })}
+                    className={`${option} px-3 py-1.5`}
+                  >
+                    {format(`facing.${facing}`)}
                   </button>
                 ))}
               </div>

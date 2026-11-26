@@ -14,6 +14,7 @@ function AnatomyAvatar({
   mood = "idle",
   animated = false,
   followPointer = false,
+  mirrored = false,
   motion = mood,
   explicitPlayback = false,
   shape = "sphere",
@@ -45,6 +46,7 @@ function AnatomyAvatar({
         seed,
         frontFacing,
         follow: followPointer,
+        isMirrored: () => element.ownerSVGElement?.hasAttribute("data-bot-mirrored") === true,
         staticMode: !animated,
         reducedMotion: reduced.matches && !explicitPlayback,
         maxFps: followPointer || explicitPlayback ? 60 : 30,
@@ -77,8 +79,13 @@ function AnatomyAvatar({
       data-bot-motion={motion}
       data-bot-engine="anatomy"
       data-bot-shape={shape}
+      data-bot-mirrored={mirrored ? "" : undefined}
       viewBox={`${inset} ${inset} ${viewport} ${viewport}`}
-      style={color ? { ...style, color } : style}
+      style={{
+        ...style,
+        ...(color ? { color } : {}),
+        ...(mirrored ? { scale: "-1 1", transformOrigin: "center" } : {}),
+      }}
       aria-hidden="true"
       focusable="false"
       className={`block shrink-0 ${className}`}
@@ -92,6 +99,7 @@ function FallbackAvatar({
   mood = "idle",
   animated = false,
   followPointer = false,
+  mirrored = false,
   motion: _motion,
   explicitPlayback: _explicitPlayback,
   shape: _shape,
@@ -132,7 +140,7 @@ function FallbackAvatar({
       const dx = event.clientX - (rect.left + rect.width / 2);
       const dy = event.clientY - (rect.top + rect.height / 2);
       const reach = Math.max(rect.width * 2.8, 150);
-      targetX = (dx / reach) * 0.24;
+      targetX = (dx / reach) * (svg.hasAttribute("data-bot-mirrored") ? -0.24 : 0.24);
       targetY = (-dy / reach) * 0.24;
       if (Math.hypot(dx, dy) > reach) resetGaze();
     };
@@ -184,8 +192,14 @@ function FallbackAvatar({
       {...props}
       ref={svgRef}
       data-codex-bot={mood}
+      data-bot-mirrored={mirrored ? "" : undefined}
       viewBox={BOT_VIEW_BOX}
-      style={{ ...style, ...(color ? { color } : {}), ...(scale !== 1 ? { scale } : {}) }}
+      style={{
+        ...style,
+        ...(color ? { color } : {}),
+        ...(scale !== 1 ? { scale } : {}),
+        ...(mirrored ? { scale: `${-scale} ${scale}`, transformOrigin: "center" } : {}),
+      }}
       aria-hidden="true"
       focusable="false"
       className={`block shrink-0 ${className}`}

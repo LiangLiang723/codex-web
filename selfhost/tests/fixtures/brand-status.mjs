@@ -1,8 +1,45 @@
 import assert from "node:assert/strict";
 import { verifyAnatomyMotion } from "./brand-motion.mjs";
 
+async function verifyFullPetActionRound(page, pet) {
+  const catalogue = await page.evaluate(async () => {
+    const modulePath = document.querySelector('meta[name="codex-bot-anatomy"]').content;
+    const { states, stateDurations } = await import(new URL(modulePath, location.origin + "/"));
+    return { states: Object.keys(states), durations: stateDurations };
+  });
+  assert.equal(catalogue.states.length, 53);
+  const action = pet.and(page.locator('[data-pet-reaction="spontaneous"]'));
+  const played = [];
+  // 采样短动作时固定虚拟时间，避免浏览器操作的耗时吃掉状态的完整窗口。
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+  try {
+    for (const _state of catalogue.states) {
+      if ((await action.count()) === 0) await page.clock.fastForward(41_000);
+      await page.clock.runFor(80);
+      const { motion, drawing, reaction } = await pet.evaluate((node) => {
+        const svg = node.querySelector('[data-bot-engine="anatomy"]');
+        return {
+          motion: svg?.getAttribute("data-bot-motion"),
+          drawing: Boolean(svg?.querySelector("svg")),
+          reaction: node.getAttribute("data-pet-reaction"),
+        };
+      });
+      assert.equal(reaction, "spontaneous", `Expected autonomous action ${played.length + 1}, saw ${motion}`);
+      assert(drawing, `${motion} did not mount the live renderer`);
+      assert(!played.includes(motion), `${motion} repeated before the round finished`);
+      played.push(motion);
+      await page.clock.fastForward(catalogue.durations[motion] + 100);
+      await action.waitFor({ state: "detached" });
+    }
+  } finally {
+    await page.clock.resume();
+  }
+  assert.deepEqual(played.sort(), catalogue.states.sort());
+  console.log("PASS all 53 native states in a live pet rotation");
+}
+
 export async function verifyBotStatus(page, pet, emit) {
-  if (process.env.SELFHOST_ANATOMY_CLOCK_TEST) await page.clock.install();
+  const fullRound = Boolean(process.env.SELFHOST_ALL_PET_ACTIONS) && page.viewportSize().width === 1236;
   const activityTurnId = "bot-activity-fixture";
   const activityUser = {
     id: "bot-activity-user",
@@ -21,13 +58,19 @@ export async function verifyBotStatus(page, pet, emit) {
   const workingPet = pet.locator('[data-codex-bot="working"]');
   await workingPet.waitFor();
   const anatomyEnabled = (await page.locator('meta[name="codex-bot-anatomy"]').count()) === 1;
+  await pet.locator("[data-bot-mirrored]").waitFor();
   const workingLine = page.locator("[data-chat-loading-icon]");
   await workingLine.locator('[data-codex-bot="working"]').waitFor();
   if (anatomyEnabled) {
     assert.equal(await workingLine.locator('[data-codex-bot="working"]').getAttribute("viewBox"), "0 0 20 20");
     await verifyAnatomyMotion(workingLine.locator('[data-bot-motion="progress"]'));
     await verifyAnatomyMotion(workingLine.locator('[data-bot-motion="working"]'));
-    if (process.env.SELFHOST_ANATOMY_CLOCK_TEST) {
+    if (fullRound) {
+      await verifyFullPetActionRound(page, pet);
+      await page.clock.fastForward(41_000);
+      await pet.and(page.locator('[data-pet-reaction="spontaneous"]')).waitFor();
+    }
+    if (process.env.SELFHOST_ANATOMY_CLOCK_TEST && !fullRound) {
       await page.clock.fastForward(27_000);
       await pet.and(page.locator('[data-pet-reaction="spontaneous"]')).waitFor();
       await workingLine.locator('[data-bot-motion="working"]').waitFor();
@@ -102,6 +145,23 @@ export async function verifyBotStatus(page, pet, emit) {
   await pet.locator('[data-codex-bot="idle"]').waitFor();
   if (anatomyEnabled) {
     await pet.locator('[data-bot-engine="anatomy"][data-bot-motion="finished"]').waitFor();
+    if (fullRound) {
+      await page.emulateMedia({ reducedMotion: "no-preference" });
+      await verifyAnatomyMotion(pet.locator('[data-bot-engine="anatomy"]'));
+      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+      try {
+        await page.clock.fastForward(90_000);
+        await pet.locator('[data-bot-motion="sleeping"]').waitFor();
+        await page.clock.fastForward(23_000);
+        await pet.locator('[data-bot-motion="waking"]').waitFor();
+        await page.clock.fastForward(1_800);
+        await page.clock.fastForward(23_000);
+        await pet.and(page.locator('[data-pet-reaction="spontaneous"]')).waitFor();
+      } finally {
+        await page.clock.resume();
+      }
+      console.log("PASS the full pool resumes after an idle nap");
+    }
   }
 }
 
