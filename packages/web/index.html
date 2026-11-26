@@ -19,6 +19,19 @@
         };
         const BOOTSTRAP_SNAPSHOT_KEY = "zcode:web-remote-control:bootstrap-shell";
 
+        try {
+          // React 接管前读取桌宠设置保存的同一条记录。
+          const appearance = JSON.parse(localStorage.getItem("codex-web:conversation-pet-preferences"));
+          if (typeof appearance?.color === "string" && /^#[0-9a-f]{6}$/i.test(appearance.color)) {
+            document.documentElement.style.setProperty("--codex-bot-color", appearance.color.toLowerCase());
+          }
+          if (appearance?.material === "fluffy" || appearance?.material === "glass") {
+            document.documentElement.dataset.codexBotMaterial = appearance.material;
+          }
+        } catch {
+          // 本地存储被禁止或记录无效时使用主题纯色。
+        }
+
         const normalizeResolvedTheme = (theme) => {
           if (theme === "dark") return "dark";
           if (theme === "light") return "light";
@@ -176,11 +189,11 @@
         display: grid;
         width: 72px;
         height: 72px;
-        color: #fff;
+        color: var(--codex-bot-color, #fff);
       }
 
       html[data-zcode-bootstrap-theme="light"] .zcode-boot-loading__mark {
-        color: #161616;
+        color: var(--codex-bot-color, #161616);
       }
 
       .zcode-boot-loading__mark > span {

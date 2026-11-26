@@ -11,6 +11,7 @@ import {
 } from "react";
 import { createRoot } from "react-dom/client";
 import { AppErrorBoundary } from "@zcode/ui/error-boundary";
+import { ZCodeAppLogo } from "@zcode/ui/app-logo";
 import { Button } from "@zcode/ui/button";
 import { Input } from "@zcode/ui/input";
 import { z } from "zod";
@@ -41,7 +42,7 @@ const AccountSettings = lazy(() =>
 const loadingWorkspace = (
   <div className="zcode-boot-loading" role="status" aria-busy="true" aria-label="Loading…">
     <span className="zcode-boot-loading__mark" aria-hidden="true">
-      <span className="zcode-boot-loading__logo" />
+      <ZCodeAppLogo className="size-full" animated />
     </span>
   </div>
 );

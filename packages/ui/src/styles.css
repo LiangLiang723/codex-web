@@ -12,11 +12,11 @@
 @plugin "../lucide-colors.mjs";
 
 [data-codex-bot] {
-  color: #161616;
+  color: var(--codex-bot-color, #161616);
 }
 
 .dark [data-codex-bot] {
-  color: #fff;
+  color: var(--codex-bot-color, #fff);
 }
 
 /* Hero 可为任意图片/视频/iframe，不能用 App 主题推断关闭图标对比度。 */

@@ -70,8 +70,6 @@ export function BotStudio({ preferences, onChange, locale, format }: BotStudioPr
                 followPointer={preferences.followPointer}
                 mirrored={preferences.facing === "mirrored"}
                 shape={preferences.shape}
-                color={preferences.color}
-                material={preferences.material}
                 renderSize={144}
                 scale={BOT_SIZES[preferences.size]}
                 pokeCount={poke}
@@ -99,7 +97,6 @@ export function BotStudio({ preferences, onChange, locale, format }: BotStudioPr
                     >
                       <BotAvatar
                         shape={shape}
-                        color={preferences.color}
                         renderSize={32}
                         scale={1.32}
                         frontFacing

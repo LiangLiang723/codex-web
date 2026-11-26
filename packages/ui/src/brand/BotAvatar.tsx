@@ -1,8 +1,7 @@
 import { useEffect, useEffectEvent, useRef } from "react";
-import { loadAnatomyMaterial, useBotAnatomy, type AnatomyGeometry } from "./anatomyPlayer.js";
+import { useBotAnatomy } from "./anatomyPlayer.js";
 import type { BotAvatarProps } from "./contract.js";
 import { BOT_VIEW_BOX, createBotDrawing, staticBotPaths } from "./botDrawing.js";
-import { createMaterialPainter } from "./materialPainter.js";
 
 export function BotAvatar(props: BotAvatarProps) {
   const profile = useBotAnatomy();
@@ -19,8 +18,6 @@ function AnatomyAvatar({
   motion = mood,
   explicitPlayback = false,
   shape = "sphere",
-  color,
-  material,
   scale = 1,
   renderSize = 300,
   frontFacing = false,
@@ -31,13 +28,8 @@ function AnatomyAvatar({
   ...props
 }: BotAvatarProps & { profile: NonNullable<ReturnType<typeof useBotAnatomy>> }) {
   const host = useRef<SVGGElement>(null);
-  const svg = useRef<SVGSVGElement>(null);
-  const surface = useRef<HTMLCanvasElement>(null);
   const player = useRef<ReturnType<typeof profile.createBot> | null>(null);
-  const painter = useRef<ReturnType<typeof createMaterialPainter>>(null);
-  const latestFrame = useRef<{ geometry: AnatomyGeometry; deformed: boolean } | null>(null);
   const startingMotion = useEffectEvent(() => motion);
-  const materialTarget = material !== undefined;
 
   useEffect(() => {
     const element = host.current;
@@ -54,10 +46,6 @@ function AnatomyAvatar({
         frontFacing,
         follow: followPointer,
         isMirrored: () => element.ownerSVGElement?.hasAttribute("data-bot-mirrored") === true,
-        onFrame: materialTarget ? (geometry, deformed) => {
-          latestFrame.current = { geometry, deformed };
-          painter.current?.draw(geometry, deformed);
-        } : undefined,
         staticMode: !animated,
         reducedMotion: reduced.matches && !explicitPlayback,
         maxFps: followPointer || explicitPlayback ? 60 : 30,
@@ -71,28 +59,8 @@ function AnatomyAvatar({
       reduced.removeEventListener("change", mountPlayer);
       player.current?.destroy();
       player.current = null;
-      latestFrame.current = null;
     };
-  }, [animated, explicitPlayback, followPointer, frontFacing, materialTarget, profile, renderSize, seed, shape]);
-
-  useEffect(() => {
-    const drawing = svg.current;
-    const canvas = surface.current;
-    if (!drawing || !canvas || !material || material === "flat") return;
-    let active = true;
-    void loadAnatomyMaterial(profile, material).then((palette) => {
-      if (!active || !palette) return;
-      const next = createMaterialPainter(drawing, canvas, material, palette, profile.materialOutline?.(shape) ?? null);
-      painter.current = next;
-      const frame = latestFrame.current;
-      if (frame) next?.draw(frame.geometry, frame.deformed);
-    });
-    return () => {
-      active = false;
-      painter.current?.dispose();
-      painter.current = null;
-    };
-  }, [material, profile, shape]);
+  }, [animated, explicitPlayback, followPointer, frontFacing, profile, renderSize, seed, shape]);
 
   useEffect(() => {
     player.current?.setState(motion);
@@ -104,10 +72,9 @@ function AnatomyAvatar({
   const viewport = renderSize / scale;
   const inset = (renderSize - viewport) / 2;
   const orientation = mirrored ? { scale: "-1 1", transformOrigin: "center" } : undefined;
-  const drawing = (
+  return (
     <svg
       {...props}
-      ref={svg}
       data-codex-bot={mood}
       data-bot-motion={motion}
       data-bot-engine="anatomy"
@@ -116,29 +83,14 @@ function AnatomyAvatar({
       viewBox={`${inset} ${inset} ${viewport} ${viewport}`}
       style={{
         ...style,
-        ...(color ? { color } : {}),
         ...orientation,
       }}
       aria-hidden="true"
       focusable="false"
-      className={materialTarget
-        ? "absolute inset-0 block size-full data-[bot-material-painted]:opacity-0"
-        : `block shrink-0 ${className}`}
+      className={`block shrink-0 ${className}`}
     >
       <g ref={host} />
     </svg>
-  );
-  if (!materialTarget) return drawing;
-  return (
-    <span className={`relative block shrink-0 ${className}`}>
-      {drawing}
-      <canvas
-        ref={surface}
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 hidden size-full data-[bot-material]:block"
-        style={orientation}
-      />
-    </span>
   );
 }
 
@@ -150,8 +102,6 @@ function FallbackAvatar({
   motion: _motion,
   explicitPlayback: _explicitPlayback,
   shape: _shape,
-  color,
-  material: _material,
   scale = 1,
   renderSize: _renderSize,
   frontFacing: _frontFacing,
@@ -244,7 +194,6 @@ function FallbackAvatar({
       viewBox={BOT_VIEW_BOX}
       style={{
         ...style,
-        ...(color ? { color } : {}),
         ...(scale !== 1 ? { scale } : {}),
         ...(mirrored ? { scale: `${-scale} ${scale}`, transformOrigin: "center" } : {}),
       }}

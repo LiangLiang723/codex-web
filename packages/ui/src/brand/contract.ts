@@ -95,8 +95,6 @@ export interface BotAvatarProps extends Omit<
   motion?: string;
   explicitPlayback?: boolean;
   shape?: BotShape;
-  color?: string | null;
-  material?: BotMaterial;
   scale?: number;
   renderSize?: number;
   frontFacing?: boolean;

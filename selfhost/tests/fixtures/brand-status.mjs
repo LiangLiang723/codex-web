@@ -1,5 +1,21 @@
 import assert from "node:assert/strict";
 import { verifyAnatomyMotion } from "./brand-motion.mjs";
+import { verifyPaintedBots } from "./brand-materials.mjs";
+
+export async function prepareStatusBrowserPage(page) {
+  const allActions = Boolean(process.env.SELFHOST_ALL_PET_ACTIONS);
+  const styled = Boolean(process.env.SELFHOST_BOT_MATERIALS_TEST);
+  // 在页面安装桌宠计时器前统一时钟，保证进入工作状态时能取消之前的空闲计时器。
+  if (process.env.SELFHOST_ANATOMY_CLOCK_TEST || (allActions && page.viewportSize().width === 1236)) {
+    await page.clock.install();
+  }
+  await page.addInitScript(({ allActions, styled }) => {
+    localStorage.setItem("selfhost.auth", "status-test-fixture");
+    localStorage.setItem("zcode-locale-preference", "zh-CN");
+    const preferences = { allActions, ...(styled ? { material: "fluffy", color: "#c74ef3" } : {}) };
+    localStorage.setItem("codex-web:conversation-pet-preferences", JSON.stringify(preferences));
+  }, { allActions, styled });
+}
 
 async function verifyFullPetActionRound(page, pet) {
   const catalogue = await page.evaluate(async () => {
@@ -58,6 +74,7 @@ export async function verifyBotStatus(page, pet, emit) {
   const workingPet = pet.locator('[data-codex-bot="working"]');
   await workingPet.waitFor();
   const anatomyEnabled = (await page.locator('meta[name="codex-bot-anatomy"]').count()) === 1;
+  const styled = anatomyEnabled && process.env.SELFHOST_BOT_MATERIALS_TEST;
   await pet.locator("[data-bot-mirrored]").waitFor();
   const workingLine = page.locator("[data-chat-loading-icon]");
   await workingLine.locator('[data-codex-bot="working"]').waitFor();
@@ -65,6 +82,10 @@ export async function verifyBotStatus(page, pet, emit) {
     assert.equal(await workingLine.locator('[data-codex-bot="working"]').getAttribute("viewBox"), "0 0 20 20");
     await verifyAnatomyMotion(workingLine.locator('[data-bot-motion="progress"]'));
     await verifyAnatomyMotion(workingLine.locator('[data-bot-motion="working"]'));
+    if (styled) {
+      await verifyPaintedBots(workingLine, "fluffy", 1, "#c74ef3");
+      await verifyPaintedBots(pet, "fluffy", 1, "#c74ef3");
+    }
     if (fullRound) {
       await verifyFullPetActionRound(page, pet);
       await page.clock.fastForward(41_000);
@@ -88,7 +109,9 @@ export async function verifyBotStatus(page, pet, emit) {
     status: "inProgress",
   };
   emit({ type: "timeline.item.upsert", item: reasoningItem });
-  await page.locator('[data-summary-leading-icon][data-codex-bot="thinking"]').waitFor();
+  const thinking = page.locator('[data-summary-leading-icon][data-codex-bot="thinking"]');
+  await thinking.waitFor();
+  if (styled) await verifyPaintedBots(thinking, "fluffy", 1, "#c74ef3");
   const command = {
     id: "bot-activity-command",
     turnId: activityTurnId,
@@ -120,7 +143,7 @@ export async function verifyBotStatus(page, pet, emit) {
     await page.waitForFunction((node) => !node.isConnected, animatedDrawing);
   }
   const stayedStill = await workingPet
-    .locator('path[fill="currentColor"][fill-rule="evenodd"]')
+    .locator('path[fill-rule="evenodd"][d]:not([d=""])').first()
     .evaluate(async (path) => {
     await new Promise(requestAnimationFrame);
     const before = path.getAttribute("d");
@@ -172,18 +195,25 @@ async function verifyStartup(page, origin, reducedMotion) {
     await app.promise;
     await route.continue();
   });
+  let anatomy;
   try {
     await page.goto(origin, { waitUntil: "commit" });
     const splash = page.locator(".zcode-boot-loading");
     await splash.waitFor();
-    const anatomy = (await page.locator('meta[name="codex-bot-anatomy"]').count()) === 1;
+    anatomy = (await page.locator('meta[name="codex-bot-anatomy"]').count()) === 1;
     if (anatomy) {
       const mark = splash.locator('[data-bot-engine="anatomy"]');
       await mark.waitFor();
       assert.equal(await mark.getAttribute("data-bot-motion"), "idle");
       await mark.locator("svg path[d]").first().waitFor({ state: "attached" });
+      if (process.env.SELFHOST_BOT_MATERIALS_TEST) {
+        await verifyPaintedBots(mark, "glass", 1, "#c74ef3");
+        await page.waitForFunction(() =>
+          decodeURIComponent(document.querySelector("link[data-codex-bot-favicon]").href).includes("data:image/png"),
+        );
+      }
     }
-    const frames = await splash.evaluate(async (element) => {
+    const frames = await splash.evaluate(async (element, reduced) => {
       const read = () => {
         const paths = Array.from(element.querySelectorAll("svg path[d]"));
         return paths.length
@@ -192,17 +222,22 @@ async function verifyStartup(page, origin, reducedMotion) {
       };
       const samples = new Set();
       const start = performance.now();
-      while (performance.now() - start < 450) {
+      // 原生 idle 有停顿，软件渲染的浏览器还要等第一次材质上传。
+      while (performance.now() - start < (reduced ? 500 : 3_000)) {
         await new Promise(requestAnimationFrame);
         samples.add(read());
+        if (!reduced && samples.size > 1) break;
       }
       return samples.size;
-    });
+    }, reducedMotion === "reduce");
     assert.equal(frames > 1, reducedMotion === "no-preference", "The initial splash follows motion preferences");
   } finally {
     app.resolve();
   }
   await page.locator(".zcode-boot-loading").waitFor({ state: "detached" });
+  if (anatomy && process.env.SELFHOST_BOT_MATERIALS_TEST) {
+    await verifyPaintedBots(page.locator("[data-app-logo]"), "glass", 1, "#c74ef3");
+  }
 }
 
 export async function verifyBrowserStartup(browser, origin) {
@@ -210,6 +245,11 @@ export async function verifyBrowserStartup(browser, origin) {
     const page = await browser.newPage();
     page.setDefaultTimeout(10000);
     try {
+      if (process.env.SELFHOST_BOT_MATERIALS_TEST) {
+        await page.addInitScript(() => {
+          localStorage.setItem("codex-web:conversation-pet-preferences", '{"material":"glass","color":"#c74ef3"}');
+        });
+      }
       await verifyStartup(page, origin, reducedMotion);
       console.log(`PASS idle startup splash (${reducedMotion})`);
     } finally {

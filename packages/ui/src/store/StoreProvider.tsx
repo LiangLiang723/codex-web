@@ -7,6 +7,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useLayoutEffect,
   useRef,
   useSyncExternalStore,
   type ReactNode,
@@ -35,7 +36,25 @@ export function StoreProvider({
     });
   }
 
-  return <StoreContext.Provider value={storeRef.current}>{children}</StoreContext.Provider>;
+  return (
+    <StoreContext.Provider value={storeRef.current}>
+      <BotAppearance />
+      {children}
+    </StoreContext.Provider>
+  );
+}
+
+function BotAppearance() {
+  const color = useZCodeStore((state) => state.conversationPetPreferences.color);
+  const material = useZCodeStore((state) => state.conversationPetPreferences.material);
+  useLayoutEffect(() => {
+    // 启动壳和所有 Bot 都读取文档上的外观。偏好仍由同一个 store 保存。
+    const root = document.documentElement;
+    root.dataset.codexBotMaterial = material;
+    if (color) root.style.setProperty("--codex-bot-color", color);
+    else root.style.removeProperty("--codex-bot-color");
+  }, [color, material]);
+  return null;
 }
 
 /**

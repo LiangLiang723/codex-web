@@ -7,6 +7,7 @@ export interface DevicePlatformIconProps {
 }
 export interface ZCodeAppLogoProps {
   className?: string;
+  animated?: boolean;
 }
 export type BottomSheetProps = ComponentProps<typeof Dialog.Root>;
 export type BottomSheetContentProps = ComponentProps<typeof Dialog.Content>;

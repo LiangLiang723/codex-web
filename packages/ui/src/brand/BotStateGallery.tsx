@@ -41,8 +41,6 @@ export function BotStateGallery({
             key={replay}
             motion={motion}
             shape={preferences.shape}
-            color={preferences.color}
-            material={preferences.material}
             renderSize={128}
             animated
             explicitPlayback
@@ -115,7 +113,6 @@ export function BotStateGallery({
             <BotAvatar
               motion={name}
               shape={preferences.shape}
-              color={preferences.color}
               renderSize={96}
               seed={`gallery-${name}`}
               animated

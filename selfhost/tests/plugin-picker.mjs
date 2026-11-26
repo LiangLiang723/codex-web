@@ -715,6 +715,10 @@ async function verify(page, origin) {
   await snapshot("bot-draft-light");
   if (!mobile) {
     await activate(page.getByTestId("task-settings-button"));
+    if (anatomyEnabled) {
+      await activate(page.locator('[data-settings-section-nav="conversationPet"]'));
+      await activate(page.getByTestId("bot-studio-reset"));
+    }
     await activate(page.locator('[data-settings-section-nav="appearance"]'));
     const themeSelect = page.locator('[data-settings-search-id="settings.themeMode"]').getByRole("combobox");
     await activate(themeSelect);

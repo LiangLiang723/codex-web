@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { build } from "esbuild";
 import { prepareBotMaterials } from "./prepare-bot-materials.mjs";
@@ -169,6 +169,8 @@ function buildModel(e, t, n, G, gE, tE, warnBody, outline)`);
 adapt('s = e.morph == null && e.bodies.length === 1', 's = !outline && e.morph == null && e.bodies.length === 1');
 adapt('c !== "sphere" && warnBody(c);', '!outline && c !== "sphere" && warnBody(c);');
 adapt("shape: bT(e, n, G)", "shape: bT(e, n, G, outline)");
+adapt('eyes: t.cutout ? "" : d(f),', 'eyes: t.cutout ? "" : d(f), surfaceEyes: () => f.map(eye => d([eye])),');
+adapt("eyesD: i.eyes, glow: i.glow,", "eyesD: i.eyes, surfaceEyes: i.surfaceEyes, glow: i.glow,");
 adapt(
   "l = mM([kE, ...i.map(({ shape: c }) => pM(c.body, c.center))]),",
   "l = outline && e.morph == null ? [] : mM([kE, ...i.map(({ shape: c }) => pM(c.body, c.center))]),",
@@ -194,12 +196,62 @@ adapt(
   `const frame = rt.frame();
     // 造型选择用正脸缩略图，播放器的会话帧仍使用原始朝向。
     if (opts.frontFacing) frame.quat = [1, 0, 0, 0];
-    renderer.render(buildModel(frame, theme, size, G, gE, trail, warnBody, opts.outline));
-    opts.onFrame?.(renderer.geometry, frame.morph != null);`,
+    lastModel = buildModel(frame, theme, size, G, gE, trail, warnBody, opts.outline);
+    deformed = frame.morph != null;
+    renderer.render(lastModel, skin, deformed);`,
 );
 adapt(
-  "return { svg, render };",
-  "return { svg, render, geometry: { svg, zoom: zoomG, parts: partsG, head: headG, body: bodyP, holes: maskEyes, halo: haloP } };",
+  "  const renderFrame = () => {",
+  "  let lastModel, skin, deformed;\n  const renderFrame = () => {",
+);
+adapt(
+  "  const warnedBodies = new Set;",
+  `  const unbindAppearance = opts.bindAppearance?.(next => {
+    skin = next;
+    if (lastModel) renderer.render(lastModel, skin, deformed);
+  });
+  const warnedBodies = new Set;`,
+);
+adapt("      stopLoop();\n      io?.disconnect();", "      unbindAppearance?.();\n      stopLoop();\n      io?.disconnect();");
+adapt(
+  "  const render = model => {",
+  `  const materialEyes = [];
+  const drawMaterialEyes = (paths, eyePaint, clipId) => {
+    // 眼窝只能画在原版可见眼睛里，保留转过侧面和合眼时的原始轮廓。
+    for (let index = 0; index < Math.max(paths.length, materialEyes.length); index++) {
+      const path = paths[index];
+      const eye = materialEyes[index] ?? (materialEyes[index] = mk("path", { "data-bot-material-eye": "" }, headG));
+      setA(eye, "d", path || null);
+      setA(eye, "fill", path ? eyePaint : null);
+      setA(eye, "clip-path", path && clipId ? clipId : null);
+    }
+  };
+  const render = (model, skin, deformed) => {
+    setA(svg, "data-bot-material", skin?.mode ?? null);
+    setA(svg, "data-bot-color", skin?.color ?? null);`,
+);
+adapt('setA(haloP, "fill", `url(#${uid}-ghalo)`)', 'setA(haloP, "fill", skin?.surface ?? `url(#${uid}-ghalo)`)');
+adapt('setA(bodyP, "fill", `url(#${uid}-gbody)`)', 'setA(bodyP, "fill", skin?.body ?? `url(#${uid}-gbody)`)');
+adapt('} else setA(bodyP, "fill", model.inkPaint);', '} else setA(bodyP, "fill", skin?.body ?? model.inkPaint);');
+adapt(
+  '      setA(eyesP, "clip-path", null);\n      return;',
+  '      setA(eyesP, "clip-path", null);\n      drawMaterialEyes(skin ? model.surfaceEyes?.() ?? [] : [], skin?.eye);\n      return;',
+);
+adapt(
+  'const bodyD = da(model.bodyPts), eyesD = model.eyesPts.map(da).join("");\n    setA(bodyP, "d", bodyD); setA(bodyP, "fill", model.inkPaint);',
+  `const bodyD = da(model.bodyPts), eyePaths = model.eyesPts.map(da), eyesD = eyePaths.join("");
+    setA(bodyP, "d", bodyD); setA(bodyP, "fill", (deformed ? skin?.surface : skin?.body) ?? model.inkPaint);
+    if (skin) setA(clipBody, "d", bodyD);
+    drawMaterialEyes(skin ? eyePaths : [], skin?.eye, \`url(#\${uid}-body)\`);`,
+);
+adapt("const renderParts = (parts, inkPaint) => {", "const renderParts = (parts, inkPaint, strokePaint = inkPaint) => {");
+adapt(
+  'setA(n, "d", p.d); setA(n, "fill", "none"); setA(n, "stroke", inkPaint);',
+  'setA(n, "d", p.d); setA(n, "fill", "none"); setA(n, "stroke", strokePaint);',
+);
+adapt(
+  "renderParts(model.parts, model.inkPaint);",
+  "renderParts(model.parts, skin?.surface ?? model.inkPaint, skin?.stroke ?? model.inkPaint);",
 );
 adapt(
   "createRuntime(G, { zoomMul: opts.zoomMul ?? 1, isGazeAlways:",
@@ -217,11 +269,27 @@ const previewStates = {
   all: { clips, next: "idle" },
   ...Object.fromEntries(clips.map((name) => [`clip:${name}`, { clips: [name] }])),
 };
+const config = makeConfig(recipes);
+const runtime = createRuntime(config);
+createStateMachine(config, runtime, "idle", { isResting: true });
+for (let frame = 0; frame < 60; frame++) runtime.advance(0.1);
+const faviconModel = (cutout) => buildModel(
+  runtime.frame(),
+  { cutout, ink: [0, 0, 0], spot: [0, 0, 0] }, 64, config,
+  makeMorphGenerators(config), makeTrail(config), () => {},
+);
+const model = faviconModel(true);
+assert.equal(model.mode, "sphere");
+assert(model.bodyD && !model.eyesD);
+const faviconEyes = faviconModel(false).eyesD.match(/M[^Z]+Z/gu);
+assert.equal(faviconEyes?.length, 2);
+
 const bundle = await build({
   stdin: {
     resolveDir: vendor,
     contents: `
       import { createGrokBot } from "./grok-player.js";
+      import { installBotAppearance } from ${JSON.stringify(fileURLToPath(new URL("bot-appearance.mjs", import.meta.url)))};
       const data = ${JSON.stringify(recipes)};
       const outlines = ${JSON.stringify(outlines)};
       export const clips = ${JSON.stringify(clips)};
@@ -235,8 +303,19 @@ const bundle = await build({
         return points ? "M" + points.map(([x, y]) => [50 + x * 32, 50 + y * 32].join(" ")).join("L") + "Z" : null;
       };
       Object.assign(data.states, ${JSON.stringify(previewStates)});
-      export const createBot = (host, options = {}) =>
-        createGrokBot(host, { ...options, data, outline: outlines[options.shape] });
+      const subscribe = globalThis.document && installBotAppearance(document, materials, {
+        body: ${JSON.stringify(model.bodyD)}, eyes: ${JSON.stringify(faviconEyes)},
+      });
+      export const createBot = (host, options = {}) => {
+        const shape = options.shape ?? "sphere";
+        // 小图标共用同一张纹理，精确轮廓仍由各自的 SVG 路径裁切。
+        const useSurface = (options.size ?? 320) < 100 && shape !== "sphere";
+        const outline = useSurface ? null : materialOutline(shape);
+        return createGrokBot(host, {
+          ...options, data, outline: outlines[shape],
+          bindAppearance: receive => subscribe?.(outline, useSurface, receive),
+        });
+      };
 
       // HTML 启动壳早于 React 出现。独立加载同一模块，首帧就绪后再替换主题标志。
       const bootHost = globalThis.document?.querySelector(".zcode-boot-loading__anatomy");
@@ -297,19 +376,7 @@ const bundle = await build({
 const code = bundle.outputFiles[0].contents;
 const filename = `codex-bot-anatomy-${createHash("sha256").update(code).digest("hex").slice(0, 12)}.mjs`;
 
-const config = makeConfig(recipes);
-const runtime = createRuntime(config);
-createStateMachine(config, runtime, "idle", { isResting: true });
-for (let frame = 0; frame < 60; frame++) runtime.advance(0.1);
-const size = 64;
-const model = buildModel(
-  runtime.frame(),
-  { cutout: true, ink: [0, 0, 0], spot: [0, 0, 0] }, size, config,
-  makeMorphGenerators(config), makeTrail(config), () => {},
-);
-assert.equal(model.mode, "sphere");
 // 保留原版静帧的朝向和眼睛形状，标签图标只调整视口留白。
-assert(model.bodyD && !model.eyesD);
 const favicon = (color) =>
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 10 44 44"><path fill="${color}" fill-rule="evenodd" d="${model.bodyD}"/></svg>\n`;
 

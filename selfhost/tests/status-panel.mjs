@@ -1,4 +1,5 @@
 import {
+  prepareStatusBrowserPage,
   verifyBotStatus,
   verifyBrowserStartup,
   verifyCompactPet,
@@ -188,9 +189,7 @@ const mobileStatusScroller =
   '[data-slot="bottom-sheet-content"] > div:has(> [data-status-section])';
 
 async function installFixture(page, origin) {
-  // 在页面安装桌宠计时器前统一时钟，保证进入工作状态时能取消之前的空闲计时器。
-  const fullPetRound = process.env.SELFHOST_ALL_PET_ACTIONS && page.viewportSize().width === 1236;
-  if (process.env.SELFHOST_ANATOMY_CLOCK_TEST || fullPetRound) await page.clock.install();
+  await prepareStatusBrowserPage(page);
   let goal = initialGoal;
   let socket;
   let cursor = 0;
@@ -205,11 +204,6 @@ async function installFixture(page, origin) {
     if (text.includes("当前远程服务不支持 subagents.list") || text.includes("same key"))
       errors.push(text);
   });
-  await page.addInitScript((allActions) => {
-    localStorage.setItem("selfhost.auth", "status-test-fixture");
-    localStorage.setItem("zcode-locale-preference", "zh-CN");
-    if (allActions) localStorage.setItem("codex-web:conversation-pet-preferences", '{"allActions":true}');
-  }, Boolean(process.env.SELFHOST_ALL_PET_ACTIONS));
   await page.route(new URL("/api/**", origin).href, (route) => {
     const url = new URL(route.request().url());
     const request = route.request().postDataJSON();
@@ -782,6 +776,9 @@ try {
     channel: "chrome",
     headless: true,
     ignoreDefaultArgs: ["--hide-scrollbars"],
+    args: process.env.SELFHOST_BOT_MATERIALS_TEST
+      ? ["--enable-webgl", "--ignore-gpu-blocklist", "--enable-unsafe-swiftshader"]
+      : [],
   });
   try {
     await verifyBrowserStartup(browser, origin);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { verifyMaterialOptions, verifySavedMaterial } from "./brand-materials.mjs";
+import { verifyMaterialOptions, verifyPaintedBots, verifySavedMaterial } from "./brand-materials.mjs";
 
 export async function verifyAnatomyMotion(avatar) {
   const drawing = avatar.locator("svg");
@@ -64,6 +64,7 @@ export async function verifyMotionPreview(page, activate, materialRequests) {
   await activate(studio.getByTestId("bot-studio-gallery-tab"));
   const cards = studio.locator("[data-bot-state-card]");
   assert.equal(await cards.count(), 53);
+  if (materialRequests) await verifyPaintedBots(cards, "glass", 53);
   await activate(studio.locator('[data-bot-group="Morphs"]'));
   assert.equal(await cards.count(), 13);
   await verifyAnatomyMotion(cards.locator('[data-bot-motion="radar"]'));
@@ -71,7 +72,7 @@ export async function verifyMotionPreview(page, activate, materialRequests) {
   await studio.getByTestId("bot-studio-trigger").getByText(/搜索/u).waitFor();
   await verifyAnatomyMotion(preview.locator('[data-bot-motion="radar"]'));
   if (materialRequests) {
-    await preview.locator('canvas[data-bot-material="glass"]').waitFor();
+    await verifyPaintedBots(preview, "glass", 1);
   }
   await activate(studio.getByTestId("bot-studio-poke"));
   await activate(studio.getByTestId("bot-studio-replay"));
@@ -224,12 +225,14 @@ export async function verifyBrandSettings(page, { activate, showTaskList, origin
   await activate(themeSelect);
   await activate(page.getByRole("option", { name: "浅色", exact: true }));
   await page.waitForFunction(() =>
-    document.querySelector('link[rel="icon"]')?.getAttribute("href")?.endsWith("codex-bot-light.svg?v=4"),
+    document.documentElement.dataset.zcodeBrowserThemeSurface === "light",
   );
-  const lightIcon = await favicon.getAttribute("href");
-  const lightSvg = await (await page.request.get(new URL(lightIcon, origin).href)).text();
+  const lightSvg = await (await page.request.get(new URL("/codex-bot-light.svg?v=4", origin).href)).text();
   assert.match(lightSvg, /fill="#161616"/);
   if (anatomyEnabled) {
+    const currentIcon = decodeURIComponent(await favicon.getAttribute("href"));
+    assert.match(currentIcon, /^data:image\/svg\+xml,/u, "The tab icon still uses the chosen appearance");
+    assert.match(currentIcon, materialRequests ? /data:image\/png/u : /fill="#3289ff"/u);
     assert.match(lightSvg, /viewBox="10 10 44 44"/);
     assert.equal(lightSvg.match(/M[\d.]+ /g)?.length, 3, "The tab icon shows two complete eye cutouts");
   }
@@ -258,7 +261,7 @@ export async function verifyBrandSettings(page, { activate, showTaskList, origin
     assert.equal(await canvas.getAttribute("data-bot-shape"), "cloud");
     assert.equal(await canvas.getAttribute("data-bot-mirrored"), null);
     if (materialRequests) {
-      await dockedPet.locator('canvas[data-bot-material="glass"]').waitFor();
+      await verifyPaintedBots(dockedPet, "glass", 1);
     }
   }
 }

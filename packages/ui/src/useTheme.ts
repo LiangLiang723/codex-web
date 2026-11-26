@@ -50,8 +50,8 @@ function syncBrowserThemeSurface(resolved: ResolvedTheme) {
   setThemeMetaContent("color-scheme", resolved);
 
   const icon = document.querySelector<HTMLLinkElement>("link[data-codex-bot-favicon]");
-  if (icon) {
-    const href = new URL(`codex-bot-${resolved}.svg?v=4`, icon.href).href;
+  if (icon && !document.querySelector('meta[name="codex-bot-anatomy"]')) {
+    const href = new URL(`/codex-bot-${resolved}.svg?v=4`, document.baseURI).href;
     if (icon.href !== href) icon.href = href;
   }
 

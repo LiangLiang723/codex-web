@@ -3,7 +3,14 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
 const material = (mode) => `[data-pet-material-option="${mode}"]`;
-const canvas = (mode) => `canvas[data-bot-material="${mode}"]`;
+const painted = (mode, color = "#3289ff") =>
+  `svg[data-bot-material="${mode}"][data-bot-color="${color}"]`;
+
+export async function verifyPaintedBots(scope, mode, count, color) {
+  await scope.locator(painted(mode, color)).nth(count - 1).waitFor({ state: "attached" });
+  assert.equal(await scope.locator(painted(mode, color)).count(), count,
+    "Every Anatomy instance on this surface uses the current material and color");
+}
 
 export function trackMaterialRequests(page) {
   const materials = new Set();
@@ -20,17 +27,38 @@ export async function verifyMaterialOptions(page, studio, preview, activate, req
   await activate(studio.locator('[data-pet-shape-option="sphere"]'));
   await preview.locator('[data-bot-shape="sphere"] svg').waitFor({ state: "attached" });
   const native = await preview.locator('[data-bot-engine="anatomy"] svg').elementHandle();
+  const eyes = studio.locator('[data-pet-shape-option="sphere"] [data-bot-material-eye]');
+  const textures = [];
   for (const mode of ["fluffy", "glass"]) {
     await activate(studio.locator(material(mode)));
-    await preview.locator(canvas(mode)).waitFor();
+    await verifyPaintedBots(preview, mode, 1);
+    await verifyPaintedBots(studio.locator("fieldset").first(), mode, 25);
     assert(await native.evaluate((node) => node.isConnected), "Switching material preserves the Anatomy player");
-    const fraction = await preview.locator(canvas(mode)).evaluate((node) => {
-      const image = node.getContext("2d").getImageData(0, 0, node.width, node.height);
-      let drawn = 0;
-      for (let i = 3; i < image.data.length; i += 4) drawn += Number(image.data[i] > 0);
-      return drawn / (node.width * node.height);
+    assert.equal(await eyes.count(), 2, "The front-facing sphere keeps two eyes");
+    const eye = await eyes.first().evaluate(async (node) => {
+      const paint = node.getAttribute("fill").match(/url\(#(.*?)\)/u)[1];
+      const image = new Image();
+      image.src = document.getElementById(paint).querySelector("image").getAttribute("href");
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(image, 0, 0);
+      const levels = new Set();
+      const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      for (let index = 0; index < data.length; index += 4) {
+        if (data[index + 3] > 200) levels.add(data[index] + data[index + 1] + data[index + 2]);
+      }
+      return { palette: levels.size, raster: image.src, path: node.getAttribute("d") };
     });
-    assert(fraction > 0.15, `${mode} covers the rounded body`);
+    assert(eye.path && eye.palette > 8, `${mode} shades the native eye contour`);
+    textures.push(eye);
+    await page.waitForFunction(() => {
+      const icon = document.querySelector("link[data-codex-bot-favicon]");
+      return icon.href.startsWith("data:image/svg+xml") &&
+        decodeURIComponent(icon.href).includes("data:image/png");
+    });
     assert.deepEqual([...requests], mode === "fluffy" ? ["fluffy"] : ["fluffy", "glass"]);
     const screenshots = process.env.SELFHOST_BRAND_SCREENSHOTS;
     if (screenshots) {
@@ -38,15 +66,21 @@ export async function verifyMaterialOptions(page, studio, preview, activate, req
       await studio.screenshot({ path: join(screenshots, `pet-${mode}-${page.viewportSize().width}.png`) });
     }
   }
+  assert.equal(textures[0].path, textures[1].path, "Both materials use the same Anatomy eye outline");
+  assert.notEqual(textures[0].raster, textures[1].raster, "Eye pixels differ between fluffy and glass");
+  await studio.getByTestId("bot-studio-custom-color").fill("#c74ef3");
+  await verifyPaintedBots(preview, "glass", 1, "#c74ef3");
+  await verifyPaintedBots(studio.locator("fieldset").first(), "glass", 25, "#c74ef3");
+  await activate(studio.locator('[data-pet-color-option="#3289ff"]'));
   await activate(studio.locator(material("flat")));
-  await preview.locator(canvas("glass")).waitFor({ state: "detached" });
+  await preview.locator(painted("glass")).waitFor({ state: "detached" });
   await activate(studio.locator(material("glass")));
   await activate(studio.locator('[data-pet-shape-option="cloud"]'));
   await preview.locator('[data-bot-shape="cloud"]').waitFor();
-  await preview.locator(canvas("glass")).waitFor();
+  await verifyPaintedBots(preview, "glass", 1);
 }
 
 export async function verifySavedMaterial(studio, pet) {
   await studio.locator(`${material("glass")}[aria-pressed="true"]`).waitFor();
-  await pet.locator(canvas("glass")).waitFor();
+  await verifyPaintedBots(pet, "glass", 1);
 }

@@ -5746,11 +5746,13 @@ nodes:
         file: "packages/ui/src/store/index.ts"
       - symbol: "applyTheme"
         file: "packages/ui/src/useTheme.ts"
-      - symbol: "AppearanceSectionContent"
-        file: "packages/ui/src/settingsCodePreview.tsx"
+      - symbol: "BotStudio"
+        file: "packages/ui/src/brand/BotStudio.tsx"
+      - symbol: "StoreProvider"
+        file: "packages/ui/src/store/StoreProvider.tsx"
     invariants:
       - "The renderer preference owns visibility. Thread binding and phase determine placement and animation."
-      - "The resolved root theme controls the monochrome Bot mark and favicon."
+      - "Every Bot inherits the browser's current material and custom color. The resolved root theme supplies the default colors."
 
   - id: "capability.selfhost-codex-extensions"
     kind: "capability"

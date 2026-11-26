@@ -1,25 +1,6 @@
 import { useEffect, useState } from "react";
 import type { BotMaterial, BotShape } from "./contract.js";
 
-export interface AnatomyGeometry {
-  svg: SVGSVGElement;
-  zoom: SVGGElement;
-  parts: SVGGElement;
-  head: SVGGElement;
-  body: SVGPathElement;
-  holes: SVGPathElement;
-  halo: SVGPathElement;
-}
-
-export type TexturedMaterial = Exclude<BotMaterial, "flat">;
-interface MaterialTextures {
-  outline: HTMLCanvasElement;
-  surface: HTMLCanvasElement;
-}
-export interface AnatomyMaterial {
-  getTextures: (path: string | null, color: string) => MaterialTextures | null;
-}
-
 interface AnatomyPlayer {
   setState: (state: string) => void;
   poke: (motion: "bounce") => void;
@@ -32,8 +13,7 @@ export interface AnatomyProfile {
   shapes: BotShape[];
   states: Record<string, { clips: string[]; face?: string; morph?: string; next?: string; holdSeconds?: number }>;
   stateDurations?: Readonly<Record<string, number>>;
-  materials?: Readonly<Record<TexturedMaterial, string>>;
-  materialOutline?: (shape: BotShape) => string | null;
+  materials?: Readonly<Record<Exclude<BotMaterial, "flat">, string>>;
   createBot: (
     container: SVGElement,
     options: {
@@ -43,7 +23,6 @@ export interface AnatomyProfile {
       seed: string;
       follow: boolean;
       isMirrored?: () => boolean;
-      onFrame?: (geometry: AnatomyGeometry, deformed: boolean) => void;
       staticMode: boolean;
       reducedMotion: boolean;
       shape: BotShape;
@@ -57,13 +36,6 @@ export interface AnatomyProfile {
 
 let loaded: AnatomyProfile | null = null;
 let pending: Promise<AnatomyProfile | null> | undefined;
-
-export async function loadAnatomyMaterial(profile: AnatomyProfile, material: TexturedMaterial) {
-  const path = profile.materials?.[material];
-  if (!path || !/^assets\/codex-bot-material-(fluffy|glass)-[a-f0-9]{12}\.mjs$/u.test(path)) return null;
-  const url = new URL(path, window.location.origin + "/").href;
-  return import(/* @vite-ignore */ url).catch(() => null) as Promise<AnatomyMaterial | null>;
-}
 
 function loadAnatomy() {
   const path = document.querySelector('meta[name="codex-bot-anatomy"]')?.getAttribute("content");
