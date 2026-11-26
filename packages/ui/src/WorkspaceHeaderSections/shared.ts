@@ -9,6 +9,9 @@ import type {
 } from "@zcode/shared";
 import type { Ref } from "react";
 
+export const WORKSPACE_HEADER_ICON_BUTTON_CLASS =
+  "text-foreground hover:bg-hover hover:text-foreground [app-region:no-drag]";
+
 export interface WorkspaceHeaderState {
   selectedProvider: ZCodeProvider;
 }

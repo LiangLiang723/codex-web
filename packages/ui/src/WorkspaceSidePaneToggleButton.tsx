@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { WINDOWS_CAPTION_CONTROL_CLASS } from "@/windowCaptionControls.js";
+import { WORKSPACE_HEADER_ICON_BUTTON_CLASS } from "@/WorkspaceHeaderSections/shared.js";
 
 export function WorkspaceSidePaneToggleButton({
   isSidePaneOpen,
@@ -32,7 +33,7 @@ export function WorkspaceSidePaneToggleButton({
         size="icon-md"
         data-testid={TID_SIDE_PANE_TOGGLE}
         className={cn(
-          "text-foreground hover:bg-hover hover:text-foreground [app-region:no-drag]",
+          WORKSPACE_HEADER_ICON_BUTTON_CLASS,
           useWindowsCaptionSpacing && WINDOWS_CAPTION_CONTROL_CLASS,
           isSidePaneOpen && "!bg-selected text-foreground",
         )}

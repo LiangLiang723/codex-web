@@ -33,7 +33,7 @@ const makeThread = (id, name) => ({
   updatedAt: 20,
   status: { type: "idle" },
 });
-const parent = makeThread(threadId, "工作区状态栏测试，检查会话标题应尽量利用手机和桌面的整行可用空间");
+const parent = makeThread(threadId, "/workspaces/project-alpha/documentation/release-planning/2026-11-26/session-title-responsive-ui-verification.md");
 const other = makeThread(otherId, "第二个任务");
 const child = {
   ...makeThread(childId, "子智能体详情"),

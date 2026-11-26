@@ -6875,19 +6875,19 @@ export function SessionPane({
   else if (showConversationPet && (draftRuntimeRebuilding || modelSelectionPending)) petActivity = "loading";
   else if (showConversationPet && visibleQueue?.items.length) petActivity = "waiting";
   const conversationBottomDock = conversationBottomDockContent ? (
-    <div className="relative">
+    <>
       {showConversationPet && !isDraft ? (
         <div
           aria-hidden="true"
           data-codex-pet-anchor="composer"
-          // 锚点原在文档流中，窄屏会为桌宠多留一整行。定位在输入区或只读提示的上边缘。
-          className="pointer-events-none absolute right-3 bottom-full h-[var(--codex-pet-compact-size,2.25rem)] w-9"
+          // 紧凑桌宠在输入区上方占一行；右栏展开时由会话容器收起这行。
+          className="pointer-events-none mr-3 ml-auto h-[var(--codex-pet-compact-size,2.25rem)] w-9"
         />
       ) : null}
       <ConversationBottomDockTransition mode="chat">
         {conversationBottomDockContent}
       </ConversationBottomDockTransition>
-    </div>
+    </>
   ) : null;
 
   const { agents: presentationAgents } = useSubagents(

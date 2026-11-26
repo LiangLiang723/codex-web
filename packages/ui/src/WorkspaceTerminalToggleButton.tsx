@@ -6,6 +6,7 @@ import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useShortcutCommandLabel } from "@/shortcuts/useShortcutBindings.js";
 import { WINDOWS_CAPTION_CONTROL_CLASS } from "@/windowCaptionControls.js";
+import { WORKSPACE_HEADER_ICON_BUTTON_CLASS } from "@/WorkspaceHeaderSections/shared.js";
 import { runUserAction } from "@/lib/userActionTelemetry.js";
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
 
@@ -40,7 +41,7 @@ export function WorkspaceTerminalToggleButton({
         size="icon-md"
         data-testid={TID_TERMINAL_TOGGLE}
         className={cn(
-          "text-foreground hover:bg-hover hover:text-foreground [app-region:no-drag]",
+          WORKSPACE_HEADER_ICON_BUTTON_CLASS,
           useWindowsCaptionSpacing && WINDOWS_CAPTION_CONTROL_CLASS,
           isTerminalOpen && "!bg-selected text-foreground",
         )}

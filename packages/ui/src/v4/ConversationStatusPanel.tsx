@@ -79,6 +79,7 @@ import {
 import { ScrollFadeViewport } from "@/components/ui/scroll-fade-viewport.js";
 import { useNowTicker } from "@/components/workflow-graph/use-now-ticker.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
+import { WORKSPACE_HEADER_ICON_BUTTON_CLASS } from "@/WorkspaceHeaderSections/shared.js";
 import { formatBackgroundTaskElapsedLabel } from "@/BackgroundTaskElapsedLabel.js";
 import { GitActionMenu } from "@/GitActionMenu.js";
 import { HostedGitBranchSwitcher } from "@/GitBranchSwitcher.js";
@@ -2168,8 +2169,12 @@ export function SelfhostConversationStatusPanel(props: SelfhostConversationStatu
       variant={headerTarget ? "ghost" : "outline"}
       size="icon-md"
       aria-label={openLabel}
-      title={openLabel}
-      className={headerTarget ? "text-foreground-subtle" : "bg-surface shadow-xs"}
+      title={headerTarget ? undefined : openLabel}
+      className={
+        headerTarget
+          ? cn(WORKSPACE_HEADER_ICON_BUTTON_CLASS, open && "!bg-selected")
+          : "bg-surface shadow-xs"
+      }
       data-session-status-toggle=""
       onClick={
         wide && !mobile
@@ -2183,8 +2188,16 @@ export function SelfhostConversationStatusPanel(props: SelfhostConversationStatu
       <MonitorActivityIcon aria-hidden className="size-4" />
     </Button>
   );
+  // 状态入口移到顶栏后与同排按钮共用提示，面板内的入口继续随面板布局。
   const placeTrigger = (node: ReactNode) =>
-    headerTarget ? createPortal(node, headerTarget) : node;
+    headerTarget
+      ? createPortal(
+          <ControlHintTooltip title={openLabel} side="bottom">
+            {node}
+          </ControlHintTooltip>,
+          headerTarget,
+        )
+      : node;
   return (
     <aside
       ref={root}

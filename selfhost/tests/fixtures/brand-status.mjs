@@ -167,9 +167,9 @@ export async function verifyCompactPet(pane) {
   const [slot, dockBox, transitionBox] = await Promise.all(
     [anchor, dock, transition].map((element) => element.boundingBox()),
   );
-  assert.equal(await anchor.evaluate((element) => getComputedStyle(element).position), "absolute");
-  assert(Math.abs(dockBox.height - transitionBox.height) <= 1, "The compact pet adds no dock height");
-  assert(Math.abs(slot.y + slot.height - dockBox.y) <= 2, "Its anchor touches the top edge of the dock");
+  assert.equal(await anchor.evaluate((element) => getComputedStyle(element).position), "static");
+  assert(slot.height > 0 && Math.abs(dockBox.height - transitionBox.height - slot.height) <= 1);
+  assert(Math.abs(slot.y + slot.height - transitionBox.y) <= 1, "The compact pet has its own row above the dock");
   assert(slot.x + slot.width <= dockBox.x + dockBox.width, "The pet is at the upper right of the dock");
 }
 
