@@ -2,8 +2,6 @@ import { buildVolume } from "../upstream/open-bot-avatar/src/volume.ts";
 import { exposedHeight } from "../upstream/open-bot-avatar/src/dom/materials/socket.ts";
 import { EYE_W, EYE_H, eyeCenters } from "../upstream/open-bot-avatar/src/validate.ts";
 
-// 上游球形网格以原点为球心；偏移 bounds 会把绒毛截成一边。
-const sphere = { radius: 32, bounds: { minX: -32, minY: -32, maxX: 32, maxY: 32 } };
 const front = { cY: 1, sY: 0, cP: 1, sP: 0, facing: 1 };
 const tileSize = 160;
 const eyeLayout = { x: 50, y: 47, spacing: 14, scale: 1 };
@@ -81,16 +79,47 @@ function fillSurface(sphereTexture) {
   return canvas;
 }
 
+function fittedEyes(shape, area) {
+  const { bounds } = shape;
+  const sx = (bounds.maxX - bounds.minX) / area.width;
+  const sy = (bounds.maxY - bounds.minY) / area.height;
+  const host = shape.parts[shape.eyePart];
+  return area.eyes.filter((points) => points.length >= 3).slice(0, 2).map((points, slot) => {
+    const xs = points.map(([x]) => x);
+    const ys = points.map(([, y]) => y);
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const dx = bounds.minX + (cx - area.x) * sx;
+    const dy = bounds.minY + (cy - area.y) * sy;
+    // 眼珠嵌在眼窝里，精确的可见范围由画布上 Anatomy 的眼睛路径补齐。
+    const point = ([x, y]) => `${((x - cx) * sx * 0.82).toFixed(1)} ${((y - cy) * sy).toFixed(1)}`;
+    const mark = { shape: "path", d: `M${points.map(point).join("L")}Z` };
+    shape.eyeZ[slot] = Math.max(0, host?.height(dx, dy) ?? 0);
+    return { mark, dx, dy };
+  });
+}
+
 export function createMaterialTextures(render) {
   const volumes = new Map();
   const cache = new Map();
-  return (path, color) => {
+  let restEyes;
+  function volumeFor(path) {
+    if (!volumes.has(path)) {
+      const volume = toVolume(path);
+      if (path === lensSphere) restEyes = [...volume.eyeZ];
+      volumes.set(path, volume);
+    }
+    return volumes.get(path);
+  }
+
+  function getTextures(path, color) {
     let palette = cache.get(color);
     if (!palette) {
+      const sphere = volumeFor(lensSphere);
       const outline = cropMaterial(render, sphere, color);
       if (!outline) return null;
-      if (!volumes.has(lensSphere)) volumes.set(lensSphere, toVolume(lensSphere));
-      const eye = cropEye(render, volumes.get(lensSphere), color);
+      sphere.eyeZ = [...restEyes];
+      const eye = cropEye(render, sphere, color);
       if (!eye) return null;
       const round = { outline, surface: fillSurface(outline), eye };
       palette = { round, outlines: new Map() };
@@ -100,12 +129,21 @@ export function createMaterialTextures(render) {
     if (!path) return palette.round;
     const { outlines } = palette;
     if (!outlines.has(path)) {
-      if (!volumes.has(path)) volumes.set(path, toVolume(path));
-      const outline = cropMaterial(render, volumes.get(path), color);
+      const outline = cropMaterial(render, volumeFor(path), color);
       if (!outline) return palette.round;
       if (outlines.size >= 8) outlines.delete(outlines.keys().next().value);
       outlines.set(path, { ...palette.round, outline });
     }
     return outlines.get(path);
-  };
+  }
+
+  // 动画推进时按当前投影渲染身体和眼窝，完整保留着色器绘制的毛尖和半透明边缘。
+  function renderFrame(path, color, area, density) {
+    const shape = volumeFor(path ?? lensSphere);
+    const eyes = fittedEyes(shape, area);
+    const image = render(shape, front, { color, ink: "#151515", eyes }, density);
+    return image ? { image, bounds: shape.bounds } : null;
+  }
+
+  return { getTextures, renderFrame };
 }

@@ -33,6 +33,21 @@ export async function verifyMaterialOptions(page, studio, preview, activate, req
     await activate(studio.locator(material(mode)));
     await verifyPaintedBots(preview, mode, 1);
     await verifyPaintedBots(studio.locator("fieldset").first(), mode, 25);
+    const live = preview.locator(`canvas[data-bot-live-material="${mode}"]`);
+    await live.waitFor({ state: "attached" });
+    assert.equal(await studio.locator("fieldset canvas[data-bot-live-material]").count(), 0,
+      "Small shape picks use the shared palette");
+    const opacity = await live.evaluate((node) => {
+      const { data } = node.getContext("2d").getImageData(0, 0, node.width, node.height);
+      let visible = 0, translucent = 0;
+      for (let index = 3; index < data.length; index += 4) {
+        if (data[index] > 0) visible++;
+        if (data[index] > 0 && data[index] < 250) translucent++;
+      }
+      return { visible, translucent };
+    });
+    assert(opacity.visible > 100 && opacity.translucent > 20,
+      `${mode} preserves the upstream transparent edges`);
     assert(await native.evaluate((node) => node.isConnected), "Switching material preserves the Anatomy player");
     assert.equal(await eyes.count(), 2, "The front-facing sphere keeps two eyes");
     const eye = await eyes.first().evaluate(async (node) => {

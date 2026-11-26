@@ -16,7 +16,7 @@ export async function prepareBotMaterials(output) {
         contents: `
           import { ${kind} } from "./dom/materials/${kind}.ts";
           import { createMaterialTextures } from ${JSON.stringify(texture)};
-          export const getTextures = createMaterialTextures(${kind}.render);
+          export const { getTextures, renderFrame } = createMaterialTextures(${kind}.render);
         `,
       },
       banner: { js: `/*\n${license.trim()}\n*/` },

@@ -169,8 +169,14 @@ function buildModel(e, t, n, G, gE, tE, warnBody, outline)`);
 adapt('s = e.morph == null && e.bodies.length === 1', 's = !outline && e.morph == null && e.bodies.length === 1');
 adapt('c !== "sphere" && warnBody(c);', '!outline && c !== "sphere" && warnBody(c);');
 adapt("shape: bT(e, n, G)", "shape: bT(e, n, G, outline)");
-adapt('eyes: t.cutout ? "" : d(f),', 'eyes: t.cutout ? "" : d(f), surfaceEyes: () => f.map(eye => d([eye])),');
-adapt("eyesD: i.eyes, glow: i.glow,", "eyesD: i.eyes, surfaceEyes: i.surfaceEyes, glow: i.glow,");
+adapt('eyes: t.cutout ? "" : d(f),', `eyes: t.cutout ? "" : d(f),
+    surfaceEyes: () => f.map(eye => d([eye])),
+    materialArea: () => ({
+      x: c - a[0] * Math.abs(o), y: u - a[1] * Math.abs(o),
+      width: 2 * a[0] * Math.abs(o), height: 2 * a[1] * Math.abs(o),
+      eyes: f.map(eye => xT(eye, kT).map(([x, y]) => [c + x * o, u - y * o])),
+    }),`);
+adapt("eyesD: i.eyes, glow: i.glow,", "eyesD: i.eyes, surfaceEyes: i.surfaceEyes, materialArea: i.materialArea, glow: i.glow,");
 adapt(
   "l = mM([kE, ...i.map(({ shape: c }) => pM(c.body, c.center))]),",
   "l = outline && e.morph == null ? [] : mM([kE, ...i.map(({ shape: c }) => pM(c.body, c.center))]),",
@@ -206,17 +212,30 @@ adapt(
 );
 adapt(
   "  const warnedBodies = new Set;",
-  `  const unbindAppearance = opts.bindAppearance?.(next => {
-    skin = next;
+  `  const redraw = () => {
     if (lastModel) renderer.render(lastModel, skin, deformed);
+  };
+  const unbindAppearance = opts.bindAppearance?.(next => {
+    skin = next;
+    redraw();
   });
   const warnedBodies = new Set;`,
 );
-adapt("      stopLoop();\n      io?.disconnect();", "      unbindAppearance?.();\n      stopLoop();\n      io?.disconnect();");
+adapt("function createRenderer(doc, uid, S, G)", "function createRenderer(doc, uid, S, G, createMaterialLayer, redraw)");
+adapt('const eyesP = mk("path", {}, headG);', 'const eyesP = mk("path", {}, headG);\n  const live = createMaterialLayer?.(svg, headG, redraw);');
+adapt("renderer = createRenderer(doc, uid, size, G);", "renderer = createRenderer(doc, uid, size, G, opts.createMaterialLayer, redraw);");
+adapt("return { svg, render };", "return { svg, render, activeMaterial: () => live?.active(), dispose: () => live?.dispose() };");
+adapt(
+  'if (now - lastT < frameDur - 1) { rafId = win.requestAnimationFrame(tick); return; }',
+  `// 体积着色随 Anatomy 的时钟绘制，给玻璃光线步进留出每帧预算。
+    const minFrame = renderer?.activeMaterial() ? Math.max(frameDur, 1000 / 30) : frameDur;
+    if (now - lastT < minFrame - 1) { rafId = win.requestAnimationFrame(tick); return; }`,
+);
+adapt("      stopLoop();\n      io?.disconnect();", "      unbindAppearance?.();\n      renderer?.dispose();\n      stopLoop();\n      io?.disconnect();");
 adapt(
   "  const render = model => {",
   `  const materialEyes = [];
-  const drawMaterialEyes = (paths, eyePaint, clipId) => {
+  const drawMaterialEyes = (paths, eyePaint, clipId, painted) => {
     // 眼窝只能画在原版可见眼睛里，保留转过侧面和合眼时的原始轮廓。
     for (let index = 0; index < Math.max(paths.length, materialEyes.length); index++) {
       const path = paths[index];
@@ -224,25 +243,31 @@ adapt(
       setA(eye, "d", path || null);
       setA(eye, "fill", path ? eyePaint : null);
       setA(eye, "clip-path", path && clipId ? clipId : null);
+      setA(eye, "visibility", painted ? "hidden" : null);
     }
   };
   const render = (model, skin, deformed) => {
     setA(svg, "data-bot-material", skin?.mode ?? null);
-    setA(svg, "data-bot-color", skin?.color ?? null);`,
+    setA(svg, "data-bot-color", skin?.color ?? null);
+    const compositeMaterial = (eyePaths, clipId) => {
+      const painted = live?.draw(model, skin, deformed, eyePaths);
+      setA(bodyP, "visibility", painted ? "hidden" : null);
+      drawMaterialEyes(eyePaths, skin?.eye, clipId, painted);
+    };`,
 );
 adapt('setA(haloP, "fill", `url(#${uid}-ghalo)`)', 'setA(haloP, "fill", skin?.surface ?? `url(#${uid}-ghalo)`)');
 adapt('setA(bodyP, "fill", `url(#${uid}-gbody)`)', 'setA(bodyP, "fill", skin?.body ?? `url(#${uid}-gbody)`)');
 adapt('} else setA(bodyP, "fill", model.inkPaint);', '} else setA(bodyP, "fill", skin?.body ?? model.inkPaint);');
 adapt(
   '      setA(eyesP, "clip-path", null);\n      return;',
-  '      setA(eyesP, "clip-path", null);\n      drawMaterialEyes(skin ? model.surfaceEyes?.() ?? [] : [], skin?.eye);\n      return;',
+  '      setA(eyesP, "clip-path", null);\n      compositeMaterial(skin ? model.surfaceEyes?.() ?? [] : []);\n      return;',
 );
 adapt(
   'const bodyD = da(model.bodyPts), eyesD = model.eyesPts.map(da).join("");\n    setA(bodyP, "d", bodyD); setA(bodyP, "fill", model.inkPaint);',
   `const bodyD = da(model.bodyPts), eyePaths = model.eyesPts.map(da), eyesD = eyePaths.join("");
     setA(bodyP, "d", bodyD); setA(bodyP, "fill", (deformed ? skin?.surface : skin?.body) ?? model.inkPaint);
     if (skin) setA(clipBody, "d", bodyD);
-    drawMaterialEyes(skin ? eyePaths : [], skin?.eye, \`url(#\${uid}-body)\`);`,
+    compositeMaterial(skin ? eyePaths : [], \`url(#\${uid}-body)\`);`,
 );
 adapt("const renderParts = (parts, inkPaint) => {", "const renderParts = (parts, inkPaint, strokePaint = inkPaint) => {");
 adapt(
@@ -290,6 +315,7 @@ const bundle = await build({
     contents: `
       import { createGrokBot } from "./grok-player.js";
       import { installBotAppearance } from ${JSON.stringify(fileURLToPath(new URL("bot-appearance.mjs", import.meta.url)))};
+      import { createBotMaterialLayer } from ${JSON.stringify(fileURLToPath(new URL("bot-live-material.mjs", import.meta.url)))};
       const data = ${JSON.stringify(recipes)};
       const outlines = ${JSON.stringify(outlines)};
       export const clips = ${JSON.stringify(clips)};
@@ -313,6 +339,7 @@ const bundle = await build({
         const outline = useSurface ? null : materialOutline(shape);
         return createGrokBot(host, {
           ...options, data, outline: outlines[shape],
+          createMaterialLayer: (options.size ?? 320) >= 120 ? createBotMaterialLayer : undefined,
           bindAppearance: receive => subscribe?.(outline, useSurface, receive),
         });
       };

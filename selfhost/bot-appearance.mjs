@@ -45,8 +45,10 @@ export function installBotAppearance(document, materials, favicon) {
     const key = useSurface ? "surface" : outline;
     if (paints.has(key)) return paints.get(key);
     let paint = null;
+    const { getTextures, renderFrame } = palette;
+    const { material, color } = preference;
     try {
-      const textures = palette.getTextures(outline, preference.color);
+      const textures = getTextures(outline, color);
       if (textures) {
         const body = pattern(useSurface ? textures.surface : textures.outline);
         const eye = pattern(textures.eye);
@@ -54,13 +56,14 @@ export function installBotAppearance(document, materials, favicon) {
         const stroke = textures.surface.getContext("2d")
           .getImageData(textures.surface.width / 2, textures.surface.height / 2, 1, 1).data;
         paint = {
-          mode: preference.material,
-          color: preference.color,
+          mode: material,
+          color,
           body: `url(#${body.id})`,
           surface: `url(#${surface.id})`,
           eye: `url(#${eye.id})`,
           stroke: `rgb(${stroke[0]} ${stroke[1]} ${stroke[2]})`,
           iconDefs: () => body.outerHTML + eye.outerHTML,
+          renderFrame: (area, density) => renderFrame(outline, color, area, density),
         };
       }
     } catch {
