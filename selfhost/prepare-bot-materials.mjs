@@ -3,6 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { anatomyProjection } from "./bot-material-shaders.mjs";
 
 const source = fileURLToPath(new URL("../upstream/open-bot-avatar/src/", import.meta.url));
 const texture = fileURLToPath(new URL("bot-material-texture.mjs", import.meta.url));
@@ -24,6 +25,7 @@ export async function prepareBotMaterials(output) {
       platform: "browser",
       bundle: true,
       minify: true,
+      plugins: [anatomyProjection],
       write: false,
     });
     const code = bundle.outputFiles[0].contents;

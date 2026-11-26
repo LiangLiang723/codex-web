@@ -203,17 +203,22 @@ adapt(
     // 造型选择用正脸缩略图，播放器的会话帧仍使用原始朝向。
     if (opts.frontFacing) frame.quat = [1, 0, 0, 0];
     lastModel = buildModel(frame, theme, size, G, gE, trail, warnBody, opts.outline);
-    deformed = frame.morph != null;
-    renderer.render(lastModel, skin, deformed);`,
+    if (lastModel) {
+      // Anatomy 使用 Y 向上和行主序，材质使用 Y 向下和 WebGL 的列主序。
+      const [xx, xy, xz, yx, yy, yz, zx, zy, zz] = ir(frame.quat);
+      lastModel.materialView = [xx, -yx, zx, -xy, yy, -zy, xz, -yz, zz];
+      lastModel.materialMorph = frame.morph != null;
+    }
+    renderer.render(lastModel, skin);`,
 );
 adapt(
   "  const renderFrame = () => {",
-  "  let lastModel, skin, deformed;\n  const renderFrame = () => {",
+  "  let lastModel, skin;\n  const renderFrame = () => {",
 );
 adapt(
   "  const warnedBodies = new Set;",
   `  const redraw = () => {
-    if (lastModel) renderer.render(lastModel, skin, deformed);
+    if (lastModel) renderer.render(lastModel, skin);
   };
   const unbindAppearance = opts.bindAppearance?.(next => {
     skin = next;
@@ -224,11 +229,12 @@ adapt(
 adapt("function createRenderer(doc, uid, S, G)", "function createRenderer(doc, uid, S, G, createMaterialLayer, redraw)");
 adapt('const eyesP = mk("path", {}, headG);', 'const eyesP = mk("path", {}, headG);\n  const live = createMaterialLayer?.(svg, headG, redraw);');
 adapt("renderer = createRenderer(doc, uid, size, G);", "renderer = createRenderer(doc, uid, size, G, opts.createMaterialLayer, redraw);");
-adapt("return { svg, render };", "return { svg, render, activeMaterial: () => live?.active(), dispose: () => live?.dispose() };");
+adapt("return { svg, render };", "return { svg, render, materialFps: () => live?.fps(), dispose: () => live?.dispose() };");
 adapt(
   'if (now - lastT < frameDur - 1) { rafId = win.requestAnimationFrame(tick); return; }',
   `// 体积着色随 Anatomy 的时钟绘制，给玻璃光线步进留出每帧预算。
-    const minFrame = renderer?.activeMaterial() ? Math.max(frameDur, 1000 / 30) : frameDur;
+    const fps = renderer?.materialFps();
+    const minFrame = fps ? Math.max(frameDur, 1000 / fps) : frameDur;
     if (now - lastT < minFrame - 1) { rafId = win.requestAnimationFrame(tick); return; }`,
 );
 adapt("      stopLoop();\n      io?.disconnect();", "      unbindAppearance?.();\n      renderer?.dispose();\n      stopLoop();\n      io?.disconnect();");
@@ -246,12 +252,13 @@ adapt(
       setA(eye, "visibility", painted ? "hidden" : null);
     }
   };
-  const render = (model, skin, deformed) => {
+  const render = (model, skin) => {
     setA(svg, "data-bot-material", skin?.mode ?? null);
     setA(svg, "data-bot-color", skin?.color ?? null);
     const compositeMaterial = (eyePaths, clipId) => {
-      const painted = live?.draw(model, skin, deformed, eyePaths);
+      const painted = live?.draw(model, skin, eyePaths);
       setA(bodyP, "visibility", painted ? "hidden" : null);
+      setA(eyesP, "visibility", painted ? "hidden" : null);
       drawMaterialEyes(eyePaths, skin?.eye, clipId, painted);
     };`,
 );
@@ -265,7 +272,7 @@ adapt(
 adapt(
   'const bodyD = da(model.bodyPts), eyesD = model.eyesPts.map(da).join("");\n    setA(bodyP, "d", bodyD); setA(bodyP, "fill", model.inkPaint);',
   `const bodyD = da(model.bodyPts), eyePaths = model.eyesPts.map(da), eyesD = eyePaths.join("");
-    setA(bodyP, "d", bodyD); setA(bodyP, "fill", (deformed ? skin?.surface : skin?.body) ?? model.inkPaint);
+    setA(bodyP, "d", bodyD); setA(bodyP, "fill", (model.materialMorph ? skin?.surface : skin?.body) ?? model.inkPaint);
     if (skin) setA(clipBody, "d", bodyD);
     compositeMaterial(skin ? eyePaths : [], \`url(#\${uid}-body)\`);`,
 );
@@ -334,12 +341,12 @@ const bundle = await build({
       });
       export const createBot = (host, options = {}) => {
         const shape = options.shape ?? "sphere";
-        // 小图标共用同一张纹理，精确轮廓仍由各自的 SVG 路径裁切。
-        const useSurface = (options.size ?? 320) < 100 && shape !== "sphere";
+        // 正面造型选项共用体积，以 Anatomy 的轮廓投影各自的形状。
+        const useSurface = options.frontFacing && shape !== "sphere";
         const outline = useSurface ? null : materialOutline(shape);
         return createGrokBot(host, {
           ...options, data, outline: outlines[shape],
-          createMaterialLayer: (options.size ?? 320) >= 120 ? createBotMaterialLayer : undefined,
+          createMaterialLayer: createBotMaterialLayer,
           bindAppearance: receive => subscribe?.(outline, useSurface, receive),
         });
       };

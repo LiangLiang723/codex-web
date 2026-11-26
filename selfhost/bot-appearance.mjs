@@ -63,7 +63,8 @@ export function installBotAppearance(document, materials, favicon) {
           eye: `url(#${eye.id})`,
           stroke: `rgb(${stroke[0]} ${stroke[1]} ${stroke[2]})`,
           iconDefs: () => body.outerHTML + eye.outerHTML,
-          renderFrame: (area, density) => renderFrame(outline, color, area, density),
+          renderFrame: (area, eyes, view, morphing, density) =>
+            renderFrame(outline, color, area, eyes, view, useSurface || morphing, density),
         };
       }
     } catch {

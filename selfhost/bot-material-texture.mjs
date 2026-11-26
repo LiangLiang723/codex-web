@@ -1,6 +1,7 @@
 import { buildVolume } from "../upstream/open-bot-avatar/src/volume.ts";
 import { exposedHeight } from "../upstream/open-bot-avatar/src/dom/materials/socket.ts";
 import { EYE_W, EYE_H, eyeCenters } from "../upstream/open-bot-avatar/src/validate.ts";
+import { bodyWarp, outlineProfile } from "./bot-material-projection.mjs";
 
 const front = { cY: 1, sY: 0, cP: 1, sP: 0, facing: 1 };
 const tileSize = 160;
@@ -79,28 +80,30 @@ function fillSurface(sphereTexture) {
   return canvas;
 }
 
-function fittedEyes(shape, area) {
-  const { bounds } = shape;
+function projectedEyes(bounds, area, paths) {
   const sx = (bounds.maxX - bounds.minX) / area.width;
   const sy = (bounds.maxY - bounds.minY) / area.height;
-  const host = shape.parts[shape.eyePart];
-  return area.eyes.filter((points) => points.length >= 3).slice(0, 2).map((points, slot) => {
-    const xs = points.map(([x]) => x);
-    const ys = points.map(([, y]) => y);
-    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
-    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
-    const dx = bounds.minX + (cx - area.x) * sx;
-    const dy = bounds.minY + (cy - area.y) * sy;
-    // 眼珠嵌在眼窝里，精确的可见范围由画布上 Anatomy 的眼睛路径补齐。
-    const point = ([x, y]) => `${((x - cx) * sx * 0.82).toFixed(1)} ${((y - cy) * sy).toFixed(1)}`;
-    const mark = { shape: "path", d: `M${points.map(point).join("L")}Z` };
-    shape.eyeZ[slot] = Math.max(0, host?.height(dx, dy) ?? 0);
-    return { mark, dx, dy };
+  const ox = bounds.minX - area.x * sx;
+  const oy = bounds.minY - area.y * sy;
+  const matrix = [sx, 0, 0, sy, ox, oy];
+  return area.eyes.slice(0, 2).flatMap((points, index) => {
+    if (points.length < 3 || !paths[index]) return [];
+    const xs = points.map(([x]) => x * sx + ox);
+    const ys = points.map(([, y]) => y * sy + oy);
+    const x = Math.min(...xs);
+    const y = Math.min(...ys);
+    const w = Math.max(...xs) - x;
+    const h = Math.max(...ys) - y;
+    if (w < 0.01 || h < 0.01) return [];
+    // 点列只用来计算瓦片范围，绘制时使用 Anatomy 的原始弧线路径。
+    const mark = { shape: "path", d: paths[index], anatomy: { matrix, box: { x, y, w, h } } };
+    return [{ mark, dx: 0, dy: 0 }];
   });
 }
 
 export function createMaterialTextures(render) {
   const volumes = new Map();
+  const profiles = new Map();
   const cache = new Map();
   let restEyes;
   function volumeFor(path) {
@@ -138,10 +141,15 @@ export function createMaterialTextures(render) {
   }
 
   // 动画推进时按当前投影渲染身体和眼窝，完整保留着色器绘制的毛尖和半透明边缘。
-  function renderFrame(path, color, area, density) {
+  function renderFrame(path, color, area, paths, matrix, morphing, density) {
     const shape = volumeFor(path ?? lensSphere);
-    const eyes = fittedEyes(shape, area);
-    const image = render(shape, front, { color, ink: "#151515", eyes }, density);
+    let warp;
+    if (morphing && area.outline) {
+      if (!profiles.has(path)) profiles.set(path, outlineProfile(path, shape.bounds));
+      warp = bodyWarp(profiles.get(path), area, shape.bounds);
+    }
+    const eyes = projectedEyes(shape.bounds, area, paths);
+    const image = render(shape, front, { color, ink: "#151515", eyes, anatomy: { matrix, warp } }, density);
     return image ? { image, bounds: shape.bounds } : null;
   }
 

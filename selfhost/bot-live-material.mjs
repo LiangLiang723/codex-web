@@ -9,7 +9,8 @@ function materialArea(model) {
   const x = Math.min(...xs);
   const y = Math.min(...ys);
   return {
-    x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y, eyes: model.eyesPts,
+    x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y,
+    eyes: model.eyesPts, outline: model.bodyPts,
   };
 }
 
@@ -22,13 +23,7 @@ export function createBotMaterialLayer(svg, parent, refresh) {
   let size;
   let visibleWidth = 0;
   let observed;
-
-  const observer = new win.ResizeObserver(() => {
-    const width = observed.getBoundingClientRect().width;
-    if (width === visibleWidth) return;
-    visibleWidth = width;
-    refresh();
-  });
+  let observer;
 
   function hide() {
     if (outer) {
@@ -38,28 +33,35 @@ export function createBotMaterialLayer(svg, parent, refresh) {
     return false;
   }
 
-  function draw(model, skin, deformed, eyePaths) {
-    if (!skin || deformed || model.glow) return hide();
+  function draw(model, skin, eyePaths) {
+    if (!skin) return hide();
     if (!observed) {
       observed = svg.closest("[data-codex-bot]") ?? svg;
       visibleWidth = observed.getBoundingClientRect().width;
+      observer = new win.ResizeObserver(() => {
+        const width = observed.getBoundingClientRect().width;
+        if (width === visibleWidth) return;
+        visibleWidth = width;
+        refresh();
+      });
       observer.observe(observed);
     }
-    // 状态行和图鉴小卡用共享纹理，缩小的桌宠也不用逐帧绘制体积。
-    if (visibleWidth < 80 || doc.hidden) return hide();
+    if (visibleWidth === 0 || doc.hidden) return hide();
 
     const area = materialArea(model);
-    if (!area || area.width < 1 || area.height < 1) return hide();
     const pixels = Math.ceil(Math.min(320, visibleWidth * Math.min(win.devicePixelRatio, 2.5)));
     const scale = pixels / model.size;
-    const density = Math.min(2.7, Math.max(area.width, area.height) * scale / 64);
+    const hasBody = area && Math.min(area.width, area.height) * scale >= 0.5;
     let frame;
-    try {
-      frame = skin.renderFrame(area, density);
-    } catch {
-      // 上下文丢失或体积不可用时，仍然由同一帧的 SVG 绘制共享材质。
+    if (hasBody) {
+      try {
+        const density = Math.min(2.7, Math.max(area.width, area.height) * scale / 64);
+        frame = skin.renderFrame(area, eyePaths, model.materialView, model.materialMorph, density);
+      } catch {
+        // 上下文丢失时仍然可以用当前帧的 SVG 绘制身体和眼睛。
+      }
+      if (!frame) return hide();
     }
-    if (!frame) return hide();
 
     if (!ctx) {
       outer = doc.createElementNS(svgNamespace, "foreignObject");
@@ -79,28 +81,18 @@ export function createBotMaterialLayer(svg, parent, refresh) {
 
     ctx.resetTransform();
     ctx.clearRect(0, 0, pixels, pixels);
-    ctx.setTransform(scale, 0, 0, scale, 0, 0);
-    const { image, bounds } = frame;
-    const sx = area.width / (bounds.maxX - bounds.minX);
-    const sy = area.height / (bounds.maxY - bounds.minY);
-    const dx = area.x + (image.cx - image.radius - bounds.minX) * sx;
-    const dy = area.y + (image.cy - image.radius - bounds.minY) * sy;
-    const drawFrame = () => ctx.drawImage(
-      image.canvas, image.x, image.y, image.size, image.size,
-      dx, dy, image.radius * 2 * sx, image.radius * 2 * sy,
-    );
-    drawFrame();
-
-    // 使用 Anatomy 的弧线作为眼珠外形，同时保留原版着色器画出的镜面亮点。
-    for (const d of eyePaths) {
-      const path = new Path2D(d);
-      ctx.save();
-      ctx.clip(path);
-      ctx.fillStyle = "#151515";
-      ctx.fill(path);
-      ctx.globalAlpha = 0.8;
-      drawFrame();
-      ctx.restore();
+    if (frame) {
+      ctx.setTransform(scale, 0, 0, scale, 0, 0);
+      const { image, bounds } = frame;
+      const sx = area.width / (bounds.maxX - bounds.minX);
+      const sy = area.height / (bounds.maxY - bounds.minY);
+      const dx = area.x + (image.cx - image.radius - bounds.minX) * sx;
+      const dy = area.y + (image.cy - image.radius - bounds.minY) * sy;
+      // 眼珠已由体积着色器完整绘制，第二次合成会在精确眼缘内留下暗边。
+      ctx.drawImage(
+        image.canvas, image.x, image.y, image.size, image.size,
+        dx, dy, image.radius * 2 * sx, image.radius * 2 * sy,
+      );
     }
     outer.style.display = "block";
     canvas.dataset.botLiveMaterial = skin.mode;
@@ -109,7 +101,7 @@ export function createBotMaterialLayer(svg, parent, refresh) {
 
   return {
     draw,
-    active: () => Boolean(canvas?.dataset.botLiveMaterial),
-    dispose: () => observer.disconnect(),
+    fps: () => canvas?.dataset.botLiveMaterial ? Math.min(30, 8 + visibleWidth / 5) : undefined,
+    dispose: () => observer?.disconnect(),
   };
 }
