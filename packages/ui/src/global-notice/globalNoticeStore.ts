@@ -1,3 +1,4 @@
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 import { logger } from "@/logger.js";
 
 export type GlobalNoticePriority = "low" | "normal" | "high";
@@ -179,7 +180,7 @@ function describeError(error: unknown): string {
 /** localStorage 在隐私模式、被禁用或沙箱 iframe 中访问即抛 SecurityError；退回内存存储，通知在本次会话内仍可用。 */
 function resolveBrowserNoticeStorage(): GlobalNoticeStorage {
   try {
-    const storage = window.localStorage;
+    const storage = getBrowserLocalStorage();
     if (storage) return storage;
   } catch (error) {
     logger.warn("[global-notice] localStorage 不可用，改用内存存储", {

@@ -1,5 +1,6 @@
 // 服务端规则驱动的草稿模型迁移：纯判定与客户端标记，规格见 docs/chat/draft-model-migration.md。
 // 判定只读目标 Host 的 ModelSelectionView，标记存在本设备 localStorage，不进 Session 或 Host 状态。
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 import { completeNewModelSelection } from "@zcode/provider";
 import {
   OFFICIAL_PROVIDER_TEMPLATE_IDS,
@@ -139,7 +140,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readStorageJson(key: string): unknown {
   try {
-    const raw = window.localStorage.getItem(key);
+    const raw = getBrowserLocalStorage().getItem(key);
     return raw ? (JSON.parse(raw) as unknown) : null;
   } catch {
     // 损坏或不可读的标记按未判定处理；最坏结果是同一规则再判定一次。
@@ -149,7 +150,7 @@ function readStorageJson(key: string): unknown {
 
 function writeStorageJson(key: string, value: unknown): void {
   try {
-    window.localStorage.setItem(key, JSON.stringify(value));
+    getBrowserLocalStorage().setItem(key, JSON.stringify(value));
   } catch (error) {
     logger.lifecycle.warn("[draft-model-migration] 迁移标记写入失败", { key, error });
   }

@@ -1,3 +1,4 @@
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 import {
   BUILTIN_MODEL_PROVIDER_IDS,
 } from "@zcode/shared";
@@ -44,7 +45,7 @@ function getLocalStorage(): Storage | null {
     return null;
   }
   try {
-    return window.localStorage;
+    return getBrowserLocalStorage();
   } catch (error) {
     // WebView 隐私模式或移动端远控容器可能禁用 localStorage。
     // 这里只影响 footer 的 provider 选择记忆，失败时降级为本次默认选择即可。

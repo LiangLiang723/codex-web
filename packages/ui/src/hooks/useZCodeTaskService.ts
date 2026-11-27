@@ -1,3 +1,4 @@
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 import { useWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import type { IZCodeTaskService } from "@zcode/services";
 import type { ZCodeTaskSnapshot } from "@zcode/shared";
@@ -97,7 +98,7 @@ function getBrowserStorage(): Storage | null {
     return null;
   }
   try {
-    return window.localStorage;
+    return getBrowserLocalStorage();
   } catch {
     return null;
   }

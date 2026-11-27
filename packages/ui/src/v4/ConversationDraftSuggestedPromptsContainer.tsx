@@ -96,19 +96,24 @@ export function ConversationDraftSuggestedPromptsContainer({
   const onboardingRecordService = useOnboardingRecordService();
   const recommendationPaneId = useId();
   const recommendationMode = isOfficeMode ? "office" : "coding";
-  const recommendationRevision = useSyncExternalStore(
-    subscribeRecommendedPrompts,
-    getRecommendedPromptsRevision,
-  );
+  const readRecommendations = useMemo(() => {
+    let revision = -1;
+    let items: DraftSuggestedPromptItem[] = [];
+    return () => {
+      const current = getRecommendedPromptsRevision();
+      if (revision !== current) {
+        items = getRecommendedPromptsForPane(recommendationPaneId, recommendationMode);
+        revision = current;
+      }
+      return items;
+    };
+  }, [recommendationMode, recommendationPaneId]);
+  const recommendedItems = useSyncExternalStore(subscribeRecommendedPrompts, readRecommendations);
   useEffect(() => {
     if (!proactive) return;
     registerRecommendedPromptPane(recommendationPaneId, recommendationMode);
     return () => unregisterRecommendedPromptPane(recommendationPaneId);
   }, [proactive, recommendationMode, recommendationPaneId]);
-  const recommendedItems = useMemo(
-    () => getRecommendedPromptsForPane(recommendationPaneId, recommendationMode),
-    [recommendationMode, recommendationPaneId, recommendationRevision],
-  );
   const [closing, setClosing] = useState(false);
   const closeRecommendations = async () => {
     setClosing(true);
@@ -524,6 +529,7 @@ export function ConversationDraftSuggestedPromptsContainer({
       cancelOperation,
       finishMutation,
       intl,
+      isWebRemoteControl,
       revalidateAndPrependPlugin,
       resolution.services.pluginManagementService,
       showMutationConfirmation,

@@ -314,6 +314,7 @@ export function V4WorkspaceChatArea({
       readOnlyReason,
       allowEscapeStopOutsidePane,
       primaryPaneSessionId,
+      sessionId,
       activeSelectionSideChatSessionId,
       provider,
       onSessionCreated,

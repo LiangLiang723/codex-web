@@ -20,7 +20,7 @@ export interface WindowControllerTaskListRegistry {
   getRevision(): number;
   getDirectoryRevision(): number;
   getSourceRevision(): number;
-  readActivities(): Array<{
+  getActivitiesSnapshot(): ReadonlyArray<{
     address: WindowHostControllerTaskRow["address"];
     activity: NonNullable<WindowHostControllerTaskRow["activity"]>;
   }>;
@@ -105,6 +105,10 @@ export function getWindowControllerTaskListRegistry(
   >();
   const taskRows = new Map<string, WindowHostControllerTaskRow>();
   let revision = 0;
+  let activitiesSnapshot: {
+    revision: number;
+    activities: ReturnType<WindowControllerTaskListRegistry["getActivitiesSnapshot"]>;
+  } | null = null;
   let directoryRevision = 0;
   let sourceRevision = 0;
   let started = false;
@@ -132,6 +136,7 @@ export function getWindowControllerTaskListRegistry(
     cursors.clear();
     queryCache.clear();
     taskRows.clear();
+    activitiesSnapshot = null;
     const ids = Array.from(subscriptionIds);
     subscriptionIds.clear();
     for (const subscriptionId of ids) {
@@ -255,12 +260,16 @@ export function getWindowControllerTaskListRegistry(
     getSourceRevision() {
       return sourceRevision;
     },
-    readActivities() {
-      return Array.from(taskRows.values()).flatMap((row) =>
+    getActivitiesSnapshot() {
+      if (activitiesSnapshot?.revision === revision) return activitiesSnapshot.activities;
+      const activities = Array.from(taskRows.values()).flatMap((row) =>
         row.sourceAvailability === "online" && row.activity
           ? [{ address: row.address, activity: row.activity }]
           : [],
       );
+      // 和其他 Controller 投影按同一批 revision 发布，避免渲染读取时重复扫描全部任务。
+      activitiesSnapshot = { revision, activities };
+      return activities;
     },
     list(queryKey, version, query) {
       // 未打开工作区不在 Controller 的 source 订阅中，不能用它的 delta 保证全局缓存有效。

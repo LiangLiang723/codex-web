@@ -1,6 +1,7 @@
 // 分屏 Layout 层持久化（localStorage）：try/catch 静默降级；
 // 损坏数据整体丢弃回初始布局（不部分救回）。
 // 兼容读取旧版 v1（单值 splitPane），仅当 v1 workspaceKey 是可信本地路径时迁移。
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 import {
   clampSplitRatio,
   leafPaneIds,
@@ -234,11 +235,11 @@ export function migratePersistedPaneLayoutV1(
 /** 读取持久化布局（v2 优先，缺失时尝试 v1 迁移）；无记录/损坏/无 storage 环境返回 null。 */
 export function readPersistedPaneLayout(): PaneLayoutSnapshot | null {
   try {
-    const rawV2 = localStorage.getItem(PANE_LAYOUT_STORAGE_KEY);
+    const rawV2 = getBrowserLocalStorage().getItem(PANE_LAYOUT_STORAGE_KEY);
     if (rawV2) {
       return sanitizePersistedPaneLayout(JSON.parse(rawV2));
     }
-    const rawV1 = localStorage.getItem(PANE_LAYOUT_STORAGE_KEY_V1);
+    const rawV1 = getBrowserLocalStorage().getItem(PANE_LAYOUT_STORAGE_KEY_V1);
     if (rawV1) {
       return migratePersistedPaneLayoutV1(JSON.parse(rawV1));
     }
@@ -292,7 +293,7 @@ export function persistPaneLayout(snapshot: PaneLayoutSnapshot): void {
     if (serialized === lastPersistedPaneLayout) {
       return;
     }
-    localStorage.setItem(PANE_LAYOUT_STORAGE_KEY, serialized);
+    getBrowserLocalStorage().setItem(PANE_LAYOUT_STORAGE_KEY, serialized);
     lastPersistedPaneLayout = serialized;
   } catch {
     // 无 storage 环境（测试/隐身）静默降级：刷新恢复不可用，但不影响正常分屏。

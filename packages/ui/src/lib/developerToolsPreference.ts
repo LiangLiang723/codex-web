@@ -1,3 +1,4 @@
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 export const DEVELOPER_TOOLS_STORAGE_KEYS = [
   "zcode:developer-tools:enabled",
   "zcode:token-debug:enabled",
@@ -31,7 +32,7 @@ function getLocalStorage(): Storage | undefined {
     return undefined;
   }
   try {
-    return window.localStorage;
+    return getBrowserLocalStorage();
   } catch {
     return undefined;
   }

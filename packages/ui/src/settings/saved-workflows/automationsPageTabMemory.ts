@@ -1,14 +1,13 @@
-// 自动化页顶级标签的记忆：记在 sessionStorage，
-// 照 settingsNavigation.ts 的 last-section 先例——从详情页 / 对话切回来时仍在「工作流」。
-// 中枢升级成跨项目视图后，页不再依赖活动项目：用单一 app 级 key，不再按 workspaceKey 分桶；
-// 不进 Zustand、不跨窗口广播。
+// 自动化页跨项目共享上次选中的标签。自托管跟随账号，桌面保留窗口级偏好。
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
+import { getBrowserLocalStorage, getBrowserSessionStorage } from "@/lib/browserEnvironment.js";
 import type { AutomationsPageTab } from "@/settings/saved-workflows/AutomationsPageTitleSwitch.js";
 
 const STORAGE_KEY = "zcode-automations-page-tab";
 
 function storage(): Storage | null {
   try {
-    return typeof sessionStorage === "undefined" ? null : sessionStorage;
+    return (selfHostedBuild ? getBrowserLocalStorage() : getBrowserSessionStorage()) ?? null;
   } catch {
     return null;
   }

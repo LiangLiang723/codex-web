@@ -70,7 +70,9 @@ export function ConversationTurnRow({
   );
 }
 
-export function resolveAssistantCopyText(unit: ConversationTurnRenderUnit): string | undefined {
+export function resolveAssistantCopyText(
+  unit: Pick<ConversationTurnRenderUnit, "assistantTextRows" | "assistantWorkRows" | "latestAssistantTextRow">,
+): string | undefined {
   if (!unit.latestAssistantTextRow) {
     return undefined;
   }

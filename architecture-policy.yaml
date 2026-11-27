@@ -2104,6 +2104,13 @@ global:
   acceptedUpstreamSnapshot: scripts/architecture/upstream-snapshot.json
 
 exceptions:
+  - id: selfhost-browser-storage-existing-ui-edit
+    rule: unmanaged-new-file
+    paths:
+      - packages/ui/src/lib/sourceServerUpdatePreferences.ts
+      - packages/ui/src/lib/workflowRunAckStore.ts
+      - packages/ui/src/v4/startPlanQuotaReminderStore.ts
+    reason: 三个已入库的 UI 存储调用改用现有浏览器环境入口，自托管由账号状态提供存储。原有键、调用方和业务模块边界保持一致。
   - id: region-copy-suggested-prompts-edit
     rule: unmanaged-new-file
     paths: [packages/ui/src/v4/featureSuggestedPrompts.ts]
@@ -2116,6 +2123,10 @@ exceptions:
       - packages/ui/src/hooks/useBotPrivateDeliveryRetry.ts
       - packages/ui/src/hooks/useBrowserSitePermissions.ts
     reason: 已存在的工作流面板、Bot 群组与重试、浏览器权限 Hook 只收紧闭包依赖或清理代次，沿用原先的页面、服务和权限 owner。
+  - id: existing-session-open-telemetry-hook
+    rule: unmanaged-new-file
+    paths: [packages/ui/src/v4/telemetry/useSessionOpenArmsTelemetry.ts]
+    reason: 已存在的会话打开埋点 Hook 收紧报告所用的依赖，事件、报告者和模块边界沿用原实现。
   - id: workflow-fill-frames-scrollbar-loop-fix
     rule: unmanaged-new-file
     paths: [packages/ui/src/app-shell/WorkflowRunFillFrames.tsx]

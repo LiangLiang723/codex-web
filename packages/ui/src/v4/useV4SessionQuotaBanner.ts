@@ -85,7 +85,7 @@ export function useV4SessionQuotaBanner(params: {
       isStartPlanProvider ? activeProviderId! : "",
     ),
   });
-  const reminderVersion = useSyncExternalStore(
+  useSyncExternalStore(
     startPlanQuotaReminderStore.subscribe,
     startPlanQuotaReminderStore.getSnapshot,
     startPlanQuotaReminderStore.getSnapshot,
@@ -95,47 +95,30 @@ export function useV4SessionQuotaBanner(params: {
     () => ({ sessionId: params.sessionId, activeProviderId, modelId }),
     [params.sessionId, activeProviderId, modelId],
   );
-  const state = useMemo(
-    () =>
-      buildSessionQuotaBannerState({
-        activeProviderId,
-        snapshot: entitlement.snapshot,
-        modelId,
-        isReminderHidden: (key, referenceTime) =>
-          startPlanQuotaReminderStore.isHidden(key, reminderOwner, referenceTime),
-        serverQuotaExhausted,
-        serverConcurrentLimited,
-        ...(concurrentLimitCode ? { serverConcurrentLimitBusinessCode: concurrentLimitCode } : {}),
-        ...(concurrentLimitCode
-          ? {
-              serverConcurrentLimitReason: resolveStartPlanConcurrentLimitBannerReason(
-                params.error?.message,
-              ),
-            }
-          : {}),
-        ...(providerLimitedCode ? { serverProviderLimitedBusinessCode: providerLimitedCode } : {}),
-        ...(serverProviderLimited
-          ? { serverProviderLimitedMessage: params.error?.message ?? null }
-          : {}),
-        ...(params.mcpUnavailableNotice
-          ? { mcpUnavailableNotice: params.mcpUnavailableNotice }
-          : {}),
-      }),
-    [
-      activeProviderId,
-      reminderOwner,
-      reminderVersion,
-      concurrentLimitCode,
-      entitlement.snapshot,
-      modelId,
-      params.error?.message,
-      params.mcpUnavailableNotice,
-      providerLimitedCode,
-      serverConcurrentLimited,
-      serverProviderLimited,
-      serverQuotaExhausted,
-    ],
-  );
+  const state = buildSessionQuotaBannerState({
+    activeProviderId,
+    snapshot: entitlement.snapshot,
+    modelId,
+    isReminderHidden: (key, referenceTime) =>
+      startPlanQuotaReminderStore.isHidden(key, reminderOwner, referenceTime),
+    serverQuotaExhausted,
+    serverConcurrentLimited,
+    ...(concurrentLimitCode ? { serverConcurrentLimitBusinessCode: concurrentLimitCode } : {}),
+    ...(concurrentLimitCode
+      ? {
+          serverConcurrentLimitReason: resolveStartPlanConcurrentLimitBannerReason(
+            params.error?.message,
+          ),
+        }
+      : {}),
+    ...(providerLimitedCode ? { serverProviderLimitedBusinessCode: providerLimitedCode } : {}),
+    ...(serverProviderLimited
+      ? { serverProviderLimitedMessage: params.error?.message ?? null }
+      : {}),
+    ...(params.mcpUnavailableNotice
+      ? { mcpUnavailableNotice: params.mcpUnavailableNotice }
+      : {}),
+  });
 
   const dismissKey = buildSessionQuotaBannerDismissKey(
     state,
@@ -198,6 +181,7 @@ export function useV4SessionQuotaBanner(params: {
   const terminalPlan = terminalSnapshot !== null && isTerminalCodingPlanSnapshot(terminalSnapshot);
   const maxPlan = terminalSnapshot !== null && isMaxCodingPlanSnapshot(terminalSnapshot);
 
+  const refreshEntitlement = entitlement.refresh;
   const previousPhaseRef = useRef<SessionPhase | null>(params.phase);
   useEffect(() => {
     const previousPhase = previousPhaseRef.current;
@@ -205,9 +189,9 @@ export function useV4SessionQuotaBanner(params: {
     if (!isStartPlanProvider || previousPhase === params.phase) return;
     if (isRunningPhase(previousPhase) !== isRunningPhase(params.phase)) {
       // 任务开始会预占额度，终止会扣减或释放；必须绕过普通 freshness 校正一次。
-      void entitlement.refresh({ force: true, silent: true, reason: "manual" });
+      void refreshEntitlement({ force: true, silent: true, reason: "manual" });
     }
-  }, [entitlement.refresh, isStartPlanProvider, params.phase]);
+  }, [refreshEntitlement, isStartPlanProvider, params.phase]);
 
   const modelRefreshInitializedRef = useRef(false);
   const previousModelKeyRef = useRef<string | null>(null);
@@ -220,9 +204,9 @@ export function useV4SessionQuotaBanner(params: {
       return;
     }
     if (nextKey && nextKey !== previousKey) {
-      void entitlement.refresh({ reason: "initial" });
+      void refreshEntitlement({ reason: "initial" });
     }
-  }, [activeProviderId, entitlement.refresh, isStartPlanProvider, modelId]);
+  }, [activeProviderId, refreshEntitlement, isStartPlanProvider, modelId]);
 
   const dismiss = useCallback(() => {
     if (state.reminderKey) {

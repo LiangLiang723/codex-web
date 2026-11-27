@@ -1,3 +1,4 @@
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 import { isHighspeedProviderId } from "@zcode/shared";
 import { modelSelectionSchema, type ModelSelection } from "@zcode/shared/model-selection";
 import { submissionModeSchema, type SubmissionMode } from "@zcode/shared/zcode-protocol-v4";
@@ -302,7 +303,7 @@ function normalizeSparseModelSelection(selection: ModelSelection): ModelSelectio
 function browserStorage(): StorageLike | null {
   if (typeof window === "undefined") return null;
   try {
-    return window.localStorage;
+    return getBrowserLocalStorage();
   } catch {
     return null;
   }

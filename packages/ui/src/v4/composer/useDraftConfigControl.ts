@@ -258,7 +258,7 @@ export function useDraftConfigControl(params: {
       ? workspace.composerInitialization
       : undefined;
   });
-  const loadedScope = useMemo<ComposerState>(() => {
+  const loadCurrentScope = (): ComposerState => {
     const saved = readV4ComposerDraft(workspacePath, workspaceIdentity, scopeId, rootScope);
     return {
       scopeKey,
@@ -275,8 +275,10 @@ export function useDraftConfigControl(params: {
         ? { migration: { source: "rootDraft" as const, base: saved.modelSelection } }
         : {}),
     };
-  }, [scopeKey]);
-  const [storedState, setStoredState] = useState(loadedScope);
+  };
+  const [storedState, setStoredState] = useState(loadCurrentScope);
+  // 正文/模型细节更新不能重新读取存储。只在原 owner 离开当前 scope 时载入目标草稿。
+  const loadedScope = storedState.scopeKey === scopeKey ? storedState : loadCurrentScope();
   const stagedContentRef = useRef<
     | (ComposerDraftPersistenceTarget & {
         content: Pick<V4ComposerDraft, "text" | "editorStateJson" | "mention">;
@@ -558,7 +560,7 @@ export function useDraftConfigControl(params: {
       pending.baseDraft = currentState.draft;
       pending.persist = draftPersistenceRef.current;
     }
-  }, [currentState.draft, scopeKey, scopePersistenceTarget]);
+  }, [bumpScopeContentRevision, currentState.draft, scopeKey, scopePersistenceTarget]);
   useEffect(
     () => () => {
       const pending = stagedContentRef.current;
@@ -616,7 +618,7 @@ export function useDraftConfigControl(params: {
       persistDraft(next);
       lastPersistedDraftRef.current = next;
     },
-    [isCurrentScope, mergeStagedContent, persistDraft, scopePersistenceTarget],
+    [bumpScopeContentRevision, isCurrentScope, mergeStagedContent, persistDraft, scopeKey, scopePersistenceTarget],
   );
   const updateDraftConfig = useCallback(
     (update: (current: Partial<SessionConfigState>) => Partial<SessionConfigState>) => {
@@ -846,7 +848,7 @@ export function useDraftConfigControl(params: {
         setStoredState(nextState);
       }
     },
-    [incarnation, isCurrentScope, scopeKey, scopePersistenceTarget],
+    [bumpScopeContentRevision, incarnation, isCurrentScope, scopeKey, scopePersistenceTarget],
   );
   const captureComposerContentLifecycleCommit = useCallback(() => {
     const target = scopePersistenceTarget;
@@ -1055,6 +1057,7 @@ export function useDraftConfigControl(params: {
       return true;
     },
     [
+      createDraftPersistence,
       scopeId,
       isCurrentScope,
       mergeStagedContent,

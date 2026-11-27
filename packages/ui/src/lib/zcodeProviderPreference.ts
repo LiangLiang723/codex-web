@@ -1,3 +1,4 @@
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 import {
   normalizeAgentProviderToZCodeAgent,
   ZCODE_AGENT_PROVIDER,
@@ -18,7 +19,7 @@ function getBrowserStorage(): StorageLike | null {
   }
 
   try {
-    return window.localStorage;
+    return getBrowserLocalStorage();
   } catch {
     return null;
   }

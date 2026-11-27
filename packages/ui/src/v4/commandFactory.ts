@@ -1,6 +1,7 @@
 // Command 信封工厂。
 // commandId = uuid v7（时间有序，重试不变）；clientId 每个客户端实例稳定并持久化，
 // 服务端幂等表与 pendingCommands 展示都以它区分提交端。
+import { getBrowserLocalStorage, getBrowserSessionStorage } from "@/lib/browserEnvironment.js";
 import {
   COMMANDS_REQUIRING_BASE_REVISION,
   ROW_TARGETING_COMMANDS,
@@ -22,14 +23,14 @@ export function getV4ClientId(): string {
   if (cachedClientId) return cachedClientId;
   let stored: string | null = null;
   try {
-    stored = localStorage.getItem(CLIENT_ID_STORAGE_KEY);
+    stored = getBrowserLocalStorage().getItem(CLIENT_ID_STORAGE_KEY);
   } catch {
     // incognito / node 测试环境无 localStorage，退化为内存缓存
   }
   const clientId = stored ?? `client-${uuidv7()}`;
   if (!stored) {
     try {
-      localStorage.setItem(CLIENT_ID_STORAGE_KEY, clientId);
+      getBrowserLocalStorage().setItem(CLIENT_ID_STORAGE_KEY, clientId);
     } catch {
       // 同上，忽略
     }
@@ -50,14 +51,14 @@ export function getV4EditorId(): string {
   if (cachedEditorId) return cachedEditorId;
   let stored: string | null = null;
   try {
-    stored = sessionStorage.getItem(EDITOR_ID_STORAGE_KEY);
+    stored = getBrowserSessionStorage().getItem(EDITOR_ID_STORAGE_KEY);
   } catch {
     // 无 sessionStorage 环境退化为进程内稳定
   }
   const editorId = stored ?? `editor-${uuidv7()}`;
   if (!stored) {
     try {
-      sessionStorage.setItem(EDITOR_ID_STORAGE_KEY, editorId);
+      getBrowserSessionStorage().setItem(EDITOR_ID_STORAGE_KEY, editorId);
     } catch {
       // 同上，忽略
     }
@@ -70,7 +71,7 @@ export function getV4EditorId(): string {
 export function regenerateV4EditorId(): string {
   const editorId = `editor-${uuidv7()}`;
   try {
-    sessionStorage.setItem(EDITOR_ID_STORAGE_KEY, editorId);
+    getBrowserSessionStorage().setItem(EDITOR_ID_STORAGE_KEY, editorId);
   } catch {
     // 无 sessionStorage 环境只在进程内生效
   }

@@ -25,6 +25,7 @@ import {
 import { buildNativeTurnInput } from "./nativeTurnInput.js";
 import { nativeInteractionResult, nativeRequests } from "./nativeInteractions.js";
 import { TurnFileBridge } from "./turnFileChanges.js";
+import { flushBrowserState } from "./browserState.js";
 type Emit = (channel: string, event: string, value: unknown) => void;
 
 /** Translate the original ZCode service/channel contracts. Codex alone creates and persists Thread IDs. */
@@ -171,6 +172,8 @@ export class SessionBridge {
     commandId: string,
     projectId: string,
   ): Promise<unknown> {
+    // 网页存储改由网关异步提交，首发和发送前仍要确认恢复线索已经落库。
+    if (type === "createSession" || type === "sendText") await flushBrowserState(this.gateway);
     const config = rec(p.config),
       first = rec(p.firstInput),
       selection = rec(p.modelSelection ?? first.modelSelection ?? config.modelSelection),

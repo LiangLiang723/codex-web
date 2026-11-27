@@ -15,6 +15,7 @@
     "./dropdown-menu": "./src/components/ui/dropdown-menu.tsx",
     "./select": "./src/components/ui/select.tsx",
     "./useTheme": "./src/useTheme.ts",
+    "./browser-environment": "./src/lib/browserEnvironment.ts",
     "./conversation-share-readonly": "./src/v4/ConversationShareReadonlyTimeline.tsx",
     "./oauth-provider-icon": "./src/lib/oauthProviderIcon.tsx",
     "./bot-brand": "./src/brand/index.ts",

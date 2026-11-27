@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { useEffectEvent, useLayoutEffect, useRef } from "react";
 import { createSessionTraceId } from "@zcode/shared";
 import type { ConversationOpenTiming, ConversationSnapshot } from "@zcode/shared/zcode-protocol-v4";
 import {
@@ -139,13 +139,14 @@ export function useSessionOpenArmsTelemetry({
   }>({ openTiming, rendererTiming });
   latestTimingRef.current = { openTiming, rendererTiming };
 
+  const snapshotOwnerAtOpen = useEffectEvent(() => snapshot?.sessionId);
   useLayoutEffect(() => {
     if (!enabled || readOnly || !sessionId) {
       runtimeRef.current = null;
       return undefined;
     }
     const resolvedOpenKind: SessionOpenKind =
-      openKind ?? (snapshot?.sessionId === sessionId ? "keep_warm" : "cold");
+      openKind ?? (snapshotOwnerAtOpen() === sessionId ? "keep_warm" : "cold");
     const runtime: SessionOpenRuntime = {
       identity: {
         sessionOpenId: createSessionTraceId(),

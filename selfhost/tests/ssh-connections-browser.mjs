@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { browserStateFixture } from "./fixtures/browser-state.mjs";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 import { createServer } from "vite";
@@ -99,14 +100,14 @@ async function verify(page, origin) {
   let accountAvatar = null;
   let socket;
   const theme = page.viewportSize().width >= 768 ? "zai-light" : "zai-dark";
+  const browserState = browserStateFixture({ "zcode-theme": theme, "zcode-locale-preference": "zh-CN" });
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.addInitScript((activeTheme) => {
+  await page.addInitScript(() => {
     localStorage.setItem("selfhost.auth", "ssh-test-fixture");
-    localStorage.setItem("zcode-locale-preference", "zh-CN");
-    localStorage.setItem("zcode-theme", activeTheme);
-  }, theme);
+  });
   await page.route(new URL("/api/**", origin).href, async (route) => {
     const url = new URL(route.request().url());
+    if (url.pathname === "/api/selfhost/browser-state") return browserState(route);
     if (!url.pathname.startsWith("/api/")) return route.continue();
     if (url.pathname === "/api/selfhost/account/avatar") {
       accountAvatar = route.request().postDataJSON().avatar;

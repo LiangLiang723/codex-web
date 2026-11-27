@@ -11,7 +11,7 @@
 //
 // 结构：生命周期收敛在纯控制器 startDraftSessionPrewarm（可单测，无 React 依赖），
 // useDraftSessionPrewarm 只做 effect 接线与 owner-scoped binding 暴露。
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { CommandAck, CommandType, SessionConfigState } from "@zcode/shared/zcode-protocol-v4";
 import { logger } from "@/logger.js";
 
@@ -436,7 +436,7 @@ class DraftSessionPrewarmCoordinator {
             current.controller.markDiscarded();
             current.binding = null;
             this.blockedInvalidationVersion = current.invalidationVersion;
-            const retainers = [...current.retainers];
+            const retainers = Array.from(current.retainers);
             current.retainers.clear();
             for (const invalidate of retainers) invalidate();
             this.emitBindings();
@@ -484,7 +484,7 @@ class DraftSessionPrewarmCoordinator {
     this.clearRetryTimer();
     current.retiring = true;
     current.binding = null;
-    for (const invalidate of [...current.retainers]) invalidate();
+    for (const invalidate of Array.from(current.retainers)) invalidate();
     current.retainers.clear();
     current.controller.dispose();
     this.emitBindings();
@@ -602,7 +602,10 @@ export function useDraftSessionPrewarm(params: {
     () => ({ workspaceKey, paneId, transportIdentity }),
     [paneId, transportIdentity, workspaceKey],
   );
-  const generation = useMemo(() => ({ owner }), [enabled, invalidationVersion, owner]);
+  const generation = useMemo(
+    () => ({ owner, enabled, invalidationVersion }),
+    [enabled, invalidationVersion, owner],
+  );
   const acquired = useRef<AcquiredDraftPrewarm | null>(null);
   useLayoutEffect(() => {
     if (acquired.current?.generation === generation) {
@@ -614,8 +617,12 @@ export function useDraftSessionPrewarm(params: {
     binding: DraftPrewarmBinding;
   } | null>(null);
 
+  // 预热代次只随逻辑 owner 与能力换代变化，实时回调由上面的 layout 更新。
+  const readPrewarmCallbacks = useEffectEvent(() => ({ dispatchCommand, resolveInitialConfig }));
   useEffect(() => {
+    const { owner, enabled, invalidationVersion } = generation;
     if (!enabled) return;
+    const { dispatchCommand, resolveInitialConfig } = readPrewarmCallbacks();
     // 原先在 render 登记，未启用预热的历史页没有 acquire/release，Map 会永久保留闭包中的
     // 已关闭 store 和历史。登记与订阅必须同属已提交的 effect，中止 render 也不能留下 owner。
     const coordinator = getDraftSessionPrewarmCoordinator({
@@ -641,7 +648,7 @@ export function useDraftSessionPrewarm(params: {
       acquired.current = null;
       release();
     };
-  }, [enabled, generation, invalidationVersion, owner]);
+  }, [generation]);
 
   const waitForSession = useMemo(
     () => createWaitForDraftSession(acquired, enabled, generation, invalidationVersion),

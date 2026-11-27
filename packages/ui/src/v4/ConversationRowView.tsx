@@ -509,6 +509,8 @@ const UserInputAttachmentList = memo(function UserInputAttachmentList({
   });
 
   useEffect(() => {
+    const thumbnailObjectUrls = thumbnailObjectUrlsRef.current;
+    const ownerThumbnailUrls = thumbnailUrlsRef.current;
     if (attachmentKind === "file" || !attachments || !sessionId || !readAttachment) {
       return;
     }
@@ -576,9 +578,9 @@ const UserInputAttachmentList = memo(function UserInputAttachmentList({
       cancelled = true;
       // Desktop local video 返回自定义协议 URL，不是 renderer 创建的 Blob；
       // 只释放本 effect 创建的 object URL，避免把本地媒体 URL 当成 Blob 生命周期管理。
-      for (const url of thumbnailObjectUrlsRef.current) URL.revokeObjectURL(url);
-      thumbnailObjectUrlsRef.current.clear();
-      thumbnailUrlsRef.current.clear();
+      for (const url of thumbnailObjectUrls) URL.revokeObjectURL(url);
+      thumbnailObjectUrls.clear();
+      ownerThumbnailUrls.clear();
     };
   }, [attachmentIndices, attachmentKind, attachments, entityId, readAttachment, rowId, sessionId]);
 

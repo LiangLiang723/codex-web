@@ -20,6 +20,7 @@
  *   与本缓存无关，也不会由 Renderer 自动触发权限副作用。
  * 因此缓存最坏的后果是首屏多显示一瞬正确性未知的状态，随即被下一次事件驱动的查询覆盖。
  */
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 import {
   isCuaPermissionStatusAvailable,
   type CuaPermissionState,
@@ -56,7 +57,7 @@ interface CachedEnvelope {
 function getBrowserStorage(): StorageLike | null {
   if (typeof window === "undefined") return null;
   try {
-    return window.localStorage;
+    return getBrowserLocalStorage();
   } catch {
     return null;
   }

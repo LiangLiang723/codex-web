@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { create } from "zustand";
-import { writeSafeLocalStorage } from "@/lib/browserEnvironment.js";
+import { getBrowserLocalStorage, writeSafeLocalStorage } from "@/lib/browserEnvironment.js";
 
 export interface BrowserVisitScope {
   workspaceKey: string;
@@ -87,7 +87,7 @@ function readScopeIdentity(scopeKey: string): string[] | null {
 function loadRecentVisits(): Record<string, BrowserVisitRecord[]> {
   if (typeof window === "undefined") return {};
   try {
-    const storage = window.localStorage;
+    const storage = getBrowserLocalStorage();
     const loaded: Array<[string, BrowserVisitRecord[]]> = [];
     const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index)).filter(
       (key): key is string => key?.startsWith(STORAGE_KEY_PREFIX) === true,
@@ -137,7 +137,7 @@ function persistScopeVisits(scopeKey: string, visits: BrowserVisitRecord[]): voi
 function removePersistedScope(scopeKey: string): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.removeItem(`${STORAGE_KEY_PREFIX}${scopeKey}`);
+    getBrowserLocalStorage().removeItem(`${STORAGE_KEY_PREFIX}${scopeKey}`);
   } catch {
     // 清理历史不能阻断任务删除。
   }
@@ -158,7 +158,7 @@ export function clearBrowserRecentVisitsForTask(workspaceKey: string, sessionId:
   }
   if (typeof window !== "undefined") {
     try {
-      const storage = window.localStorage;
+      const storage = getBrowserLocalStorage();
       for (let index = 0; index < storage.length; index += 1) {
         const key = storage.key(index);
         if (!key?.startsWith(STORAGE_KEY_PREFIX)) continue;
@@ -180,7 +180,7 @@ export function clearBrowserRecentVisitsForTask(workspaceKey: string, sessionId:
 function removePersistedRecentVisits(): void {
   if (typeof window === "undefined") return;
   try {
-    const storage = window.localStorage;
+    const storage = getBrowserLocalStorage();
     const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index)).filter(
       (key): key is string => Boolean(key?.startsWith(STORAGE_KEY_PREFIX)),
     );
@@ -191,7 +191,7 @@ function removePersistedRecentVisits(): void {
 }
 
 function handleRecentVisitsStorage(event: StorageEvent): void {
-  if (event.storageArea !== window.localStorage) return;
+  if (event.storageArea !== getBrowserLocalStorage()) return;
   if (event.key === null) {
     useBrowserRecentVisitsStore.setState({ scopes: {} });
     return;

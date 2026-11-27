@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { waitForBrowserStateWrite } from "./browser-state.mjs";
 
 export async function verifyConversationDraftRoundTrip(
   page,
   { activate, showTaskList, mobile, editor, threadId, draftThreadId, submissions },
 ) {
+  const savedDraft = waitForBrowserStateWrite(page, (key, value) =>
+    key.startsWith("zcode-v4-composer-drafts:") && value?.includes("管理页往返草稿"),
+  );
   await editor.focus();
   await page.keyboard.insertText("管理页往返草稿");
   await showTaskList();
@@ -41,4 +45,12 @@ export async function verifyConversationDraftRoundTrip(
   }
   await editor.getByText("管理页往返草稿", { exact: true }).waitFor();
   assert.equal(submissions.length, 2, "Returning from settings must keep the current draft unsent");
+
+  await savedDraft;
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForURL((url) => url.searchParams.get("thread") === threadId);
+  // 刷新先恢复账号和工作台，再在编辑器就绪后检查草稿内容。
+  await editor.waitFor({ timeout: 45_000 });
+  await editor.getByText("管理页往返草稿", { exact: true }).waitFor();
+  assert.equal(submissions.length, 2, "Refreshing the page must restore the draft without resending");
 }

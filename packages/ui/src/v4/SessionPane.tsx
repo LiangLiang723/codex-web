@@ -31,6 +31,7 @@ import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -766,23 +767,27 @@ export function SessionPane({
   );
   const [nativePendingDraft, setNativePendingDraft] = useState<string | null>(null);
   const pendingAtEntry = useMemo(() => {
-    if (sessionId !== null) return null;
-    if (selfHostedBuild) {
-      const pendingCreates = pendingCommandRegistry.list(null).filter((entry) =>
-        entry.replay.kind === "input" && entry.replay.type === "createSession" &&
-        isPendingCommandForWorkspace(entry, workspacePath, workspaceIdentity) &&
-        (entry.clientContext?.projectId ?? null) === newTaskComposerScope.projectId,
-      );
-      const native = pendingCreates.find((entry) => entry.commandId === nativePendingDraft) ?? pendingCreates[0];
-      if (native) return native;
-    }
-    if (newTaskComposerScope.projectId !== null) return null;
-    const pending = readPendingTaskDraft(newTaskComposerScope);
-    return pending?.workspacePath === workspacePath && pending.commandId ? pending : null;
+    // 保留外部新建意图的刷新键。收到迟到回执时先确认它仍属于本次草稿。
+    const readPendingEntry = () => {
+      if (sessionId !== null) return null;
+      if (selfHostedBuild) {
+        const pendingCreates = pendingCommandRegistry.list(null).filter((entry) =>
+          entry.replay.kind === "input" && entry.replay.type === "createSession" &&
+          isPendingCommandForWorkspace(entry, workspacePath, workspaceIdentity) &&
+          (entry.clientContext?.projectId ?? null) === newTaskComposerScope.projectId,
+        );
+        const native = pendingCreates.find((entry) => entry.commandId === nativePendingDraft) ?? pendingCreates[0];
+        if (native) return native;
+      }
+      if (newTaskComposerScope.projectId !== null) return null;
+      const pending = readPendingTaskDraft(newTaskComposerScope);
+      return pending?.workspacePath === workspacePath && pending.commandId ? pending : null;
+    };
+    return { generation: composerDraftGeneration, entry: readPendingEntry() };
   }, [sessionId, workspacePath, workspaceIdentity, newTaskComposerScope, composerDraftGeneration, nativePendingDraft]);
   const [resolvedDraftCommand, setResolvedDraftCommand] = useState<string | null>(null);
   const recoveringDraft =
-    pendingAtEntry?.commandId !== resolvedDraftCommand ? pendingAtEntry : null;
+    pendingAtEntry.entry?.commandId !== resolvedDraftCommand ? pendingAtEntry.entry : null;
   const workspaceHomePath = useWorkspaceHomePath({
     workspacePath,
     workspaceIdentity,
@@ -970,7 +975,7 @@ export function SessionPane({
     () =>
       sessionId
         ? getConversationShareSelectedProductTurnIds(
-            useConversationShareSelectionStore.getState(),
+            { drafts: shareDraft ? { [sessionId]: shareDraft } : {} },
             sessionId,
           )
         : [],
@@ -981,7 +986,7 @@ export function SessionPane({
     () =>
       sessionId
         ? getConversationShareSelectedProductTurnIds(
-            useConversationShareSelectionStore.getState(),
+            { drafts: shareDraft ? { [sessionId]: shareDraft } : {} },
             sessionId,
             "pending",
           )
@@ -1001,7 +1006,18 @@ export function SessionPane({
     capabilitiesFingerprint: "",
     supportedArtifactTypes: [],
   });
-  const [sharePreflightVersion, setSharePreflightVersion] = useState(0);
+  const sharePreflightCacheRef = useRef(new Map<string, ConversationShareTurnPreflightResult>());
+  const [sharePreflightSnapshot, setSharePreflightSnapshot] = useState(() => ({
+    meta: sharePreflightMetaRef.current,
+    cache: new Map(sharePreflightCacheRef.current),
+  }));
+  // 预检结果在同一次更新中发布缓存与元数据，渲染始终消费同一批 Host 回报。
+  const publishSharePreflight = useCallback(() => {
+    setSharePreflightSnapshot({
+      meta: sharePreflightMetaRef.current,
+      cache: new Map(sharePreflightCacheRef.current),
+    });
+  }, []);
   const selectedShareTurnFingerprints = useMemo(
     () =>
       new Map(
@@ -1017,7 +1033,7 @@ export function SessionPane({
               sessionId: sessionId ?? "",
               revision: snapshot?.revision,
               logEpoch: snapshot?.logEpoch,
-              capabilitiesFingerprint: sharePreflightMetaRef.current.capabilitiesFingerprint,
+              capabilitiesFingerprint: sharePreflightSnapshot.meta.capabilitiesFingerprint,
             },
           ),
         ]),
@@ -1026,7 +1042,7 @@ export function SessionPane({
       remoteSessionId,
       preflightShareProductTurnIds,
       sessionId,
-      sharePreflightVersion,
+      sharePreflightSnapshot.meta.capabilitiesFingerprint,
       snapshot?.logEpoch,
       snapshot?.revision,
       snapshot?.rows.window,
@@ -1045,7 +1061,6 @@ export function SessionPane({
       return [productTurnId];
     });
   }, [eligibleShareItems, snapshot?.rows.window]);
-  const sharePreflightCacheRef = useRef(new Map<string, ConversationShareTurnPreflightResult>());
   // 传输类失败会被按 turn 缓存成阻断项，仅靠选择变化无法再次触发 RPC；
   // 重试 token 变化时清缓存并重新发起，避免一次网络抖动把用户卡死在选择阶段。
   const [sharePreflightRetryToken, setSharePreflightRetryToken] = useState(0);
@@ -1061,8 +1076,8 @@ export function SessionPane({
       sharePreflightCacheRef.current.delete(sharePreflightCacheKey(productTurnId));
     }
     setSharePreflightRetryToken((token) => token + 1);
-    setSharePreflightVersion((version) => version + 1);
-  }, [preflightShareProductTurnIds, sharePreflightCacheKey]);
+    publishSharePreflight();
+  }, [preflightShareProductTurnIds, publishSharePreflight, sharePreflightCacheKey]);
   const shareHydratedSessionRef = useRef<string | null>(null);
   const sharePreflight = useMemo<ConversationSharePreflightState>(() => {
     if (!shareActive || !sessionId || compactForRemoteControl) {
@@ -1072,7 +1087,7 @@ export function SessionPane({
       return { status: "idle" };
     }
     const entries = preflightShareProductTurnIds.map((productTurnId) => {
-      const entry = sharePreflightCacheRef.current.get(sharePreflightCacheKey(productTurnId));
+      const entry = sharePreflightSnapshot.cache.get(sharePreflightCacheKey(productTurnId));
       return entry?.turnFingerprint === selectedShareTurnFingerprints.get(productTurnId)
         ? entry
         : undefined;
@@ -1085,7 +1100,7 @@ export function SessionPane({
     );
     return {
       status: "ready",
-      ...sharePreflightMetaRef.current,
+      ...sharePreflightSnapshot.meta,
       blockingIssues: aggregateConversationShareBlockingIssues(resolvedEntries),
       skippableWarnings: dedupeConversationShareIssues(
         resolvedEntries.flatMap((entry) => entry.skippableWarnings),
@@ -1102,7 +1117,7 @@ export function SessionPane({
     selectedShareTurnFingerprints,
     sharePreflightCacheKey,
     shareActive,
-    sharePreflightVersion,
+    sharePreflightSnapshot,
   ]);
 
   useEffect(() => {
@@ -1115,8 +1130,8 @@ export function SessionPane({
       capabilitiesFingerprint: "",
       supportedArtifactTypes: [],
     };
-    setSharePreflightVersion((version) => version + 1);
-  }, [sharePreflightScopeKey]);
+    publishSharePreflight();
+  }, [publishSharePreflight, sharePreflightScopeKey]);
 
   useEffect(() => {
     if (shareActive && sessionId) return;
@@ -1127,8 +1142,8 @@ export function SessionPane({
       capabilitiesFingerprint: "",
       supportedArtifactTypes: [],
     };
-    setSharePreflightVersion((version) => version + 1);
-  }, [sessionId, shareActive]);
+    publishSharePreflight();
+  }, [publishSharePreflight, sessionId, shareActive]);
 
   useEffect(() => {
     // 预检结果按 turn 缓存：选择/取消只重新聚合当前选中项，只有首次加入或 turn fingerprint
@@ -1145,7 +1160,7 @@ export function SessionPane({
     const missingProductTurnIds = getMissingConversationSharePreflightTurnIds(
       sharePreflightScopeKey,
       preflightShareProductTurnIds,
-      sharePreflightCacheRef.current,
+      sharePreflightSnapshot.cache,
       selectedShareTurnFingerprints,
     );
     if (missingProductTurnIds.length === 0) return undefined;
@@ -1174,7 +1189,7 @@ export function SessionPane({
         sharePreflightMetaRef,
         sharePreflightCacheKey,
         isCurrent: () => shareActive && requestScopeKey === sharePreflightScopeKeyRef.current,
-        onUpdated: () => setSharePreflightVersion((version) => version + 1),
+        onUpdated: publishSharePreflight,
       }),
     });
   }, [
@@ -1183,8 +1198,10 @@ export function SessionPane({
     remoteSessionId,
     preflightShareProductTurnIds,
     selectedShareTurnFingerprints,
+    publishSharePreflight,
     sharePreflightCacheKey,
     sharePreflightRetryToken,
+    sharePreflightSnapshot.cache,
     sharePreflightScopeKey,
     sessionId,
     shareActive,
@@ -1272,8 +1289,13 @@ export function SessionPane({
       }
     }
   }, [conversationTelemetry, snapshot]);
-  const fileChangesRequestCache = useMemo(
-    () => new Map<string, Promise<V4ConversationFileChangesResult>>(),
+  const fileChangesOwner = useMemo(
+    () => ({
+      fileChanges,
+      sessionId,
+      logEpoch: snapshot?.logEpoch,
+      requests: new Map<string, Promise<V4ConversationFileChangesResult>>(),
+    }),
     [fileChanges, sessionId, snapshot?.logEpoch],
   );
   const [dismissedErrorKeys, setDismissedErrorKeys] = useState<readonly string[]>([]);
@@ -1724,12 +1746,17 @@ export function SessionPane({
   const workspaceConfigOptions = useZCodeSessionStore(
     (store) => store.getWorkspaceState(workspacePath, workspaceIdentity).configOptions,
   );
+  const taskProvider = snapshot?.config.provider ?? "";
+  const taskModel = snapshot?.config.model ?? "";
+  const taskMode = snapshot?.config.mode ?? "";
+  const taskThought = snapshot?.config.thought ?? "";
+  const taskConfigSessionId = snapshot?.sessionId;
   useEffect(() => {
     if (
       !sessionId ||
-      snapshot?.sessionId !== sessionId ||
-      !snapshot.config.provider.trim() ||
-      !snapshot.config.model.trim() ||
+      taskConfigSessionId !== sessionId ||
+      !taskProvider.trim() ||
+      !taskModel.trim() ||
       !workspaceConfigOptions?.length
     ) {
       return;
@@ -1742,16 +1769,21 @@ export function SessionPane({
       .setTaskConfigOptions(
         workspacePath,
         sessionId,
-        projectSessionConfigToTaskConfigOptions(workspaceConfigOptions, snapshot.config),
+        projectSessionConfigToTaskConfigOptions(workspaceConfigOptions, {
+          provider: taskProvider,
+          model: taskModel,
+          mode: taskMode,
+          thought: taskThought,
+        }),
         workspaceIdentity,
       );
   }, [
     sessionId,
-    snapshot?.config.mode,
-    snapshot?.config.model,
-    snapshot?.config.provider,
-    snapshot?.config.thought,
-    snapshot?.sessionId,
+    taskMode,
+    taskModel,
+    taskProvider,
+    taskThought,
+    taskConfigSessionId,
     workspaceConfigOptions,
     workspaceIdentity,
     workspacePath,
@@ -1803,10 +1835,19 @@ export function SessionPane({
     [workspaceIdentity, workspacePath],
   );
   // 配置/发送顺序只属于当前会话，不能让 A 的慢回执阻塞 B。
-  const configCommandBarrier = useMemo(
-    () => createConfigCommandBarrier(),
-    [workspaceKey, sessionId],
-  );
+  const createPaneOperations = () => ({
+    workspaceKey,
+    sessionId,
+    configCommandBarrier: createConfigCommandBarrier(),
+    draftNavigation: { controller: new AbortController() },
+  });
+  const [storedPaneOperations, setPaneOperations] = useState(createPaneOperations);
+  const paneOperations =
+    storedPaneOperations.workspaceKey === workspaceKey && storedPaneOperations.sessionId === sessionId
+      ? storedPaneOperations
+      : createPaneOperations();
+  if (paneOperations !== storedPaneOperations) setPaneOperations(paneOperations);
+  const { configCommandBarrier, draftNavigation } = paneOperations;
   // 软审核不是阻塞交互，不能隐藏 Composer 或禁用选区引用。
   const blockingInteractionId =
     snapshot?.pendingInteractions.find(
@@ -2109,10 +2150,6 @@ export function SessionPane({
   const projectDirectory = useOptionalProjectDirectoryActions();
   const commitCreatedTask = projectDirectory?.commitCreatedTask;
   const refreshTaskGroups = projectDirectory?.refreshTaskGroups;
-  const draftNavigation = useMemo(
-    () => ({ controller: new AbortController() }),
-    [workspaceKey, sessionId],
-  );
   useEffect(() => {
     // StrictMode 会重放 effect；旧 scope 的请求仍使用各自的取消信号。
     draftNavigation.controller = new AbortController();
@@ -2573,7 +2610,6 @@ export function SessionPane({
       resolveRecentScope,
       conversationTelemetry,
       layer,
-      provider,
       sendCommand,
       remoteAvailable,
       sessionId,
@@ -2585,8 +2621,9 @@ export function SessionPane({
 
   const handleFetchFileChanges = useCallback(
     (target: ConversationRowTarget, options: ConversationFileChangesRequestOptions) => {
+      const { fileChanges, sessionId, logEpoch, requests } = fileChangesOwner;
       const current = snapshotRef.current;
-      if (!sessionId || !current) {
+      if (!sessionId || !current || logEpoch !== current.logEpoch) {
         return Promise.resolve({
           files: 0,
           additions: 0,
@@ -2606,10 +2643,10 @@ export function SessionPane({
         target.rowId,
         target.entityId,
       ]);
-      const cachedRequest = fileChangesRequestCache.get(cacheKey);
+      const cachedRequest = requests.get(cacheKey);
       if (cachedRequest) {
-        fileChangesRequestCache.delete(cacheKey);
-        fileChangesRequestCache.set(cacheKey, cachedRequest);
+        requests.delete(cacheKey);
+        requests.set(cacheKey, cachedRequest);
         return cachedRequest;
       }
 
@@ -2627,16 +2664,16 @@ export function SessionPane({
           // in-flight Promise，settled 后删除，避免最终卡片复用早期结果。
           if (
             options.cachePolicy === "in-flight" &&
-            fileChangesRequestCache.get(cacheKey) === request
+            requests.get(cacheKey) === request
           ) {
-            fileChangesRequestCache.delete(cacheKey);
+            requests.delete(cacheKey);
           }
           return result;
         },
         (error: unknown) => {
           // 失败不能污染后续重试；仅删除当前 Promise，避免旧请求误删同 key 的新请求。
-          if (fileChangesRequestCache.get(cacheKey) === request) {
-            fileChangesRequestCache.delete(cacheKey);
+          if (requests.get(cacheKey) === request) {
+            requests.delete(cacheKey);
           }
           if (shouldResyncForStaleAuthority(error)) {
             lease?.store?.recoverFromStaleAuthority();
@@ -2644,15 +2681,15 @@ export function SessionPane({
           throw error;
         },
       );
-      fileChangesRequestCache.set(cacheKey, request);
-      while (fileChangesRequestCache.size > MAX_CONVERSATION_FILE_CHANGES_CACHE_ENTRIES) {
-        const oldestKey = fileChangesRequestCache.keys().next().value;
+      requests.set(cacheKey, request);
+      while (requests.size > MAX_CONVERSATION_FILE_CHANGES_CACHE_ENTRIES) {
+        const oldestKey = requests.keys().next().value;
         if (oldestKey === undefined) break;
-        fileChangesRequestCache.delete(oldestKey);
+        requests.delete(oldestKey);
       }
       return request;
     },
-    [fileChanges, fileChangesRequestCache, lease, sessionId],
+    [fileChangesOwner, lease],
   );
 
   const handlePreviewFileRewind = useCallback(
@@ -3500,17 +3537,12 @@ export function SessionPane({
     snapshot?.sessionId === effectiveSessionId &&
     (!snapshot.runtimeInitialization || snapshot.runtimeInitialization.status === "ready"),
   );
+  const runtimeConfig = snapshot?.config;
   useEffect(() => {
-    if (sessionId === null && effectiveSessionId && pluginUiRuntimeReady && snapshot) {
-      observeDraftPermissionGrant(effectiveSessionId, snapshot.config);
+    if (sessionId === null && effectiveSessionId && pluginUiRuntimeReady && runtimeConfig) {
+      observeDraftPermissionGrant(effectiveSessionId, runtimeConfig);
     }
-  }, [
-    sessionId,
-    effectiveSessionId,
-    pluginUiRuntimeReady,
-    snapshot?.config,
-    observeDraftPermissionGrant,
-  ]);
+  }, [sessionId, effectiveSessionId, pluginUiRuntimeReady, runtimeConfig, observeDraftPermissionGrant]);
   useLayoutEffect(() => {
     if (!effectiveSessionId || !pluginUiRuntimeReady || readOnly) return;
     return registerPluginUiPaneSession(
@@ -3611,9 +3643,13 @@ export function SessionPane({
     if (!recoveringDraft?.commandId || !remoteAvailable) return;
     let current = true;
     const commandId = recoveringDraft.commandId;
+    const { generation } = pendingAtEntry;
     if (selfHostedBuild) pendingCommandRegistry.markNativeDeliveryPending({ sessionId: null, commandId });
     const off = pendingCommandRegistry.subscribeResolution(commandId, (resolution) => {
-      if (!current) return;
+      const { draftFocusVersion } = useZCodeSessionStore
+        .getState()
+        .getWorkspaceState(workspacePath, workspaceIdentity);
+      if (!current || draftFocusVersion !== generation) return;
       if (
         resolution === "accepted" ||
         resolution === "duplicate" ||
@@ -3649,6 +3685,7 @@ export function SessionPane({
     };
   }, [
     recoveringDraft,
+    pendingAtEntry,
     remoteAvailable,
     layer,
     handleDraftSessionCreated,
@@ -3703,16 +3740,7 @@ export function SessionPane({
       // 消费 store 已按 deliveryKind 去重后的同一 realtime online 事件。
       showModelChangeNotice(transition.from, transition.to);
     },
-    [
-      effectiveSessionId,
-      focused,
-      provider,
-      sessionId,
-      showModelChangeNotice,
-      workspaceIdentity,
-      workspaceKey,
-      workspacePath,
-    ],
+    [effectiveSessionId, focused, showModelChangeNotice],
   );
   const onlineModelTransitionHandlerRef = useRef(handleOnlineModelTransition);
   useLayoutEffect(() => {
@@ -3729,9 +3757,12 @@ export function SessionPane({
     workspaceIdentity,
   });
 
+  const commitSessionLease = useEffectEvent((nextLease: SessionLease | null) => {
+    setLease({ sessionId, layer, lease: nextLease });
+  });
   useEffect(() => {
     if (!effectiveSessionId) {
-      setLease({ sessionId, layer, lease: null });
+      commitSessionLease(null);
       return;
     }
     const nextLease = layer.acquire(effectiveSessionId);
@@ -3740,7 +3771,7 @@ export function SessionPane({
     const offOnlineModelTransition = nextLease.store.onOnlineModelTransition((transition) => {
       onlineModelTransitionHandlerRef.current(effectiveSessionId, nextLease.store, transition);
     });
-    setLease({ sessionId, layer, lease: nextLease });
+    commitSessionLease(nextLease);
     return () => {
       offOnlineModelTransition();
       nextLease.release();
@@ -4358,11 +4389,13 @@ export function SessionPane({
       invalidateActiveHighspeedCard,
       intl,
       prepareHighspeedTurnFrom,
-      resolveInitialDraftConfig,
-      createSubmissionFromComposer,
       sessionId,
       settleCurrentQueueInputs,
+      viewWorktreeCreation,
       waitForDraftSession,
+      workspaceIdentity,
+      workspaceKey,
+      workspacePath,
     ],
   );
 
@@ -5358,7 +5391,7 @@ export function SessionPane({
     [
       provider,
       handleDraftSelectModel,
-      sessionId,
+      modelSelectionView,
       showModelChangeNotice,
       workspaceIdentity,
       workspacePath,
@@ -6137,6 +6170,7 @@ export function SessionPane({
   }, [
     conversationShareService,
     intl,
+    locale,
     remoteSessionId,
     sessionId,
     shareDraft,

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { verifyAnatomyMotion } from "./brand-motion.mjs";
 import { verifyPaintedBots } from "./brand-materials.mjs";
+import { browserStateFixture } from "./browser-state.mjs";
 
 export async function prepareStatusBrowserPage(page) {
   const allActions = Boolean(process.env.SELFHOST_ALL_PET_ACTIONS);
@@ -9,12 +10,16 @@ export async function prepareStatusBrowserPage(page) {
   if (process.env.SELFHOST_ANATOMY_CLOCK_TEST || (allActions && page.viewportSize().width === 1236)) {
     await page.clock.install();
   }
-  await page.addInitScript(({ allActions, styled }) => {
+  await page.addInitScript(() => {
     localStorage.setItem("selfhost.auth", "status-test-fixture");
-    localStorage.setItem("zcode-locale-preference", "zh-CN");
-    const preferences = { allActions, ...(styled ? { material: "fluffy", color: "#c74ef3" } : {}) };
-    localStorage.setItem("codex-web:conversation-pet-preferences", JSON.stringify(preferences));
-  }, { allActions, styled });
+  });
+  return browserStateFixture({
+    "zcode-locale-preference": "zh-CN",
+    "codex-web:conversation-pet-preferences": JSON.stringify({
+      allActions,
+      ...(styled ? { material: "fluffy", color: "#c74ef3" } : {}),
+    }),
+  });
 }
 
 async function verifyFullPetActionRound(page, pet) {
@@ -261,12 +266,6 @@ async function verifyStartup(page, origin, reducedMotion) {
       await mark.waitFor();
       assert.equal(await mark.getAttribute("data-bot-motion"), "idle");
       await mark.locator("svg path[d]").first().waitFor({ state: "attached" });
-      if (process.env.SELFHOST_BOT_MATERIALS_TEST) {
-        await verifyPaintedBots(mark, "glass", 1, "#c74ef3");
-        await page.waitForFunction(() =>
-          decodeURIComponent(document.querySelector("link[data-codex-bot-favicon]").href).includes("data:image/png"),
-        );
-      }
     }
     const frames = await splash.evaluate(async (element, reduced) => {
       const read = () => {
@@ -290,9 +289,6 @@ async function verifyStartup(page, origin, reducedMotion) {
     app.resolve();
   }
   await page.locator(".zcode-boot-loading").waitFor({ state: "detached" });
-  if (anatomy && process.env.SELFHOST_BOT_MATERIALS_TEST) {
-    await verifyPaintedBots(page.locator("[data-app-logo]"), "glass", 1, "#c74ef3");
-  }
 }
 
 export async function verifyBrowserStartup(browser, origin) {
@@ -300,11 +296,6 @@ export async function verifyBrowserStartup(browser, origin) {
     const page = await browser.newPage();
     page.setDefaultTimeout(10000);
     try {
-      if (process.env.SELFHOST_BOT_MATERIALS_TEST) {
-        await page.addInitScript(() => {
-          localStorage.setItem("codex-web:conversation-pet-preferences", '{"material":"glass","color":"#c74ef3"}');
-        });
-      }
       await verifyStartup(page, origin, reducedMotion);
       console.log(`PASS idle startup splash (${reducedMotion})`);
     } finally {

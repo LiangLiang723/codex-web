@@ -25,25 +25,24 @@ export function useSessionsIndex(
 ): UseSessionsIndexResult {
   const { zcodeAgentService } = useServices();
 
-  const store = useMemo(
-    () => new SessionsIndexStore(),
-    // 每个 workspace 一个 store 实例（依赖变化 → 全新 store 冷启动）。
+  const { store, transport } = useMemo(
+    () => ({
+      // workspace、身份或服务切换时，让新订阅从独立快照开始。
+      store: new SessionsIndexStore(),
+      transport: createAgentSessionsIndexTransport(zcodeAgentService, {
+        workspacePath,
+        ...(workspaceIdentity ? { workspaceIdentity } : {}),
+      }),
+    }),
     [workspacePath, workspaceIdentity, zcodeAgentService],
   );
 
   useEffect(() => {
-    const transport = createAgentSessionsIndexTransport(zcodeAgentService, {
-      workspacePath,
-      ...(workspaceIdentity ? { workspaceIdentity } : {}),
-    });
     void store.connect(transport, { forceSnapshot: true });
     return () => store.close();
-  }, [store, workspacePath, workspaceIdentity, zcodeAgentService]);
+  }, [store, transport]);
 
-  // useSyncExternalStore：store.subscribe/getState 是类字段箭头函数，引用稳定。
-  const state = useSyncExternalStore(store.subscribe, store.getState);
-  // state 变化即代表列表可能变化；getSessions 内部缓存稳定引用。
-  const sessions = useMemo(() => store.getSessions(), [store, state]);
-
-  return { sessions, status: store.getStatus() };
+  // Store 版本变化触发 render；getSessions 内部缓存有序结果。
+  useSyncExternalStore(store.subscribe, store.getState);
+  return { sessions: store.getSessions(), status: store.getStatus() };
 }

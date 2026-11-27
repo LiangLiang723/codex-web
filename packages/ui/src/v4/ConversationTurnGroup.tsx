@@ -256,7 +256,6 @@ function TurnChatLoadingSlot({
 function useConversationAssistantWorkItems(
   rows: readonly AssistantWorkRow[],
   context: ConversationRowRenderContext,
-  stageTailIsRunning = false,
 ) {
   const showReasoning = context.messageStreamShowReasoning === true;
   const firstReasoningRowId = context.messageStreamFirstReasoningRowId;
@@ -275,13 +274,12 @@ function useConversationAssistantWorkItems(
 
 function ConversationAssistantWorkItems({
   rows,
-  stageTailIsRunning = false,
   ...props
 }: {
   rows: readonly AssistantWorkRow[];
   stageTailIsRunning?: boolean;
 } & Omit<React.ComponentProps<typeof ConversationAssistantWorkContent>, "items">) {
-  const items = useConversationAssistantWorkItems(rows, props.context, stageTailIsRunning);
+  const items = useConversationAssistantWorkItems(rows, props.context);
   return <ConversationAssistantWorkContent items={items} {...props} />;
 }
 
@@ -1244,7 +1242,7 @@ function ConversationTurnGroupImpl({
   const visibleUserRows = useMemo(() => unit.visibleUserInputs, [unit.visibleUserInputs]);
   const sourceCommandId = unit.header?.sourceCommandId ?? visibleUserRows[0]?.sourceCommandId;
   const selectHighspeed = useShallow(getHighspeedTurnDependencies);
-  const highspeedState = useSyncExternalStore(
+  useSyncExternalStore(
     subscribeHighspeedTurns,
     () => selectHighspeed(sourceCommandId),
     () => selectHighspeed(sourceCommandId),
@@ -1305,7 +1303,7 @@ function ConversationTurnGroupImpl({
     }
     // 卡片和历史标识继续保留，但不超过 1.2x 或缺少完整耗时数据时不提供分享入口。
     return target && isHighspeedShareEligible(target.metrics) ? target : null;
-  }, [highspeedMeta, highspeedTurn, highspeedState, unit.highspeedOutputFooterTarget]);
+  }, [highspeedMeta, highspeedTurn, unit.highspeedOutputFooterTarget]);
   const [highspeedShareDialogOpen, setHighspeedShareDialogOpen] = useState(false);
   const firstReasoningRowId = useMemo(
     () => unit.assistantWorkRows.find((row) => row.kind === "reasoning")?.rowId,
@@ -1336,14 +1334,13 @@ function ConversationTurnGroupImpl({
   // （模型说完一段正在调工具），但最新文本行已经终态，那时 copyText 仍须可用。
   const assistantTextTerminal =
     latestAssistantTextRow?.state === "complete" || latestAssistantTextRow?.state === "interrupted";
+  const { assistantTextRows, assistantWorkRows } = unit;
   const assistantRawCopyText = useMemo(
-    () => (assistantTextTerminal ? resolveAssistantCopyText(unit) : undefined),
-    [
-      assistantTextTerminal,
-      unit.assistantTextRows,
-      unit.assistantWorkRows,
-      unit.latestAssistantTextRow,
-    ],
+    () =>
+      assistantTextTerminal
+        ? resolveAssistantCopyText({ assistantTextRows, assistantWorkRows, latestAssistantTextRow })
+        : undefined,
+    [assistantTextTerminal, assistantTextRows, assistantWorkRows, latestAssistantTextRow],
   );
   const assistantFileSummaryText = useMemo(
     () => unit.assistantTextRows.map((row) => row.text).join("\n\n"),

@@ -1,3 +1,4 @@
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 import type { UsageEntitlementSnapshot } from "@zcode/shared";
 
 // 旧缓存可能由 quota level 合成订阅；切换命名空间避免升级后恢复伪权益。
@@ -14,7 +15,7 @@ function getLocalStorage(): Storage | null {
     return null;
   }
 
-  return window.localStorage ?? null;
+  return getBrowserLocalStorage() ?? null;
 }
 
 export function buildUsageEntitlementCacheKey(params: {

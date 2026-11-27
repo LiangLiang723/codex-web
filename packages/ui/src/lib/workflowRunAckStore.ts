@@ -2,7 +2,8 @@
 // 已结束的运行行要一直挂着直到用户打开那个会话——没有计时器、没有 settledAt，只有这一份有界、
 // 持久化的 runId 集合：打开会话时把它当时所有已结束的 run 整批放进来。桌面走 localStorage，
 // 手机远控在自己的浏览器里走同一份代码、自己的存储。
-import { useMemo, useSyncExternalStore } from "react";
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
+import { useSyncExternalStore } from "react";
 
 interface StorageLike {
   getItem(key: string): string | null;
@@ -19,6 +20,7 @@ export interface WorkflowRunAckStore {
   subscribe(listener: () => void): () => void;
   /** 版本号快照：每次集合变化 +1，供 useSyncExternalStore 判等。 */
   getVersion(): number;
+  getPredicate(): (runId: string) => boolean;
 }
 
 function readStored(storage: StorageLike | null): string[] {
@@ -36,7 +38,8 @@ function readStored(storage: StorageLike | null): string[] {
 
 export function createWorkflowRunAckStore(storage: StorageLike | null): WorkflowRunAckStore {
   // 插入序 = 确认序；Set 的迭代序保证淘汰最早的。
-  const acknowledged = new Set<string>(readStored(storage).slice(-WORKFLOW_RUN_ACK_LIMIT));
+  let acknowledged = new Set<string>(readStored(storage).slice(-WORKFLOW_RUN_ACK_LIMIT));
+  let predicate = acknowledged.has.bind(acknowledged);
   const listeners = new Set<() => void>();
   let version = 0;
   const persist = () => {
@@ -50,18 +53,16 @@ export function createWorkflowRunAckStore(storage: StorageLike | null): Workflow
   return {
     isAcknowledged: (runId) => acknowledged.has(runId),
     acknowledge: (runIds) => {
-      let changed = false;
-      for (const runId of runIds) {
-        if (acknowledged.has(runId)) continue;
-        acknowledged.add(runId);
-        changed = true;
-      }
-      if (!changed) return;
-      while (acknowledged.size > WORKFLOW_RUN_ACK_LIMIT) {
-        const oldest = acknowledged.values().next().value;
+      if (runIds.every((runId) => acknowledged.has(runId))) return;
+      const next = new Set([...acknowledged, ...runIds]);
+      while (next.size > WORKFLOW_RUN_ACK_LIMIT) {
+        const oldest = next.values().next().value;
         if (oldest === undefined) break;
-        acknowledged.delete(oldest);
+        next.delete(oldest);
       }
+      // 谓词与确认集合一起发布，已提交的渲染仍然读取它对应的集合快照。
+      acknowledged = next;
+      predicate = next.has.bind(next);
       version += 1;
       persist();
       for (const listener of listeners) listener();
@@ -73,13 +74,14 @@ export function createWorkflowRunAckStore(storage: StorageLike | null): Workflow
       };
     },
     getVersion: () => version,
+    getPredicate: () => predicate,
   };
 }
 
 function getBrowserStorage(): StorageLike | null {
   if (typeof window === "undefined") return null;
   try {
-    return window.localStorage;
+    return getBrowserLocalStorage();
   } catch {
     return null;
   }
@@ -100,7 +102,5 @@ export function setWorkflowRunAckStoreForTesting(store: WorkflowRunAckStore | nu
 /** 订阅确认集合的版本；返回的谓词随版本变化换引用，调用方据此重算行选择。 */
 export function useWorkflowRunAcknowledged(): (runId: string) => boolean {
   const store = getWorkflowRunAckStore();
-  const version = useSyncExternalStore(store.subscribe, store.getVersion, store.getVersion);
-  // 谓词随版本换引用：调用方把它放进 useMemo 依赖，集合一变行选择就重算。
-  return useMemo(() => (runId: string) => store.isAcknowledged(runId), [store, version]);
+  return useSyncExternalStore(store.subscribe, store.getPredicate, store.getPredicate);
 }

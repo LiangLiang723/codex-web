@@ -1,3 +1,4 @@
+import { readSafeLocalStorage } from "@/lib/browserEnvironment.js";
 import { Component } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import type { Locale } from "@zcode/shared";
@@ -64,18 +65,8 @@ function serializeErrorForLog(error: Error): {
 }
 
 function resolveBoundaryLocale(): Locale {
-  if (typeof localStorage !== "undefined" && typeof localStorage.getItem === "function") {
-    try {
-      const storedPreference = localStorage.getItem(LOCALE_PREFERENCE_KEY);
-      if (isLocale(storedPreference)) {
-        return storedPreference;
-      }
-    } catch {
-      // 在 Node 测试环境里，可能出现“localStorage 对象存在但能力不完整/不可读”的场景
-      // （例如只有占位对象或读取阶段直接抛错）。错误边界若不兜底会在 fallback 渲染期再次崩溃，
-      // 用户就会看到白屏。这里吞掉存储层异常，继续回退到 navigator / 默认语言。
-    }
-  }
+  const storedPreference = readSafeLocalStorage(LOCALE_PREFERENCE_KEY);
+  if (isLocale(storedPreference)) return storedPreference;
 
   if (typeof navigator !== "undefined") {
     return resolveLocaleFromLanguageTag(navigator.language);

@@ -22,7 +22,8 @@ const thread = {
 };
 
 async function fixture(page, base) {
-  const reads = { catalog: 0, hosts: 0, settings: 0, connections: 0 };
+  const reads = { catalog: 0, hosts: 0, settings: 0, browserState: 0, connections: 0 };
+  const settings = { locale: "zh-CN", localePreference: "zh-CN", selfhostLastProject: { hostId, cwd } };
   const initialCatalog = Promise.withResolvers();
   const online = Promise.withResolvers();
   await page.route(new URL("/api/**", base).href, async (route) => {
@@ -30,7 +31,15 @@ async function fixture(page, base) {
     const { pathname, search } = new URL(request.url());
     if (pathname === "/api/selfhost/settings" && request.method() === "GET") {
       reads.settings++;
-      return route.fulfill({ json: { locale: "zh-CN", selfhostLastProject: { hostId, cwd } } });
+      return route.fulfill({ json: settings });
+    }
+    if (pathname === "/api/selfhost/settings" && request.method() === "PATCH") {
+      Object.assign(settings, request.postDataJSON());
+      return route.fulfill({ json: settings });
+    }
+    if (pathname === "/api/selfhost/browser-state") {
+      if (request.method() === "GET") reads.browserState++;
+      return route.fulfill({ json: { "zcode-locale-preference": settings.localePreference } });
     }
     if (pathname === "/api/selfhost/projects" && !search) {
       reads.catalog++;
@@ -107,6 +116,7 @@ async function fixture(page, base) {
   });
   return {
     reads,
+    settings,
     initialCatalog,
     async catalogChanged() {
       await online.promise;
@@ -170,6 +180,7 @@ try {
           requestStart((url) => /\/Workbench-.*\.js$/.test(url.pathname)),
           requestStart((url) => /\/zh-CN-.*\.js$/.test(url.pathname)),
           requestStart((url) => url.pathname === "/api/selfhost/settings"),
+          requestStart((url) => url.pathname === "/api/selfhost/browser-state"),
           requestStart((url) => url.pathname === "/api/hosts"),
           requestStart((url) => url.pathname === "/api/selfhost/projects" && !url.search),
         ]);
@@ -203,6 +214,7 @@ try {
         catalog: catalogReads,
         hosts: catalogReads,
         settings: 1,
+        browserState: 1,
         connections: 1,
       });
       assert(assets.some((path) => /\/zh-CN-/.test(path)));
@@ -236,7 +248,14 @@ try {
           await japaneseStarted;
           assert.equal(await page.locator("html").getAttribute("lang"), "zh-CN");
           await trigger.click();
+          const languageSaved = page.waitForResponse((response) =>
+            new URL(response.url()).pathname === "/api/selfhost/settings" &&
+            response.request().method() === "PATCH" &&
+            response.request().postDataJSON().localePreference === "ko-KR" &&
+            response.ok(),
+          );
           await page.getByTestId("settings-locale-select-item-ko-KR").click();
+          await languageSaved;
           await page.locator('html[lang="ko-KR"]').waitFor({ state: "attached" });
           const japaneseResponse = page.waitForResponse(
             (response) => /\/ja-JP-.*\.js$/.test(response.url()) && response.ok(),
@@ -244,10 +263,8 @@ try {
           japaneseDownload.resolve();
           await (await japaneseResponse).finished();
           assert.equal(await page.locator("html").getAttribute("lang"), "ko-KR");
-          assert.equal(
-            await page.evaluate(() => localStorage.getItem("zcode-locale-preference")),
-            "ko-KR",
-          );
+          assert.equal(setup.settings.localePreference, "ko-KR");
+          assert.deepEqual(await page.evaluate(() => Object.keys(localStorage)), ["selfhost.auth"]);
           assert(assets.some((path) => /\/en-US-/.test(path)));
           assert(!assets.some((path) => /\/ru-RU-/.test(path)));
         } finally {

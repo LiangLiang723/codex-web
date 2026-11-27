@@ -5,6 +5,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -493,6 +494,7 @@ function ConversationTimelineImpl({
     ],
   );
   const renderUnitCount = renderUnits.history.length + renderUnits.tail.length;
+  const hasContentColumn = renderUnitCount !== 0 || Boolean(headerSlot);
   const { virtualizedUnits, liveUnit, liveUnitIndex } = useMemo(
     () => splitConversationTimelineLiveTail(renderUnits),
     [renderUnits],
@@ -1185,7 +1187,7 @@ function ConversationTimelineImpl({
 
   useLayoutEffect(() => {
     const contentColumn = virtualHistoryRef.current;
-    if (!contentColumn || typeof ResizeObserver === "undefined") return;
+    if (!hasContentColumn || !contentColumn || typeof ResizeObserver === "undefined") return;
 
     stableContentWidthRef.current = contentColumn.clientWidth;
     let observedViewportHeight = scrollRef.current?.clientHeight ?? 0;
@@ -1307,14 +1309,15 @@ function ConversationTimelineImpl({
     getActiveUserScrollIntent,
     markLayoutScrollGuard,
     measureElement,
-    renderUnitCount === 0,
+    hasContentColumn,
     scrollToBottom,
     virtualizer,
   ]);
 
+  const liveTailCacheKey = liveUnit?.key;
   useLayoutEffect(() => {
     const element = liveTailRef.current;
-    const cacheKey = getUnitHeightCacheKey(liveUnit ?? undefined);
+    const cacheKey = liveTailCacheKey;
     if (!element || cacheKey === undefined) return;
 
     const cacheHeight = (entry?: ResizeObserverEntry) => {
@@ -1358,7 +1361,7 @@ function ConversationTimelineImpl({
     commitFollowing,
     getActiveUserScrollIntent,
     isContentWidthChanging,
-    liveUnit?.key,
+    liveTailCacheKey,
     markLayoutScrollGuard,
     scrollToBottom,
   ]);
@@ -1665,7 +1668,9 @@ function ConversationTimelineImpl({
   }, []);
 
   const rowCount = renderUnitCount;
+  const loadedRowCount = rows.length;
   const rowWindowKey = `${rows.length}:${rows[0]?.rowId ?? "none"}:${rows[rows.length - 1]?.rowId ?? "none"}`;
+  const readEntryRowWindow = useEffectEvent(() => rowWindowKey);
   const pendingGuideKey = pendingGuides.map((item) => item.queueItemId).join(":");
 
   // V4 迁移删除旧 ChatView 滚动 hook 后，sessionKey effect 仍固定滚到底部，
@@ -1693,7 +1698,7 @@ function ConversationTimelineImpl({
       scrollMemoryKey && restoredState && pendingRestoreWait
         ? {
             key: scrollMemoryKey,
-            rowWindowKey,
+            rowWindowKey: readEntryRowWindow(),
             state: restoredState,
             waitFor: pendingRestoreWait,
           }
@@ -1780,7 +1785,7 @@ function ConversationTimelineImpl({
             pendingRestore,
             scrollRef.current,
             rowCount,
-            canLoadOlder || totalCount > rows.length,
+            canLoadOlder || totalCount > loadedRowCount,
             rowWindowKey,
           )
         ) {
@@ -1799,6 +1804,7 @@ function ConversationTimelineImpl({
     };
   }, [
     canLoadOlder,
+    loadedRowCount,
     restoreScrollMemory,
     rowCount,
     rowWindowKey,

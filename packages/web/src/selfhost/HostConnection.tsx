@@ -146,7 +146,7 @@ export function useHostConnections(gateway: Gateway) {
 
   useEffect(() => {
     let revision = 0;
-    return gateway.on((message) => {
+    return gateway.onHostConnection((message) => {
       if (message.type === "disconnected") {
         publish(emptyConnections);
       } else if (message.type === "host.lifecycle") {

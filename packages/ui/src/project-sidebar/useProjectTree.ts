@@ -35,7 +35,7 @@ const sameAvailability = (
 ) =>
   left.size === right.size &&
   [...right].every(([key, value]) => areStabilizedValuesEquivalent(left.get(key), value));
-const zeroRevision = () => 0;
+const noControllerActivities = () => null;
 const EMPTY: ProjectTree = { projects: [], tasks: [] };
 export function useProjectTree(isDesktop = false) {
   const services = useBaseWorkspaceServices();
@@ -49,10 +49,10 @@ export function useProjectTree(isDesktop = false) {
     () => (controller ? getWindowControllerTaskListRegistry(controller) : null),
     [controller],
   );
-  const revision = useSyncExternalStore(
+  const controllerActivities = useSyncExternalStore(
     registry?.subscribe ?? subscribeToNothing,
-    registry?.getRevision ?? zeroRevision,
-    registry?.getRevision ?? zeroRevision,
+    registry?.getActivitiesSnapshot ?? noControllerActivities,
+    registry?.getActivitiesSnapshot ?? noControllerActivities,
   );
   const directoryRevision = registry?.getDirectoryRevision() ?? 0;
   const sourceRevision = registry?.getSourceRevision() ?? 0;
@@ -418,9 +418,7 @@ export function useProjectTree(isDesktop = false) {
   const activity = useWorkspaceSessionsIndexItems(registry ? [] : scopes);
   const lastDisplay = useRef<ProjectTree>(EMPTY);
   const displayedTree = useMemo(() => {
-    const activities = registry
-      ? registry.readActivities()
-      : activity.items.flatMap((task) => {
+    const activities = controllerActivities ?? activity.items.flatMap((task) => {
           const live = getTaskListRowActivity(task);
           return live
             ? [
@@ -438,7 +436,7 @@ export function useProjectTree(isDesktop = false) {
     const next = applyProjectTaskActivities(tree, activities);
     lastDisplay.current = stabilizeProjectTree(lastDisplay.current, next);
     return lastDisplay.current;
-  }, [tree, activity.items, registry, revision]);
+  }, [tree, activity.items, controllerActivities]);
   return useMemo(
     () => ({
       tree: displayedTree,

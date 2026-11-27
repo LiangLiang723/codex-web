@@ -87,6 +87,8 @@ export class Gateway {
   private readonly pending = new Map<string, Flight>();
   private readonly watchers = new Set<(message: Message) => void>();
   private readonly terminals = new Set<(frame: ArrayBuffer) => void>();
+  private readonly startupHostEvents = new Map<number, Message>();
+  private hostConnectionSubscribers = 0;
   constructor(
     private readonly token: string,
     private readonly sessionExpired: () => void = () => {},
@@ -138,6 +140,24 @@ export class Gateway {
       this.watchers.delete(fn);
     };
   }
+  onHostConnection(fn: (message: Message) => void) {
+    this.hostConnectionSubscribers++;
+    const unsubscribe = this.on(fn);
+    // 登录后的重放可能早于账号快照和工作台挂载，先交接当前连接收到的最后状态。
+    for (const message of this.startupHostEvents.values()) fn(message);
+    this.startupHostEvents.clear();
+    return () => {
+      unsubscribe();
+      this.hostConnectionSubscribers--;
+    };
+  }
+  private rememberStartupHostEvent(message: Message) {
+    const lifecycle = message.type === "host.lifecycle" ? record.safeParse(message.event) : undefined;
+    const hostId = message.type === "host.mfa.request"
+      ? message.hostId
+      : lifecycle?.success ? lifecycle.data.hostId : undefined;
+    if (typeof hostId === "number") this.startupHostEvents.set(hostId, message);
+  }
   onTerminal(fn: (frame: ArrayBuffer) => void) {
     this.terminals.add(fn);
     return () => {
@@ -176,6 +196,7 @@ export class Gateway {
         if (this.socket !== ws) return;
         this.socket = undefined;
         this.dialing = undefined;
+        this.startupHostEvents.clear();
         // 代理静默断线时浏览器可能迟迟收不到 close 帧，心跳超时直接进入现有重连路径。
         if (!event) ws.close();
         reject(new Error("Gateway disconnected"));
@@ -238,6 +259,7 @@ export class Gateway {
             else req.resolve(msg);
           }
         }
+        if (this.hostConnectionSubscribers === 0) this.rememberStartupHostEvent(msg);
         for (const cb of this.watchers) cb(msg);
       };
       ws.onerror = () => disconnect();
@@ -275,6 +297,7 @@ export class Gateway {
   close() {
     this.closed = true;
     clearTimeout(this.timer);
+    this.startupHostEvents.clear();
     this.socket?.close();
   }
   hosts(signal?: AbortSignal) {

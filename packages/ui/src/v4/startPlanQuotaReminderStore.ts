@@ -1,3 +1,4 @@
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 import { logger } from "@/logger.js";
 
 const PREFIX = "zcode:start-plan-reminder:v1:";
@@ -21,7 +22,7 @@ export function createStartPlanQuotaReminderStore(
         ? options.storage()
         : typeof window === "undefined"
           ? null
-          : window.localStorage;
+          : getBrowserLocalStorage();
     } catch {
       return null;
     }

@@ -1,4 +1,5 @@
 /* eslint-disable max-lines -- 设置导航意图集中管理 sessionStorage、事件桥接和解析校验，拆分会让一次性意图消费顺序更难保证。 */
+import { getBrowserLocalStorage, getBrowserSessionStorage } from "@/lib/browserEnvironment.js";
 import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { logger } from "@/logger.js";
 
@@ -141,7 +142,7 @@ function getLocalStorage(): Storage | null {
     return null;
   }
   try {
-    return window.localStorage;
+    return getBrowserLocalStorage();
   } catch (error) {
     // 部分 WebView / 移动远控容器可能禁用 localStorage。
     // 设置页分区记忆只是 UI 偏好，存储不可用时回退默认入口，不应阻断打开设置页。
@@ -275,52 +276,52 @@ export function setPendingSettingsSectionIntent(
     section === "hooks" ? options.hookWorkspacePath?.trim() || undefined : undefined;
 
   try {
-    window.sessionStorage.setItem(SETTINGS_SECTION_INTENT_KEY, section);
+    getBrowserSessionStorage().setItem(SETTINGS_SECTION_INTENT_KEY, section);
     if (options.pluginTab) {
-      window.sessionStorage.setItem(SETTINGS_PLUGIN_TAB_INTENT_KEY, options.pluginTab);
+      getBrowserSessionStorage().setItem(SETTINGS_PLUGIN_TAB_INTENT_KEY, options.pluginTab);
     } else {
-      window.sessionStorage.removeItem(SETTINGS_PLUGIN_TAB_INTENT_KEY);
+      getBrowserSessionStorage().removeItem(SETTINGS_PLUGIN_TAB_INTENT_KEY);
     }
     if (options.pluginOrigin) {
-      window.sessionStorage.setItem(SETTINGS_PLUGIN_ORIGIN_INTENT_KEY, options.pluginOrigin);
+      getBrowserSessionStorage().setItem(SETTINGS_PLUGIN_ORIGIN_INTENT_KEY, options.pluginOrigin);
     } else {
-      window.sessionStorage.removeItem(SETTINGS_PLUGIN_ORIGIN_INTENT_KEY);
+      getBrowserSessionStorage().removeItem(SETTINGS_PLUGIN_ORIGIN_INTENT_KEY);
     }
     const normalizedPluginScopeKey = options.pluginScopeKey?.trim();
     if (normalizedPluginScopeKey) {
-      window.sessionStorage.setItem(SETTINGS_PLUGIN_SCOPE_KEY_INTENT_KEY, normalizedPluginScopeKey);
+      getBrowserSessionStorage().setItem(SETTINGS_PLUGIN_SCOPE_KEY_INTENT_KEY, normalizedPluginScopeKey);
     } else {
-      window.sessionStorage.removeItem(SETTINGS_PLUGIN_SCOPE_KEY_INTENT_KEY);
+      getBrowserSessionStorage().removeItem(SETTINGS_PLUGIN_SCOPE_KEY_INTENT_KEY);
     }
     if (options.usageTab) {
-      window.sessionStorage.setItem(SETTINGS_USAGE_TAB_INTENT_KEY, options.usageTab);
+      getBrowserSessionStorage().setItem(SETTINGS_USAGE_TAB_INTENT_KEY, options.usageTab);
     }
     if (section === "remoteDevices" && options.sourceServerId?.trim()) {
-      window.sessionStorage.setItem(
+      getBrowserSessionStorage().setItem(
         SETTINGS_SOURCE_SERVER_ID_INTENT_KEY,
         options.sourceServerId.trim(),
       );
     } else {
-      window.sessionStorage.removeItem(SETTINGS_SOURCE_SERVER_ID_INTENT_KEY);
+      getBrowserSessionStorage().removeItem(SETTINGS_SOURCE_SERVER_ID_INTENT_KEY);
     }
     if (
       section === "remoteDevices" &&
       options.sourceServerId?.trim() &&
       options.sourceServerDetails
     ) {
-      window.sessionStorage.setItem(SETTINGS_SOURCE_SERVER_DETAILS_INTENT_KEY, "true");
+      getBrowserSessionStorage().setItem(SETTINGS_SOURCE_SERVER_DETAILS_INTENT_KEY, "true");
     } else {
-      window.sessionStorage.removeItem(SETTINGS_SOURCE_SERVER_DETAILS_INTENT_KEY);
+      getBrowserSessionStorage().removeItem(SETTINGS_SOURCE_SERVER_DETAILS_INTENT_KEY);
     }
     if (options.modelProviderId) {
-      window.sessionStorage.setItem(SETTINGS_MODEL_PROVIDER_ID_INTENT_KEY, options.modelProviderId);
+      getBrowserSessionStorage().setItem(SETTINGS_MODEL_PROVIDER_ID_INTENT_KEY, options.modelProviderId);
     } else {
-      window.sessionStorage.removeItem(SETTINGS_MODEL_PROVIDER_ID_INTENT_KEY);
+      getBrowserSessionStorage().removeItem(SETTINGS_MODEL_PROVIDER_ID_INTENT_KEY);
     }
     if (hookWorkspacePath) {
-      window.sessionStorage.setItem(SETTINGS_HOOK_WORKSPACE_PATH_INTENT_KEY, hookWorkspacePath);
+      getBrowserSessionStorage().setItem(SETTINGS_HOOK_WORKSPACE_PATH_INTENT_KEY, hookWorkspacePath);
     } else {
-      window.sessionStorage.removeItem(SETTINGS_HOOK_WORKSPACE_PATH_INTENT_KEY);
+      getBrowserSessionStorage().removeItem(SETTINGS_HOOK_WORKSPACE_PATH_INTENT_KEY);
     }
   } catch {
     // 忽略浏览器存储异常，不影响主流程。
@@ -355,15 +356,15 @@ function clearPendingSettingsSectionIntent(): void {
   }
 
   try {
-    window.sessionStorage.removeItem(SETTINGS_SECTION_INTENT_KEY);
-    window.sessionStorage.removeItem(SETTINGS_SOURCE_SERVER_ID_INTENT_KEY);
-    window.sessionStorage.removeItem(SETTINGS_SOURCE_SERVER_DETAILS_INTENT_KEY);
-    window.sessionStorage.removeItem(SETTINGS_USAGE_TAB_INTENT_KEY);
-    window.sessionStorage.removeItem(SETTINGS_MODEL_PROVIDER_ID_INTENT_KEY);
-    window.sessionStorage.removeItem(SETTINGS_PLUGIN_TAB_INTENT_KEY);
-    window.sessionStorage.removeItem(SETTINGS_PLUGIN_ORIGIN_INTENT_KEY);
-    window.sessionStorage.removeItem(SETTINGS_PLUGIN_SCOPE_KEY_INTENT_KEY);
-    window.sessionStorage.removeItem(SETTINGS_HOOK_WORKSPACE_PATH_INTENT_KEY);
+    getBrowserSessionStorage().removeItem(SETTINGS_SECTION_INTENT_KEY);
+    getBrowserSessionStorage().removeItem(SETTINGS_SOURCE_SERVER_ID_INTENT_KEY);
+    getBrowserSessionStorage().removeItem(SETTINGS_SOURCE_SERVER_DETAILS_INTENT_KEY);
+    getBrowserSessionStorage().removeItem(SETTINGS_USAGE_TAB_INTENT_KEY);
+    getBrowserSessionStorage().removeItem(SETTINGS_MODEL_PROVIDER_ID_INTENT_KEY);
+    getBrowserSessionStorage().removeItem(SETTINGS_PLUGIN_TAB_INTENT_KEY);
+    getBrowserSessionStorage().removeItem(SETTINGS_PLUGIN_ORIGIN_INTENT_KEY);
+    getBrowserSessionStorage().removeItem(SETTINGS_PLUGIN_SCOPE_KEY_INTENT_KEY);
+    getBrowserSessionStorage().removeItem(SETTINGS_HOOK_WORKSPACE_PATH_INTENT_KEY);
   } catch {
     // 忽略浏览器存储异常，不影响主流程。
   }
@@ -377,9 +378,9 @@ export function consumePendingSettingsSection(
   }
 
   try {
-    const raw = window.sessionStorage.getItem(SETTINGS_SECTION_INTENT_KEY);
+    const raw = getBrowserSessionStorage().getItem(SETTINGS_SECTION_INTENT_KEY);
     if (raw !== null) {
-      window.sessionStorage.removeItem(SETTINGS_SECTION_INTENT_KEY);
+      getBrowserSessionStorage().removeItem(SETTINGS_SECTION_INTENT_KEY);
     }
 
     if (raw === "skills") {
@@ -399,7 +400,7 @@ export function consumePendingSettingsSection(
 function setPendingPluginTab(tab: SettingsPluginTabTarget): void {
   if (typeof window === "undefined") return;
   try {
-    window.sessionStorage.setItem(SETTINGS_PLUGIN_TAB_INTENT_KEY, tab);
+    getBrowserSessionStorage().setItem(SETTINGS_PLUGIN_TAB_INTENT_KEY, tab);
   } catch {
     // 忽略浏览器存储异常，不影响设置页打开。
   }
@@ -408,8 +409,8 @@ function setPendingPluginTab(tab: SettingsPluginTabTarget): void {
 export function consumePendingSettingsPluginTab(): SettingsPluginTabTarget | undefined {
   if (typeof window === "undefined") return undefined;
   try {
-    const raw = window.sessionStorage.getItem(SETTINGS_PLUGIN_TAB_INTENT_KEY);
-    window.sessionStorage.removeItem(SETTINGS_PLUGIN_TAB_INTENT_KEY);
+    const raw = getBrowserSessionStorage().getItem(SETTINGS_PLUGIN_TAB_INTENT_KEY);
+    getBrowserSessionStorage().removeItem(SETTINGS_PLUGIN_TAB_INTENT_KEY);
     return raw === "plugins" || raw === "mcps" || raw === "skills" ? raw : undefined;
   } catch {
     return undefined;
@@ -419,7 +420,7 @@ export function consumePendingSettingsPluginTab(): SettingsPluginTabTarget | und
 export function consumePendingSettingsPluginOrigin(): SettingsPluginNavigationOrigin | undefined {
   if (typeof window === "undefined") return undefined;
   try {
-    const raw = window.sessionStorage.getItem(SETTINGS_PLUGIN_ORIGIN_INTENT_KEY);
+    const raw = getBrowserSessionStorage().getItem(SETTINGS_PLUGIN_ORIGIN_INTENT_KEY);
     return raw === "plugin-store" ? raw : undefined;
   } catch {
     return undefined;
@@ -429,7 +430,7 @@ export function consumePendingSettingsPluginOrigin(): SettingsPluginNavigationOr
 export function consumePendingSettingsPluginScopeKey(): string | undefined {
   if (typeof window === "undefined") return undefined;
   try {
-    const raw = window.sessionStorage.getItem(SETTINGS_PLUGIN_SCOPE_KEY_INTENT_KEY);
+    const raw = getBrowserSessionStorage().getItem(SETTINGS_PLUGIN_SCOPE_KEY_INTENT_KEY);
     return raw?.trim() || undefined;
   } catch {
     return undefined;
@@ -441,7 +442,7 @@ export function consumePendingSettingsHookWorkspacePath(): string | undefined {
   if (typeof window === "undefined") return undefined;
   try {
     return (
-      window.sessionStorage.getItem(SETTINGS_HOOK_WORKSPACE_PATH_INTENT_KEY)?.trim() || undefined
+      getBrowserSessionStorage().getItem(SETTINGS_HOOK_WORKSPACE_PATH_INTENT_KEY)?.trim() || undefined
     );
   } catch {
     return undefined;
@@ -451,7 +452,7 @@ export function consumePendingSettingsHookWorkspacePath(): string | undefined {
 export function clearPendingSettingsHookWorkspacePath(): void {
   if (typeof window === "undefined") return;
   try {
-    window.sessionStorage.removeItem(SETTINGS_HOOK_WORKSPACE_PATH_INTENT_KEY);
+    getBrowserSessionStorage().removeItem(SETTINGS_HOOK_WORKSPACE_PATH_INTENT_KEY);
   } catch {
     // 忽略浏览器存储异常，不影响主流程。
   }
@@ -460,7 +461,7 @@ export function clearPendingSettingsHookWorkspacePath(): void {
 export function clearPendingSettingsPluginScopeKey(): void {
   if (typeof window === "undefined") return;
   try {
-    window.sessionStorage.removeItem(SETTINGS_PLUGIN_SCOPE_KEY_INTENT_KEY);
+    getBrowserSessionStorage().removeItem(SETTINGS_PLUGIN_SCOPE_KEY_INTENT_KEY);
   } catch {
     // 忽略浏览器存储异常，不影响主流程。
   }
@@ -469,7 +470,7 @@ export function clearPendingSettingsPluginScopeKey(): void {
 export function clearPendingSettingsPluginOrigin(): void {
   if (typeof window === "undefined") return;
   try {
-    window.sessionStorage.removeItem(SETTINGS_PLUGIN_ORIGIN_INTENT_KEY);
+    getBrowserSessionStorage().removeItem(SETTINGS_PLUGIN_ORIGIN_INTENT_KEY);
   } catch {
     // 忽略浏览器存储异常，不影响设置页打开。
   }
@@ -481,9 +482,9 @@ export function consumePendingSettingsUsageTab(): SettingsUsageTabTarget | undef
   }
 
   try {
-    const raw = window.sessionStorage.getItem(SETTINGS_USAGE_TAB_INTENT_KEY);
+    const raw = getBrowserSessionStorage().getItem(SETTINGS_USAGE_TAB_INTENT_KEY);
     if (raw !== null) {
-      window.sessionStorage.removeItem(SETTINGS_USAGE_TAB_INTENT_KEY);
+      getBrowserSessionStorage().removeItem(SETTINGS_USAGE_TAB_INTENT_KEY);
     }
     return raw === "app" || raw === "codingPlan" ? raw : undefined;
   } catch {
@@ -500,8 +501,8 @@ export function consumePendingSettingsModelProviderTarget():
   }
 
   try {
-    const providerId = window.sessionStorage.getItem(SETTINGS_MODEL_PROVIDER_ID_INTENT_KEY);
-    window.sessionStorage.removeItem(SETTINGS_MODEL_PROVIDER_ID_INTENT_KEY);
+    const providerId = getBrowserSessionStorage().getItem(SETTINGS_MODEL_PROVIDER_ID_INTENT_KEY);
+    getBrowserSessionStorage().removeItem(SETTINGS_MODEL_PROVIDER_ID_INTENT_KEY);
     if (!providerId?.trim()) {
       return undefined;
     }
@@ -563,8 +564,8 @@ export function addPendingSettingsSectionListener(
 export function consumePendingSettingsSourceServerId(): string | undefined {
   if (typeof window === "undefined") return undefined;
   try {
-    const id = window.sessionStorage.getItem(SETTINGS_SOURCE_SERVER_ID_INTENT_KEY);
-    window.sessionStorage.removeItem(SETTINGS_SOURCE_SERVER_ID_INTENT_KEY);
+    const id = getBrowserSessionStorage().getItem(SETTINGS_SOURCE_SERVER_ID_INTENT_KEY);
+    getBrowserSessionStorage().removeItem(SETTINGS_SOURCE_SERVER_ID_INTENT_KEY);
     return id?.trim() || undefined;
   } catch {
     return undefined;
@@ -574,8 +575,8 @@ export function consumePendingSettingsSourceServerId(): string | undefined {
 export function consumePendingSettingsSourceServerDetails(): boolean {
   if (typeof window === "undefined") return false;
   try {
-    const details = window.sessionStorage.getItem(SETTINGS_SOURCE_SERVER_DETAILS_INTENT_KEY);
-    window.sessionStorage.removeItem(SETTINGS_SOURCE_SERVER_DETAILS_INTENT_KEY);
+    const details = getBrowserSessionStorage().getItem(SETTINGS_SOURCE_SERVER_DETAILS_INTENT_KEY);
+    getBrowserSessionStorage().removeItem(SETTINGS_SOURCE_SERVER_DETAILS_INTENT_KEY);
     return details === "true";
   } catch {
     return false;

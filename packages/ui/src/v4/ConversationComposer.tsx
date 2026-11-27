@@ -40,6 +40,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -886,17 +887,23 @@ function ConversationComposerImpl({
     enableExternalFileDrop: true,
     enableWorkspaceFileDrop: true,
   });
+  const {
+    handleDragOverComposer,
+    handleDragLeaveComposer,
+    handleDropComposer,
+    restoreDraftAttachments,
+  } = attachmentsApi;
   const handleConversationDragOver = useCallback(
     (event: DragEvent<HTMLElement>) => {
-      attachmentsApi.handleDragOverComposer(event);
+      handleDragOverComposer(event);
     },
-    [attachmentsApi.handleDragOverComposer],
+    [handleDragOverComposer],
   );
   const handleConversationDragLeave = useCallback(
     (event: DragEvent<HTMLElement>) => {
-      attachmentsApi.handleDragLeaveComposer(event);
+      handleDragLeaveComposer(event);
     },
-    [attachmentsApi.handleDragLeaveComposer],
+    [handleDragLeaveComposer],
   );
   const handleConversationDrop = useCallback(
     (event: DragEvent<HTMLElement>) => {
@@ -904,7 +911,7 @@ function ConversationComposerImpl({
       if (workspaceFilePayload) {
         // 文件树 payload 与 OS File[] 语义不同：只插入 mention，绝不能进入上传队列。
         event.preventDefault();
-        attachmentsApi.handleDropComposer(event);
+        handleDropComposer(event);
         appendWorkspaceFileMentionToComposer({
           inputApiRef,
           currentMarkdown: inputApiRef.current?.getMarkdown() ?? textRef.current,
@@ -915,9 +922,9 @@ function ConversationComposerImpl({
         });
         return;
       }
-      attachmentsApi.handleDropComposer(event);
+      handleDropComposer(event);
     },
-    [attachmentsApi.handleDropComposer, updateText, workspaceIdentity, workspacePath],
+    [handleDropComposer, updateText, workspaceIdentity, workspacePath],
   );
   const conversationDragKind = workspaceFileDragging
     ? "workspace"
@@ -1136,8 +1143,8 @@ function ConversationComposerImpl({
   useEffect(() => {
     if (!draftScopeId.startsWith(V4_DRAFT_SCOPE_ROOT)) return;
     const attachments = consumeV4ComposerDraftAttachments(workspaceKey, draftFocusVersion);
-    if (attachments) attachmentsApi.restoreDraftAttachments(attachments);
-  }, [draftFocusVersion, draftScopeId, workspaceKey, attachmentsApi.restoreDraftAttachments]);
+    if (attachments) restoreDraftAttachments(attachments);
+  }, [draftFocusVersion, draftScopeId, workspaceKey, restoreDraftAttachments]);
   const pendingFocusRef = useRef(false);
   // 本次 focus 是否由程序触发（见 flushPendingFocus），供 send_input_focus 过滤非用户动作。
   const programmaticFocusRef = useRef(false);
@@ -1229,6 +1236,8 @@ function ConversationComposerImpl({
   // 最近一次已把草稿载入 Lexical 的 edit scope；只用于编辑态顶部内容的显示时机。
   const [appliedDraftScopeId, setAppliedDraftScopeId] = useState<string | null>(null);
   // scope 切换：先落旧 scope 草稿，再恢复新 scope（editorStateJson 优先，退纯文本）。
+  // 在进入 scope 时读取最新已提交草稿，正文自己的状态变化不触发编辑器回填。
+  const readPublishedComposerDraft = useEffectEvent(() => composerDraft);
   useEffect(() => {
     const previousTarget = draftTargetRef.current;
     const targetChanged =
@@ -1268,7 +1277,7 @@ function ConversationComposerImpl({
       scopeToken: composerDraftScopeToken,
     };
 
-    const draft = transferredDraft ?? composerDraft;
+    const draft = transferredDraft ?? readPublishedComposerDraft();
     const restoreDraftInto = (api: LexicalChatInputHandle) => {
       // Composer 跨会话复用时，恢复正文也曾推入同一 undo 栈，留下旧会话内容。
       // 在新 scope 回填前断开旧历史；晋升沿用 token，项目解绑沿用正文，都不结束编辑周期。
@@ -1349,6 +1358,7 @@ function ConversationComposerImpl({
     updateText,
     updateComposerContent,
     workspaceIdentity,
+    workspaceKey,
     workspacePath,
     replaceComposerDraft,
   ]);
@@ -1411,6 +1421,7 @@ function ConversationComposerImpl({
   useEffect(() => {
     if (typeof window === "undefined") return;
     const commitLifecycleContent = captureComposerContentLifecycleCommit();
+    const commandResolutionCleanups = commandResolutionCleanupsRef.current;
     const flush = () => persistDraftNow(draftScopeRef.current);
     window.addEventListener("pagehide", flush);
     window.addEventListener("blur", flush);
@@ -1424,8 +1435,8 @@ function ConversationComposerImpl({
         window.clearTimeout(draftPersistTimerRef.current);
         draftPersistTimerRef.current = null;
       }
-      for (const cleanup of commandResolutionCleanupsRef.current) cleanup();
-      commandResolutionCleanupsRef.current.clear();
+      for (const cleanup of commandResolutionCleanups) cleanup();
+      commandResolutionCleanups.clear();
     };
   }, [
     captureComposerContentLifecycleCommit,
@@ -2004,7 +2015,6 @@ function ConversationComposerImpl({
       sessionId,
       snapshotDraftOfEditor,
       updateText,
-      updateComposerContent,
       webElementContexts,
       pptxElementReferences,
       workspaceIdentity,
@@ -2674,6 +2684,7 @@ function ConversationComposerImpl({
     );
   }, [
     attachmentPreviewTitle,
+    videoAttachmentPreviewTitle,
     attachmentsApi,
     clearCodeCommentContexts,
     clearConversationSelectionReferences,
@@ -2693,7 +2704,6 @@ function ConversationComposerImpl({
     removePluginUiContext,
     removePptxElementReference,
     conversationSelectionReferences,
-    pendingShareContext,
     pillWebElementContexts,
     pluginUiContexts,
     pptxElementReferences,
@@ -2921,7 +2931,8 @@ function ConversationComposerImpl({
       highspeedPresented,
       highspeedSweepActive,
       isWebRemoteControl,
-      mode,
+      isMobileTextInputViewport,
+      intl,
       handleSelectModelTrace,
       modelSelectionReload,
       modelSelectionRefresh,
@@ -2939,8 +2950,6 @@ function ConversationComposerImpl({
       resolvedSendTooltipTitle,
       sendTooltipOpen,
       remoteAvailable,
-      sendShortcut,
-      sendTooltipTitle,
       sessionId,
       pluginUiSessionId,
       showStopControl,

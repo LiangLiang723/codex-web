@@ -1,3 +1,4 @@
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 import { MAX_PROMPT_HISTORY } from "@/lib/promptHistory.js";
 
 interface StorageLike {
@@ -13,7 +14,7 @@ function getBrowserStorage(): StorageLike | null {
   }
 
   try {
-    return window.localStorage;
+    return getBrowserLocalStorage();
   } catch {
     return null;
   }

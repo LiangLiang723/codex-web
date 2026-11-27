@@ -179,7 +179,7 @@ function WorkflowNotificationBaseRow({
     return () => clearInterval(timer);
   }, []);
 
-  const openRunLink = onOpenRun ? (
+  const openRunLink = useMemo(() => onOpenRun ? (
     <button
       type="button"
       onClick={onOpenRun}
@@ -187,7 +187,7 @@ function WorkflowNotificationBaseRow({
     >
       {intl.formatMessage({ id: "chat.toolCall.workflow.openRunDetails" })}
     </button>
-  ) : null;
+  ) : null, [intl, onOpenRun]);
 
   const isEscalation = notification.kind === "escalation";
   const isStall = notification.kind === "stall";
