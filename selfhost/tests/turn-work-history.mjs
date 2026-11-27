@@ -10,7 +10,21 @@ const web = resolve(import.meta.dirname, "../../packages/web");
 const cwd = "/work-history-fixture";
 const hostId = 1;
 const eventEpoch = "work-history-fixture";
-const thread = { id: "work-history", cwd, name: "回合工作过程" };
+const startedAt = 1780000000;
+const thread = {
+  id: "work-history",
+  cwd,
+  name: "回合工作过程",
+  createdAt: startedAt - 600,
+  recencyAt: startedAt,
+};
+const projectPeer = {
+  id: "sidebar-project-peer",
+  cwd,
+  name: "较早发起的并行会话",
+  createdAt: startedAt - 300,
+  recencyAt: startedAt - 300,
+};
 const backgroundThread = {
   id: "sidebar-background",
   cwd: "/sidebar-background-fixture",
@@ -28,7 +42,6 @@ const host = {
 const project = { hostId, remotePath: cwd, name: "Fixture" };
 const backgroundProject = { hostId, remotePath: backgroundThread.cwd, name: "Background" };
 const model = { id: "fixture", model: "fixture", displayName: "Fixture", isDefault: true };
-const startedAt = 1780000000;
 const user = (id, text) => ({ id, type: "userMessage", content: [{ type: "text", text }] });
 const message = (id, text, phase = null) => ({ id, type: "agentMessage", text, phase });
 const legacy = {
@@ -148,6 +161,7 @@ async function verify(page, origin, touch) {
   let finished = false;
   let status = running;
   let backgroundStatus = { type: "idle" };
+  let peerUpdatedAt = startedAt + 30;
   let eventId = 0;
   let publish;
   let publishRuntime;
@@ -167,7 +181,10 @@ async function verify(page, origin, touch) {
     const channel = route.request().postDataJSON()?.channel;
     const scope = url.searchParams.get("cwd");
     // 后台任务可以在主机最新 25 条之外。其状态只能靠推送更新任务所在的工作区索引。
-    const rows = [{ ...thread, status }];
+    const rows = [
+      { ...thread, status },
+      { ...projectPeer, status: running, updatedAt: peerUpdatedAt },
+    ];
     if (url.searchParams.get("limit") !== "25") {
       rows.push({ ...backgroundThread, status: backgroundStatus });
     }
@@ -177,7 +194,11 @@ async function verify(page, origin, touch) {
       "/api/selfhost/projects": url.searchParams.has("organization")
         ? {
             items: [project, backgroundProject],
-            memberships: { [thread.id]: cwd, [backgroundThread.id]: backgroundThread.cwd },
+            memberships: {
+              [thread.id]: cwd,
+              [projectPeer.id]: cwd,
+              [backgroundThread.id]: backgroundThread.cwd,
+            },
           }
         : [project, backgroundProject],
       "/api/threads": {
@@ -260,11 +281,16 @@ async function verify(page, origin, touch) {
   await active.getByText("我会先检查当前设置", { exact: true }).waitFor();
   const sidebar = page.getByTestId("sidebar-task-list-region");
   const task = sidebar.locator(`[data-task-id="${thread.id}"]`);
+  const peer = sidebar.locator(`[data-task-id="${projectPeer.id}"]`);
+  const projectOrder = () =>
+    task.or(peer).evaluateAll((rows) => rows.map((row) => row.getAttribute("data-task-id")));
   const spinner = task.locator(".animate-spin .lucide-loader-circle");
   const approval = task.getByText("等待确认", { exact: true });
   if (touch) await page.getByRole("button", { name: "返回任务首页", exact: true }).tap();
   await task.waitFor();
   await spinner.waitFor();
+  await peer.locator(".animate-spin .lucide-loader-circle").waitFor();
+  assert.deepEqual(await projectOrder(), [thread.id, projectPeer.id]);
 
   const background = sidebar.locator(`[data-task-id="${backgroundThread.id}"]`);
   const backgroundSpinner = background.locator(".animate-spin .lucide-loader-circle");
@@ -289,10 +315,12 @@ async function verify(page, origin, touch) {
   publishRuntime("completed");
   await backgroundSpinner.waitFor({ state: "hidden" });
 
+  peerUpdatedAt = startedAt + 90;
   status = { type: "active", activeFlags: ["waitingOnApproval"] };
   publish({ type: "thread.status.changed", status });
   await approval.waitFor();
   await spinner.waitFor({ state: "hidden" });
+  assert.deepEqual(await projectOrder(), [thread.id, projectPeer.id]);
 
   status = running;
   publish({ type: "thread.status.changed", status });
@@ -320,6 +348,7 @@ async function verify(page, origin, touch) {
   if (touch) await page.getByRole("button", { name: "返回任务首页", exact: true }).tap();
   await task.waitFor();
   await spinner.waitFor({ state: "hidden" });
+  assert.deepEqual(await projectOrder(), [thread.id, projectPeer.id]);
   if (touch) await task.tap();
 
   await page.reload();

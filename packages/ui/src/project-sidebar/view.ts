@@ -80,8 +80,10 @@ export function compareProjectTaskRows(
   right: ProjectTask,
   kind: ProjectRowSelection["kind"],
 ): number {
+  // 自托管行的 updatedAt 已取原生 recencyAt。沿用运行优先会把并行的会话按创建时间排错。
+  const chronological = selfHostedBuild || kind === "timeline" || kind === "unread";
   return (
-    (kind === "timeline" || kind === "unread"
+    (chronological
       ? compareTaskListItemsByTime(left, right, "updated")
       : compareZCodeTaskListItems(left, right, "updated")) ||
     JSON.stringify([right.hostId, buildTaskEntityKey(right)]).localeCompare(
