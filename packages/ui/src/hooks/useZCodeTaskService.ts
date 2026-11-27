@@ -1,4 +1,3 @@
-import { useServices } from "@/hooks/useServices.js";
 import { useWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import type { IZCodeTaskService } from "@zcode/services";
 import type { ZCodeTaskSnapshot } from "@zcode/shared";
@@ -306,9 +305,9 @@ export function useZCodeTaskService(
   workspaceIdentity?: string | null,
 ): IZCodeTaskService {
   // ZCode task 服务按 workspace 身份解析，保证所有 task RPC 都落到对应的 host。
-  const services = workspacePath
-    ? useWorkspaceServices(workspacePath, preferredRemoteSessionId, workspaceIdentity)
-    : useServices();
+  const services = useWorkspaceServices(workspacePath, preferredRemoteSessionId, workspaceIdentity, undefined, {
+    contextWhenUnscoped: true,
+  });
   const rawService = services.zcodeTaskService;
   if (!rawService || typeof rawService !== "object") {
     return rawService;

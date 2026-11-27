@@ -1,5 +1,4 @@
 import type { IZCodeSessionService } from "@zcode/services";
-import { useServices } from "@/hooks/useServices.js";
 import { useWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 
 export function useZCodeSessionService(
@@ -7,8 +6,8 @@ export function useZCodeSessionService(
   preferredRemoteSessionId?: string | null,
   workspaceIdentity?: string | null,
 ): IZCodeSessionService {
-  const services = workspacePath
-    ? useWorkspaceServices(workspacePath, preferredRemoteSessionId, workspaceIdentity)
-    : useServices();
+  const services = useWorkspaceServices(workspacePath, preferredRemoteSessionId, workspaceIdentity, undefined, {
+    contextWhenUnscoped: true,
+  });
   return services.zcodeSessionService;
 }

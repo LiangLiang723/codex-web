@@ -155,48 +155,58 @@ export interface WorkspaceServicesResolution {
   rpcReady: boolean;
 }
 
+interface WorkspaceServicesOptions {
+  unscopedServices?: IServiceAccessor;
+  forceUnscoped?: boolean;
+  contextWhenUnscoped?: boolean;
+}
+
 export function useWorkspaceServicesResolution(
   workspacePath: string | null | undefined,
   preferredRemoteSessionId?: string | null,
   workspaceIdentity?: string | null,
   remoteTarget?: unknown,
-  options?: { unscopedServices?: IServiceAccessor; forceUnscoped?: boolean },
+  options?: WorkspaceServicesOptions,
 ): WorkspaceServicesResolution {
   const currentContextServices = useServices();
+  // 可选目标的 Hook 也执行完整解析链。缺少路径时沿用原来的 Provider 服务和可独立渲染能力。
+  const contextOnly = options?.contextWhenUnscoped === true && !workspacePath;
   const resolvedRemoteSessionId = useResolvedRemoteWorkspaceSessionId(
     workspacePath,
     preferredRemoteSessionId,
     workspaceIdentity,
     remoteTarget,
+    !contextOnly,
   );
-  const inferredRemoteTarget = useTabStore((state) =>
-    resolveWorkspaceServiceIsRemoteTarget({
-      workspacePath,
-      workspaceIdentity,
-      preferredRemoteSessionId,
-      activeWorkspacePath: state.activeWorkspacePath,
-      activeWorkspaceIdentity: state.activeWorkspaceIdentity,
-      activeTab: (() => {
-        const activeTab = state.activeTabId
-          ? state.tabs.find((tab) => tab.id === state.activeTabId)
-          : null;
-        return activeTab && isWorkspaceTab(activeTab) ? activeTab : null;
-      })(),
-      workspaceTabs: state.tabs.filter(isWorkspaceTab),
-    }),
+  const inferredRemoteTarget = useTabStore(
+    (state) => {
+      if (contextOnly) return false;
+      const activeTab = state.tabs.find((tab) => tab.id === state.activeTabId);
+      return resolveWorkspaceServiceIsRemoteTarget({
+        workspacePath,
+        workspaceIdentity,
+        preferredRemoteSessionId,
+        activeWorkspacePath: state.activeWorkspacePath,
+        activeWorkspaceIdentity: state.activeWorkspaceIdentity,
+        activeTab: activeTab && isWorkspaceTab(activeTab) ? activeTab : null,
+        workspaceTabs: state.tabs.filter(isWorkspaceTab),
+      });
+    },
+    !contextOnly,
   );
   const isRemoteTarget = options?.forceUnscoped ? false : inferredRemoteTarget;
   const effectiveRemoteSessionId = options?.forceUnscoped ? null : resolvedRemoteSessionId;
-  const resolvedServices = useRemoteWorkspaceSessionStore((state) =>
-    resolveWorkspaceServicesForTarget({
+  const resolvedServices = useRemoteWorkspaceSessionStore((state) => {
+    if (contextOnly) return currentContextServices;
+    return resolveWorkspaceServicesForTarget({
       currentContextServices,
       resolvedRemoteSessionId: effectiveRemoteSessionId,
       baseServices: state.baseServices,
       sessionsById: state.sessionsById,
       isRemoteTarget,
       unscopedServices: options?.unscopedServices,
-    }),
-  );
+    });
+  });
   const connectionKind = isRemoteTarget
     ? effectiveRemoteSessionId
       ? "remote-ready"
@@ -225,7 +235,7 @@ export function useWorkspaceServices(
   preferredRemoteSessionId?: string | null,
   workspaceIdentity?: string | null,
   remoteTarget?: unknown,
-  options?: { unscopedServices?: IServiceAccessor; forceUnscoped?: boolean },
+  options?: WorkspaceServicesOptions,
 ): IServiceAccessor {
   return useWorkspaceServicesResolution(
     workspacePath,

@@ -65,33 +65,7 @@ export function ResumeWorkflowRunToolCallBlock(context: ToolCallBlockRenderConte
 
   const onOpenWorkflowRun = context.onOpenWorkflowRun;
 
-  // —— run 态：紧凑可点卡（与 CreateWorkflow 共享组件，语义见组件头注释）——
-  if (context.workflowRun !== undefined) {
-    const runStatusLabel = intl.formatMessage({
-      id: `chat.toolCall.workflow.run.status.${context.workflowRun.status}`,
-    });
-    const runStepsLabel = intl.formatMessage(
-      { id: "chat.toolCall.workflow.card.steps" },
-      { done: context.workflowRun.nodesSettled, total: context.workflowRun.nodesTotal },
-    );
-    return (
-      <WorkflowRunCompactCard
-        ariaLabel={kindLabel}
-        icon={RESUME_WORKFLOW_RUN_TOOL_ICON}
-        labelText={kindLabel}
-        primaryText={runDisplay?.runId ?? context.workflowRun.runId}
-        workflowRun={context.workflowRun}
-        statusLabel={runStatusLabel}
-        stepsLabel={runStepsLabel}
-        onOpen={onOpenWorkflowRun !== undefined ? () => onOpenWorkflowRun({}) : undefined}
-        showIcon={context.showIcon !== false}
-      >
-        {snapshotNotice}
-      </WorkflowRunCompactCard>
-    );
-  }
-
-  // —— 折叠态：ToolLayout + 状态点词 + 展开说明 ——
+  // 联接结果可能晚到，先执行 Hook 再选择卡片，保证同一工具行的调用顺序。
   const runId = runDisplay?.runId;
 
   const primaryText = useMemo(
@@ -143,6 +117,32 @@ export function ResumeWorkflowRunToolCallBlock(context: ToolCallBlockRenderConte
       </p>
     );
   }, [hintLabel, runDisplay, toolCall.output]);
+
+  // —— run 态：紧凑可点卡（与 CreateWorkflow 共享组件，语义见组件头注释）——
+  if (context.workflowRun !== undefined) {
+    const runStatusLabel = intl.formatMessage({
+      id: `chat.toolCall.workflow.run.status.${context.workflowRun.status}`,
+    });
+    const runStepsLabel = intl.formatMessage(
+      { id: "chat.toolCall.workflow.card.steps" },
+      { done: context.workflowRun.nodesSettled, total: context.workflowRun.nodesTotal },
+    );
+    return (
+      <WorkflowRunCompactCard
+        ariaLabel={kindLabel}
+        icon={RESUME_WORKFLOW_RUN_TOOL_ICON}
+        labelText={kindLabel}
+        primaryText={runDisplay?.runId ?? context.workflowRun.runId}
+        workflowRun={context.workflowRun}
+        statusLabel={runStatusLabel}
+        stepsLabel={runStepsLabel}
+        onOpen={onOpenWorkflowRun !== undefined ? () => onOpenWorkflowRun({}) : undefined}
+        showIcon={context.showIcon !== false}
+      >
+        {snapshotNotice}
+      </WorkflowRunCompactCard>
+    );
+  }
 
   const hasDetails =
     runDisplay !== undefined ||

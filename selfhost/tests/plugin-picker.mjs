@@ -236,13 +236,15 @@ async function verify(page, origin) {
         },
       ],
       "/api/selfhost/projects": url.searchParams.get("organization")
-        ? { items: [project], memberships: { [threadId]: cwd } }
+        ? { items: [project], memberships: { [threadId]: cwd, ...(creations.length ? { [draftThreadId]: cwd } : {}) } }
         : [project],
       "/api/selfhost/thread-summary": {
         thread: { ...thread, id: url.searchParams.get("threadId") ?? threadId },
       },
       "/api/threads": {
-        data: url.searchParams.get("archived") === "true" ? [] : [thread],
+        data: url.searchParams.get("archived") === "true"
+          ? []
+          : [thread, ...(creations.length ? [{ ...thread, id: draftThreadId, name: "第二个验收会话" }] : [])],
         nextCursor: null,
       },
       "/api/models": { data: [model], nextCursor: null },
@@ -683,6 +685,9 @@ async function verify(page, origin) {
     { type: "mention", name: "plugin-23", path: "plugin://plugin-23@local" },
   ]);
   await historyApp.waitFor();
+  await editor.focus();
+  await page.keyboard.insertText("会话二未发送草稿");
+  await editor.getByText("会话二未发送草稿", { exact: true }).waitFor();
   await showTaskList();
   await activate(page.getByTestId(`task-item-${threadId}`));
   await page.waitForURL((windowUrl) => windowUrl.searchParams.get("thread") === threadId);
@@ -707,6 +712,17 @@ async function verify(page, origin) {
   if (mobile) await activate(page.getByTestId(`task-item-${threadId}`));
   await editor.getByText("管理页往返草稿", { exact: true }).waitFor();
   assert.equal(submissions.length, 2, "extension management must leave the draft unsent");
+  for (const [id, draft, otherDraft] of [
+    [draftThreadId, "会话二未发送草稿", "管理页往返草稿"],
+    [threadId, "管理页往返草稿", "会话二未发送草稿"],
+  ]) {
+    await showTaskList();
+    await activate(page.getByTestId(`task-item-${id}`));
+    await page.waitForURL((url) => url.searchParams.get("thread") === id);
+    await editor.getByText(draft, { exact: true }).waitFor();
+    assert.equal(await editor.getByText(otherDraft).count(), 0, "Drafts stay with their conversation");
+  }
+  assert.equal(submissions.length, 2, "Switching conversations must keep both drafts unsent");
   await verifyBrandSettings(page, { activate, showTaskList, origin, threadId, anatomyEnabled, materialRequests });
   await showTaskList();
   await activate(page.getByTestId("task-new-button"));

@@ -59,6 +59,7 @@ export function useResolvedRemoteWorkspaceSessionId(
   preferredRemoteSessionId?: string | null,
   workspaceIdentity?: string | null,
   remoteTarget?: unknown,
+  requireTabStore = true,
 ): string | null {
   const activeWorkspaceTab = useTabStore(
     useShallow((state) => {
@@ -84,6 +85,7 @@ export function useResolvedRemoteWorkspaceSessionId(
           }
         : null;
     }),
+    requireTabStore,
   );
 
   return useRemoteWorkspaceSessionStore((state) =>

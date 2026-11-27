@@ -2351,7 +2351,8 @@ exceptions:
     paths:
       - packages/services/src/onboarding/
       - packages/ui/src/onboarding/
-    reason: onboarding 目录（记录持久化服务与触发 hook）是已合入 staging 的存量功能模块，本轮修复在其既有边界内收紧老用户判定与兜底；模块 adopt 登记需单独的边界梳理，不在本缺陷修复内展开。
+      - packages/ui/src/hooks/useOnboardingRecordService.ts
+    reason: 已有 onboarding 功能的记录服务、触发逻辑和可选 ServiceProvider 读取入口同属既有模块边界。模块登记需单独梳理其依赖。
   - id: settings-search-existing-row-edit
     rule: unmanaged-new-file
     paths: [packages/ui/src/settings/ProactiveSuggestionsSetting.tsx]
