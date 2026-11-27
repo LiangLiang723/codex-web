@@ -44,7 +44,8 @@ export function useProjectTree(isDesktop = false) {
   const service = directoryServices.projectService;
   const remoteService = directoryServices.remoteProjectService;
   const projectChanges = services.windowProjectDirectory?.changesService;
-  const controller = services.windowControllerService;
+  // 自托管 Controller 没有活动订阅，注册后会用空快照屏蔽工作区的 sessions-index。
+  const controller = selfHostedBuild ? undefined : services.windowControllerService;
   const registry = useMemo(
     () => (controller ? getWindowControllerTaskListRegistry(controller) : null),
     [controller],

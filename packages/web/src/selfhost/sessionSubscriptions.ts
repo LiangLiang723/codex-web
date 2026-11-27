@@ -93,6 +93,9 @@ export class SessionSubscriptions {
           }
           this.applyEvent(sub, event);
         }
+      } else if (msg.type === "thread.runtime.updated" && num(rec(msg.update).hostId) === this.hostId) {
+        // 未打开的会话没有 thread.event。主机广播触发索引重读，由原生列表提供等待标志。
+        this.refreshIndex();
       } else if (msg.type === "thread.history.changed" && msg.hostId === this.hostId) {
         const epoch = str(msg.eventEpoch);
         if (!epoch) return;

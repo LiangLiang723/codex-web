@@ -391,7 +391,7 @@ SH-TURN-WORK 验收运行 `node selfhost/tests/turn-work-history.mjs`。桌面�
 
 ### 侧栏活动、消息顺序与会话输入设置
 
-侧栏目录以原生 Thread 为行和时间来源。「最近更新」用 Codex 的 `recencyAt` 倒序，缺少活跃时间的历史使用创建时间。新一轮开始可更新排序，流式文本和工具进度不推进排序依据。运行标志随原生运行状态以及回合的开始、结束和中断更新。等待确认或输入使用现有会话提示。断开后的首份索引由原生列表恢复。目录刷新不能写入会话状态。
+侧栏目录以原生 Thread 为行和时间来源。「最近更新」用 Codex 的 `recencyAt` 倒序，缺少活跃时间的历史使用创建时间。新一轮开始可更新排序，流式文本和工具进度不推进排序依据。自托管项目侧栏通过工作区 `sessions-index` 按工作区身份和 Thread 合并运行标志。自托管的 `window-controller` 承接目录操作，原生 ZCode Desktop 的窗口 Controller 提供其活动订阅。Gateway 的 `thread.runtime.updated` 在当前主机范围内触发索引补读，前台与后台任务都使用原生 Thread 状态。运行时任务行转圈；`waitingOnApproval` 或 `waitingOnUserInput` 时显示「等待确认」；恢复时继续转圈，结束或中断时停止。重连按原生列表重建索引。目录刷新不能写入会话状态。
 
 同一回合的首次用户输入在耗时和最终答复上方。原生历史、实时事件和补读统一投影，补到较早的输入时仍按回合内的实际顺序显示。运行中的引导保留在该输入发生的位置，回合完成引起的折叠不会移动用户输入或复制消息。
 
@@ -401,9 +401,13 @@ Codex 拥有会话的执行设置。已有会话明确修改选择时，通过�
 sequenceDiagram
     participant C as Codex App Server
     participant G as Gateway
+    participant I as 工作区 sessions-index
     participant W as 自托管 Web
     C-->>G: 原生目录、运行状态与回合事件
-    G-->>W: 目录查询及可恢复事件
+    G-->>I: 主机范围的运行状态更新信号
+    I->>G: 读取工作区的原生会话状态及等待标志
+    I-->>W: 按 Thread 附加活动和等待提示
+    G-->>W: 目录查询及可恢复的回合事件
     W->>W: 活跃时间排序、运行标志和回合消息投影
     W->>G: 修改特定 Thread 的输入设置
     G->>C: thread/settings/update
@@ -415,13 +419,13 @@ sequenceDiagram
 
 | 验收 | 场景 | 断言 |
 | --- | --- | --- |
-| SH-SIDEBAR-RUNTIME | 已有会话开始、等待确认、恢复、完成或停止；两个会话交替输出；刷新页面 | 转圈和等待提示反映当前状态；只由原生活跃时间和稳定决胜字段决定「最近更新」顺序 |
+| SH-SIDEBAR-RUNTIME | 在桌面与手机查看正在运行的会话和另一个项目的未打开会话；分别等待审批与输入，再恢复并完成；刷新页面 | 两条实际任务行独立更新转圈与等待提示；背景会话无需打开；只由原生活跃时间和稳定决胜字段决定「最近更新」顺序 |
 | SH-TURN-INPUT-ORDER | 先收到答复，后补入回合首条用户消息；折叠、展开并重开；既有引导轮 | 提问在对应答复之前，过程收起时仍可见，引导位置与消息身份保留 |
 | SH-COMPOSER-CONFIG | 两条会话设置不同的模式、模型及档位；切换、刷新、新建；远端进程重启或配置拒绝 | 每条会话恢复已确认的输入选择；同一作用域的全新草稿继承最近选择；下一轮重新提交选定的原生执行配置 |
 
 这些行为经自托管 Web 的 replayable 适配器交付。桌面和手机浏览器都使用同一原生 Thread 和顺序；ZCode Desktop 的 continuous 链路继续由窗口 Host 和 ZCode CLI 交付。
 
-隔离协议验收运行 `node selfhost/tests/sidebar-conversation-state.mjs` 和 `node selfhost/tests/workspace-services.mjs`。浏览器中的消息顺序和折叠由 SH-TURN-WORK 一起验证。
+隔离协议验收运行 `node selfhost/tests/sidebar-conversation-state.mjs` 和 `node selfhost/tests/workspace-services.mjs`。浏览器中的侧栏运行标志、等待提示、消息顺序和折叠由 SH-TURN-WORK 一起验证。
 
 ## 输入图片和历史预览
 

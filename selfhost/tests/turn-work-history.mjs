@@ -10,7 +10,13 @@ const web = resolve(import.meta.dirname, "../../packages/web");
 const cwd = "/work-history-fixture";
 const hostId = 1;
 const eventEpoch = "work-history-fixture";
-const thread = { id: "work-history", cwd, name: "回合工作过程", status: { type: "idle" } };
+const thread = { id: "work-history", cwd, name: "回合工作过程" };
+const backgroundThread = {
+  id: "sidebar-background",
+  cwd: "/sidebar-background-fixture",
+  name: "后台任务",
+};
+const running = { type: "active", activeFlags: [] };
 const host = {
   id: hostId,
   name: "Fixture",
@@ -20,6 +26,7 @@ const host = {
   authMode: "agent",
 };
 const project = { hostId, remotePath: cwd, name: "Fixture" };
+const backgroundProject = { hostId, remotePath: backgroundThread.cwd, name: "Background" };
 const model = { id: "fixture", model: "fixture", displayName: "Fixture", isDefault: true };
 const startedAt = 1780000000;
 const user = (id, text) => ({ id, type: "userMessage", content: [{ type: "text", text }] });
@@ -139,8 +146,11 @@ async function verifyInputBeforeAnswer(page) {
 
 async function verify(page, origin, touch) {
   let finished = false;
+  let status = running;
+  let backgroundStatus = { type: "idle" };
   let eventId = 0;
   let publish;
+  let publishRuntime;
   const nativeControls = { queue: false, compact: false, fork: true, queued: [] };
   await page.addInitScript(
     (theme) => {
@@ -155,13 +165,28 @@ async function verify(page, origin, touch) {
     const url = new URL(route.request().url());
     if (url.pathname === "/api/selfhost/browser-state") return browserState(route);
     const channel = route.request().postDataJSON()?.channel;
+    const scope = url.searchParams.get("cwd");
+    // 后台任务可以在主机最新 25 条之外。其状态只能靠推送更新任务所在的工作区索引。
+    const rows = [{ ...thread, status }];
+    if (url.searchParams.get("limit") !== "25") {
+      rows.push({ ...backgroundThread, status: backgroundStatus });
+    }
     const responses = {
       "/api/auth/me": { user: { username: "fixture", avatar: null } },
       "/api/hosts": [host],
       "/api/selfhost/projects": url.searchParams.has("organization")
-        ? { items: [project], memberships: { [thread.id]: cwd } }
-        : [project],
-      "/api/threads": { data: [thread], nextCursor: null },
+        ? {
+            items: [project, backgroundProject],
+            memberships: { [thread.id]: cwd, [backgroundThread.id]: backgroundThread.cwd },
+          }
+        : [project, backgroundProject],
+      "/api/threads": {
+        data:
+          url.searchParams.get("archived") === "true"
+            ? []
+            : rows.filter((row) => scope === null || row.cwd === scope),
+        nextCursor: null,
+      },
       "/api/models": { data: [model], nextCursor: null },
       "/api/selfhost/settings": { locale: "zh-CN" },
       "/api/selfhost/turn-files": { summaries: {} },
@@ -175,6 +200,13 @@ async function verify(page, origin, touch) {
     return route.fulfill({ json: responses[url.pathname] ?? { value: [] } });
   });
   await page.routeWebSocket("**/api/realtime", (socket) => {
+    publishRuntime = (status) =>
+      socket.send(
+        JSON.stringify({
+          type: "thread.runtime.updated",
+          update: { hostId, threadId: backgroundThread.id, status },
+        }),
+      );
     publish = (event) =>
       socket.send(
         JSON.stringify({
@@ -191,15 +223,17 @@ async function verify(page, origin, touch) {
         case "auth.authenticate":
           return reply({ type: "ready" });
         case "thread.activate":
+          assert.equal(request.threadId, thread.id, "后台会话无需激活即可更新任务行");
           return reply({
             type: "thread.snapshot",
-            thread,
+            thread: { ...thread, status },
             eventEpoch,
             lastEventId: eventId,
             ...(finished ? { readOnly: true, readOnlyReason: "activeWriter" } : { nativeControls }),
             history: {
               thread: {
                 ...thread,
+                status,
                 turns: [
                   legacy,
                   replyOnly,
@@ -224,6 +258,47 @@ async function verify(page, origin, touch) {
   await page.goto(new URL(`/?${query}`, origin).href);
   const active = workLocators(page, current).group;
   await active.getByText("我会先检查当前设置", { exact: true }).waitFor();
+  const sidebar = page.getByTestId("sidebar-task-list-region");
+  const task = sidebar.locator(`[data-task-id="${thread.id}"]`);
+  const spinner = task.locator(".animate-spin .lucide-loader-circle");
+  const approval = task.getByText("等待确认", { exact: true });
+  if (touch) await page.getByRole("button", { name: "返回任务首页", exact: true }).tap();
+  await task.waitFor();
+  await spinner.waitFor();
+
+  const background = sidebar.locator(`[data-task-id="${backgroundThread.id}"]`);
+  const backgroundSpinner = background.locator(".animate-spin .lucide-loader-circle");
+  const backgroundApproval = background.getByText("等待确认", { exact: true });
+  await background.waitFor();
+  backgroundStatus = running;
+  publishRuntime("running");
+  await backgroundSpinner.waitFor();
+  for (const flag of ["waitingOnUserInput", "waitingOnApproval"]) {
+    backgroundStatus = { type: "active", activeFlags: [flag] };
+    publishRuntime("running");
+    await backgroundApproval.waitFor();
+    await backgroundSpinner.waitFor({ state: "hidden" });
+    assert.equal(await approval.isVisible(), false);
+
+    backgroundStatus = running;
+    publishRuntime("running");
+    await backgroundSpinner.waitFor();
+    await backgroundApproval.waitFor({ state: "hidden" });
+  }
+  backgroundStatus = { type: "idle" };
+  publishRuntime("completed");
+  await backgroundSpinner.waitFor({ state: "hidden" });
+
+  status = { type: "active", activeFlags: ["waitingOnApproval"] };
+  publish({ type: "thread.status.changed", status });
+  await approval.waitFor();
+  await spinner.waitFor({ state: "hidden" });
+
+  status = running;
+  publish({ type: "thread.status.changed", status });
+  await spinner.waitFor();
+  await approval.waitFor({ state: "hidden" });
+  if (touch) await task.tap();
   assert.equal(await historyTrigger(page, current).count(), 0);
   await verifyFold(page, legacy, "旧回合的最终答复", ["旧回合的进度"], "已工作 20 秒", touch);
 
@@ -232,6 +307,7 @@ async function verify(page, origin, touch) {
   await active.getByText(answer.text, { exact: true }).waitFor();
   await active.getByText(lateProgress.text, { exact: true }).waitFor();
   finished = true;
+  status = { type: "idle" };
   publish({ type: "timeline.item.upsert", item: { ...initialInput, turnId: current.id } });
   publish({ type: "turn.completed", turn: { ...completed, items: [] } });
   const progress = ["我会先检查当前设置", "已核实设置的读取路径", lateProgress.text];
@@ -240,6 +316,11 @@ async function verify(page, origin, touch) {
   const only = workLocators(page, replyOnly).group;
   await only.getByText("已工作 3 秒", { exact: true }).waitFor();
   assert.equal(await only.getByRole("button", { name: "已工作 3 秒" }).count(), 0);
+
+  if (touch) await page.getByRole("button", { name: "返回任务首页", exact: true }).tap();
+  await task.waitFor();
+  await spinner.waitFor({ state: "hidden" });
+  if (touch) await task.tap();
 
   await page.reload();
   await verifyFold(page, completed, answer.text, progress, "已工作 17 分 46 秒", touch);
@@ -271,19 +352,28 @@ try {
         isMobile: touch,
         hasTouch: touch,
       });
+      const pageErrors = [];
+      page.on("pageerror", (error) => pageErrors.push(error.message));
       page.setDefaultTimeout(15000);
       try {
         await verify(page, target ?? server.resolvedUrls.local[0], touch);
       } catch (cause) {
-        const sections = await page.locator("section[data-turn-id]").evaluateAll((turns) =>
-          turns.map((turn) => [turn.getAttribute("data-turn-id"), turn.textContent]),
-        );
+        const sections = await page
+          .locator("section[data-turn-id]")
+          .evaluateAll((turns) =>
+            turns.map((turn) => [turn.getAttribute("data-turn-id"), turn.textContent]),
+          );
         const body = await page.locator("body").innerText();
-        throw new Error(`Turn fixture (${width}px) at ${page.url()}\n${JSON.stringify(sections)}\n${body}`, { cause });
+        throw new Error(
+          `Turn fixture (${width}px) at ${page.url()}\n${JSON.stringify(pageErrors)}\n${JSON.stringify(sections)}\n${body}`,
+          { cause },
+        );
       } finally {
         await page.close();
       }
-      console.log(`PASS native turn work history and final answer (${width}px)`);
+      console.log(
+        `PASS sidebar runtime and waiting indicators, native turn work history (${width}px)`,
+      );
     }
   } finally {
     await browser.close();
