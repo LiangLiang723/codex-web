@@ -153,12 +153,16 @@ async function verifyMaterialMotion(page) {
         if (start.composites !== 1 || turned.composites !== 1) {
           throw new Error(`${mode} did not draw the body and eyes in a single composite`);
         }
-        for (const width of [79, 81, 144]) {
+        for (const width of [20, 79, 81, 144]) {
           player.el.style.width = `${width}px`;
           player.el.style.height = `${width}px`;
           const density = Math.min(devicePixelRatio, 2.5);
           await readyFor(() => active.width === Math.ceil(width * density));
           if (canvas() !== active) throw new Error(`${mode} replaced its material at ${width}px`);
+          const { data } = active.getContext("2d").getImageData(0, 0, active.width, active.height);
+          if (!data.some((value, index) => index % 4 === 3 && value > 0)) {
+            throw new Error(`${mode} produced an empty material at ${width}px`);
+          }
         }
         for (const state of ["thinking", "progress", "radar"]) {
           player.setState(state);
