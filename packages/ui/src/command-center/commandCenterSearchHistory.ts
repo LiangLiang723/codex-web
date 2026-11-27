@@ -1,3 +1,4 @@
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 export type CommandCenterSearchScope = "all" | "commands" | "conversations" | "files";
 
 export interface CommandCenterSearchHistoryEntry {
@@ -15,7 +16,7 @@ function getStorage(): Storage | null {
   }
 
   try {
-    return window.localStorage;
+    return getBrowserLocalStorage();
   } catch {
     return null;
   }

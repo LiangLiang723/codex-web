@@ -1,5 +1,6 @@
 // V4 已提交命令的 renderer 持久账本。
 // 它只保存客户端恢复线索，不参与 conversation projection，也绝不能据此自动重放。
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 import { permissionGrantMode } from "@zcode/shared/zcode-protocol-v4";
 import type {
   CommandAck,
@@ -74,7 +75,7 @@ type QueryCommands = (params: CommandsQueryParams) => Promise<CommandsQueryResul
 
 function browserStorage(): StorageLike | undefined {
   try {
-    return globalThis.localStorage;
+    return getBrowserLocalStorage();
   } catch {
     return undefined;
   }

@@ -6,6 +6,7 @@
  * v4 composer 不做本地持久化。这里仅保留删除 task 时清理历史版本残留草稿键的
  * janitor 逻辑，避免旧安装升级后 localStorage 里的已删任务草稿永久残留。
  */
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 import { logger } from "@/logger.js";
 
 interface StorageLike {
@@ -28,7 +29,7 @@ function getBrowserStorage(): StorageLike | null {
   }
 
   try {
-    return window.localStorage;
+    return getBrowserLocalStorage();
   } catch {
     return null;
   }

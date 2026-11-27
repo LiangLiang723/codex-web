@@ -1,3 +1,4 @@
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 import type {
   McpConfig,
   McpServerConfig,
@@ -22,7 +23,7 @@ export const DEFAULT_MCP_CONFIG: McpConfig = {
 export function safeReadJson<T>(key: string, fallback: T): T {
   try {
     if (typeof window === "undefined") return fallback;
-    const raw = localStorage.getItem(key);
+    const raw = getBrowserLocalStorage().getItem(key);
     if (!raw) return fallback;
     return JSON.parse(raw) as T;
   } catch {
@@ -33,7 +34,7 @@ export function safeReadJson<T>(key: string, fallback: T): T {
 export function safeWriteJson(key: string, value: unknown): void {
   try {
     if (typeof window !== "undefined") {
-      localStorage.setItem(key, JSON.stringify(value));
+      getBrowserLocalStorage().setItem(key, JSON.stringify(value));
     }
   } catch {
     // ignore storage errors
@@ -53,7 +54,7 @@ export function readLegacyCommonMcpServers(): Record<string, McpServerConfig> {
 export function clearLegacyCommonMcpServers(): void {
   try {
     if (typeof window !== "undefined") {
-      localStorage.removeItem(MCP_CONFIG_KEY);
+      getBrowserLocalStorage().removeItem(MCP_CONFIG_KEY);
     }
   } catch {
     // ignore storage errors

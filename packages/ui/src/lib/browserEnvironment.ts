@@ -1,3 +1,5 @@
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
+
 export interface BrowserReadableStorageLike {
   getItem(key: string): string | null;
 }
@@ -6,13 +8,55 @@ export interface BrowserStorageLike extends BrowserReadableStorageLike {
   setItem(key: string, value: string): void;
 }
 
+export function createMemoryStorage(
+  initial: Record<string, string> = {},
+  onChange?: (key: string, value: string | null) => void,
+): Storage {
+  const values = new Map(Object.entries(initial));
+  return {
+    get length() {
+      return values.size;
+    },
+    key: (index) => [...values.keys()][index] ?? null,
+    getItem: (key) => values.get(key) ?? null,
+    setItem(key, value) {
+      if (values.get(key) === value) return;
+      onChange?.(key, value);
+      values.set(key, value);
+    },
+    removeItem(key) {
+      if (!values.has(key)) return;
+      onChange?.(key, null);
+      values.delete(key);
+    },
+    clear() {
+      for (const key of values.keys()) this.removeItem(key);
+    },
+  };
+}
+
+let selfhostStorage: Storage | undefined;
+const anonymousStorage = createMemoryStorage();
+const pageStorage = createMemoryStorage();
+
+/** 自托管在认证快照就绪后、共享工作台加载前装配账号存储。 */
+export function installSelfhostBrowserStorage(storage: Storage): void {
+  selfhostStorage = storage;
+}
+
+export function getBrowserLocalStorage(): Storage {
+  if (selfHostedBuild) return selfhostStorage ?? anonymousStorage;
+  return typeof window === "undefined" ? globalThis.localStorage : window.localStorage;
+}
+
+export function getBrowserSessionStorage(): Storage {
+  if (selfHostedBuild) return pageStorage;
+  return typeof window === "undefined" ? globalThis.sessionStorage : window.sessionStorage;
+}
+
 function getLocalStorageCandidate(): unknown {
   try {
-    return typeof window !== "undefined"
-      ? window.localStorage
-      : typeof localStorage !== "undefined"
-        ? localStorage
-        : undefined;
+    return getBrowserLocalStorage();
   } catch {
     return undefined;
   }

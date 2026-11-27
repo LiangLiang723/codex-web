@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { browserStateFixture, waitForBrowserStateWrite } from "./fixtures/browser-state.mjs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -9,6 +10,7 @@ import { nativeUserInputItems } from "../../packages/web/src/selfhost/nativeTurn
 import { revealPickerItem, revealPickerOption } from "./fixtures/composer-picker.mjs";
 import { trackMaterialRequests } from "./fixtures/brand-materials.mjs";
 import {
+  describeBrandState,
   verifyAnatomyCatalogue,
   verifyAnatomyMotion,
   verifyBrandSettings,
@@ -125,12 +127,13 @@ async function verify(page, origin) {
   const submissions = [];
   const creations = [];
   page.on("pageerror", (error) => pageErrors.push(error.stack ?? error.message));
+  const browserState = browserStateFixture({ "zcode-locale-preference": "zh-CN" });
   await page.addInitScript(() => {
     localStorage.setItem("selfhost.auth", "picker-test-fixture");
-    localStorage.setItem("zcode-locale-preference", "zh-CN");
   });
   await page.route(new URL("/api/**", origin).href, async (route) => {
     const url = new URL(route.request().url());
+    if (url.pathname === "/api/selfhost/browser-state") return browserState(route);
     const request = route.request().postDataJSON();
     const project = { hostId, remotePath: cwd, name: "引用测试项目" };
     if (url.pathname === "/api/selfhost/apps" && request?.operation === "available") {
@@ -544,6 +547,9 @@ async function verify(page, origin) {
   await closePicker(systemSkill.name);
   await select("skill:" + repoSkill.path, repoSkill.path);
   await select("skill:" + userSkill.path, userSkill.path);
+  const savedDraft = waitForBrowserStateWrite(page, (key, value) =>
+    key.startsWith("zcode-v4-composer-drafts:") && value?.includes(pluginSkill.path),
+  );
   await select("skill:" + pluginSkill.path, `${pluginSkill.pluginId} · ${pluginSkill.path}`);
 
   const chosen = [
@@ -554,6 +560,7 @@ async function verify(page, origin) {
   ];
   const chip = (id) => editor.locator('[data-mention-id="' + id + '"]');
   for (const id of chosen) await chip(id).waitFor();
+  await savedDraft;
   await page.reload({ waitUntil: "commit" });
   for (const id of chosen) await chip(id).waitFor({ timeout: 45000 });
   assert.match(await editor.innerText(), /^验收🧪 /u);
@@ -790,16 +797,7 @@ try {
       } catch (error) {
         console.error(
           `Composer browser acceptance failed at ${width}px.`,
-          await page.locator("[data-codex-pet], [data-codex-pet-anchor]").evaluateAll((nodes) =>
-            nodes.map((node) => ({
-              anchor: node.dataset.codexPetAnchor,
-              placement: node.dataset.petPlacement,
-              display: getComputedStyle(node).display,
-              visibility: getComputedStyle(node).visibility,
-              top: node.getBoundingClientRect().top,
-              height: node.getBoundingClientRect().height,
-            })),
-          ),
+          await describeBrandState(page),
           await page
             .locator("body")
             .innerText({ timeout: 3000 })

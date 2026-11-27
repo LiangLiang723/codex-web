@@ -2,6 +2,7 @@
 // 已结束的运行行要一直挂着直到用户打开那个会话——没有计时器、没有 settledAt，只有这一份有界、
 // 持久化的 runId 集合：打开会话时把它当时所有已结束的 run 整批放进来。桌面走 localStorage，
 // 手机远控在自己的浏览器里走同一份代码、自己的存储。
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 import { useMemo, useSyncExternalStore } from "react";
 
 interface StorageLike {
@@ -79,7 +80,7 @@ export function createWorkflowRunAckStore(storage: StorageLike | null): Workflow
 function getBrowserStorage(): StorageLike | null {
   if (typeof window === "undefined") return null;
   try {
-    return window.localStorage;
+    return getBrowserLocalStorage();
   } catch {
     return null;
   }

@@ -106,7 +106,8 @@ async function verifyNetworkStatus(page, origin) {
     );
   page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript(() => {
-    localStorage.setItem("selfhost.auth", "network-test-fixture");
+    if (!localStorage.getItem("selfhost.auth"))
+      localStorage.setItem("selfhost.auth", "network-test-fixture");
     localStorage.setItem("zcode-locale-preference", "zh-CN");
   });
   // Vite 的源模块也可能含有 /api/ 目录，只模拟网关的根 API。

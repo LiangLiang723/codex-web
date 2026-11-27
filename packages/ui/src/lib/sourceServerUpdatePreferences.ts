@@ -1,3 +1,4 @@
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 import { useSyncExternalStore } from "react";
 
 interface StorageLike {
@@ -8,7 +9,7 @@ const STORAGE_KEY = "zcode-source-update-notifications-v1";
 
 function browserStorage(): StorageLike | null {
   try {
-    return typeof window === "undefined" ? null : window.localStorage;
+    return typeof window === "undefined" ? null : getBrowserLocalStorage();
   } catch {
     return null;
   }

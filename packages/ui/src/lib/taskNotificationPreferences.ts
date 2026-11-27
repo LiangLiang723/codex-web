@@ -1,9 +1,10 @@
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 const TASK_NOTIFICATION_ENABLED_STORAGE_KEY = "zcode-notification-enabled";
 const TASK_NOTIFICATION_SOUND_ENABLED_STORAGE_KEY = "zcode-notification-sound-enabled";
 
 function readStoredBoolean(key: string, defaultValue: boolean): boolean {
   try {
-    const value = localStorage.getItem(key);
+    const value = getBrowserLocalStorage().getItem(key);
     if (value == null) {
       return defaultValue;
     }
@@ -16,7 +17,7 @@ function readStoredBoolean(key: string, defaultValue: boolean): boolean {
 
 function persistStoredBoolean(key: string, value: boolean): void {
   try {
-    localStorage.setItem(key, String(value));
+    getBrowserLocalStorage().setItem(key, String(value));
   } catch {
     // localStorage 不可用时静默忽略，保持 UI 主流程可继续工作。
   }

@@ -390,6 +390,22 @@ nodes:
         symbol: "WorkspaceSidebarFooter"
     invariants:
       - "Gateway persists the authenticated account's avatar. The active Web login holds the server response, which the workspace footer and account settings share."
+  - id: "capability.selfhost-account-browser-state"
+    kind: "capability"
+    label: "Self-hosted Web account state"
+    aliases: ["浏览器设置迁移", "Web 账号设置同步", "browser-state"]
+    docs: ["specs/selfhost-codex/account-browser-state.md", "packages/web/src/selfhost/CONTRACT.md"]
+    codeSeeds:
+      - file: "packages/web/src/selfhost/browserState.ts"
+        symbol: "openAccountBrowserState"
+      - file: "packages/ui/src/lib/browserEnvironment.ts"
+        symbol: "getBrowserLocalStorage"
+      - file: "selfhost/gateway/overlay/utils/selfhost-browser-state.ts"
+        symbol: "writeBrowserState"
+    invariants:
+      - "The gateway owns durable account state and authenticates each read and write. Browser persistent storage contains the login token and temporarily holds pre-upgrade entries during migration."
+      - "Existing database values take precedence during legacy import. The account language remains owned by SettingService."
+      - "Composer recovery is committed before native admission and is scoped to the current Web login."
   - id: "capability.referrals-embedded"
     kind: "capability"
     label: "Rewards center embedded website"

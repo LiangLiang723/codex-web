@@ -1,8 +1,9 @@
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 const FEEDBACK_CONTACT_STORAGE_KEY = "zcode.feedback.contact";
 
 function getStorage(): Storage | null {
   try {
-    return window.localStorage;
+    return getBrowserLocalStorage();
   } catch {
     return null;
   }

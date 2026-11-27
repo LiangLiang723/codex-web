@@ -1,3 +1,4 @@
+import { getBrowserLocalStorage, getBrowserSessionStorage } from "@/lib/browserEnvironment.js";
 import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import type { DraftPluginUiOpenRequest } from "@/plugin-ui/contract.js";
 import { usePaneLayoutStore } from "@/v4/paneLayoutStore.js";
@@ -212,7 +213,7 @@ function readStoredWorkspaceSidebarWidthPx(): number | null {
   }
 
   try {
-    const raw = window.localStorage.getItem(WORKSPACE_SIDEBAR_WIDTH_STORAGE_KEY);
+    const raw = getBrowserLocalStorage().getItem(WORKSPACE_SIDEBAR_WIDTH_STORAGE_KEY);
     if (!raw) {
       return null;
     }
@@ -229,7 +230,7 @@ function readLegacyWorkspaceSidebarWidthRatio(): number | null {
   }
 
   try {
-    const raw = window.localStorage.getItem(LEGACY_WORKSPACE_SHELL_LAYOUT_STORAGE_KEY);
+    const raw = getBrowserLocalStorage().getItem(LEGACY_WORKSPACE_SHELL_LAYOUT_STORAGE_KEY);
     if (!raw) {
       return null;
     }
@@ -247,7 +248,7 @@ function persistWorkspaceSidebarWidthPx(widthPx: number) {
   }
 
   try {
-    window.localStorage.setItem(WORKSPACE_SIDEBAR_WIDTH_STORAGE_KEY, String(Math.round(widthPx)));
+    getBrowserLocalStorage().setItem(WORKSPACE_SIDEBAR_WIDTH_STORAGE_KEY, String(Math.round(widthPx)));
   } catch {
     // ignore
   }
@@ -275,8 +276,8 @@ function consumeWebRemoteControlCollapseIntent(): boolean {
   }
 
   try {
-    if (window.sessionStorage.getItem(WEB_REMOTE_CONTROL_COLLAPSE_ONCE_SESSION_KEY) === "1") {
-      window.sessionStorage.removeItem(WEB_REMOTE_CONTROL_COLLAPSE_ONCE_SESSION_KEY);
+    if (getBrowserSessionStorage().getItem(WEB_REMOTE_CONTROL_COLLAPSE_ONCE_SESSION_KEY) === "1") {
+      getBrowserSessionStorage().removeItem(WEB_REMOTE_CONTROL_COLLAPSE_ONCE_SESSION_KEY);
       return true;
     }
   } catch {
@@ -292,7 +293,7 @@ function markWebRemoteControlCollapseIntent() {
   }
 
   try {
-    window.sessionStorage.setItem(WEB_REMOTE_CONTROL_COLLAPSE_ONCE_SESSION_KEY, "1");
+    getBrowserSessionStorage().setItem(WEB_REMOTE_CONTROL_COLLAPSE_ONCE_SESSION_KEY, "1");
   } catch {
     // ignore
   }

@@ -189,7 +189,7 @@ const mobileStatusScroller =
   '[data-slot="bottom-sheet-content"] > div:has(> [data-status-section])';
 
 async function installFixture(page, origin) {
-  await prepareStatusBrowserPage(page);
+  const browserState = await prepareStatusBrowserPage(page);
   let goal = initialGoal;
   let socket;
   let cursor = 0;
@@ -206,6 +206,7 @@ async function installFixture(page, origin) {
   });
   await page.route(new URL("/api/**", origin).href, (route) => {
     const url = new URL(route.request().url());
+    if (url.pathname === "/api/selfhost/browser-state") return browserState(route);
     const request = route.request().postDataJSON();
     const project = { hostId, remotePath: cwd, name: "状态栏测试项目" };
     const values = {

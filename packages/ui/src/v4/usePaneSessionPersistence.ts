@@ -4,6 +4,7 @@
 // 踢回 draft pane，正在输出的会话"消失"。CLI/host 进程在 renderer 刷新时继续运行，
 // 恢复选择态后 pane 重订阅即可拿到 snapshot+续流。
 // Renderer reload 或 TabStore 标记的启动激活页签可恢复；显式 workspace-only 入口保持草稿。
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 import { useCallback, useEffect, useRef } from "react";
 import { useWorkspaceServicesResolution } from "@/hooks/useWorkspaceServices.js";
 import { logger } from "@/logger.js";
@@ -17,7 +18,7 @@ function storageKey(workspaceKey: string): string {
 
 export function readPersistedPaneSession(workspaceKey: string): string | null {
   try {
-    return localStorage.getItem(storageKey(workspaceKey));
+    return getBrowserLocalStorage().getItem(storageKey(workspaceKey));
   } catch {
     return null;
   }
@@ -26,9 +27,9 @@ export function readPersistedPaneSession(workspaceKey: string): string | null {
 export function persistPaneSession(workspaceKey: string, sessionId: string | null): void {
   try {
     if (sessionId) {
-      localStorage.setItem(storageKey(workspaceKey), sessionId);
+      getBrowserLocalStorage().setItem(storageKey(workspaceKey), sessionId);
     } else {
-      localStorage.removeItem(storageKey(workspaceKey));
+      getBrowserLocalStorage().removeItem(storageKey(workspaceKey));
     }
   } catch {
     // 无 storage 环境（测试/隐身）静默降级：刷新恢复不可用，但不影响正常会话。

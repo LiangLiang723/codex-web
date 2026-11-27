@@ -1,7 +1,21 @@
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { waitForBrowserStateWrite } from "./browser-state.mjs";
 import { verifyMaterialOptions, verifyPaintedBots, verifySavedMaterial } from "./brand-materials.mjs";
+
+export function describeBrandState(page) {
+  return page.locator("[data-codex-pet], [data-codex-pet-anchor]").evaluateAll((nodes) =>
+    nodes.map((node) => ({
+      anchor: node.dataset.codexPetAnchor,
+      placement: node.dataset.petPlacement,
+      display: getComputedStyle(node).display,
+      visibility: getComputedStyle(node).visibility,
+      top: node.getBoundingClientRect().top,
+      height: node.getBoundingClientRect().height,
+    })),
+  );
+}
 
 export async function verifyAnatomyMotion(avatar) {
   const drawing = avatar.locator("svg");
@@ -223,6 +237,9 @@ export async function verifyBrandSettings(page, { activate, showTaskList, origin
   await activate(page.locator('[data-settings-section-nav="appearance"]'));
   const themeSelect = page.locator('[data-settings-search-id="settings.themeMode"]').getByRole("combobox");
   await activate(themeSelect);
+  const themeStored = waitForBrowserStateWrite(page, (key, value) =>
+    key === "zcode-theme" && value === "zai-light",
+  );
   await activate(page.getByRole("option", { name: "浅色", exact: true }));
   await page.waitForFunction(() =>
     document.documentElement.dataset.zcodeBrowserThemeSurface === "light",
@@ -236,7 +253,11 @@ export async function verifyBrandSettings(page, { activate, showTaskList, origin
     assert.match(lightSvg, /viewBox="10 10 44 44"/);
     assert.equal(lightSvg.match(/M[\d.]+ /g)?.length, 3, "The tab icon shows two complete eye cutouts");
   }
+  await themeStored;
   await page.reload({ waitUntil: "commit" });
+  if (mobile && !new URL(page.url()).searchParams.has("thread")) {
+    await activate(page.getByTestId(`task-item-${threadId}`));
+  }
   await editor.waitFor();
   assert.equal(await pet.count(), 0);
   await showTaskList();

@@ -1,5 +1,6 @@
 // import { GripHorizontal, GripVertical } from "lucide-react";
 import { cn } from "@/components/lib/utils.js";
+import { getSafeLocalStorage } from "@/lib/browserEnvironment.js";
 import {
   Group,
   Panel,
@@ -54,6 +55,7 @@ function ResizablePanelGroup({
   const { defaultLayout, onLayoutChange } = useDefaultLayout({
     id: layoutId,
     panelIds,
+    storage: getSafeLocalStorage() ?? undefined,
   });
 
   return (

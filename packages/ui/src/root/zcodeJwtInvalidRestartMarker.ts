@@ -1,3 +1,4 @@
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 const ZCODE_JWT_INVALID_RESTART_MARKER_KEY = "zcode:auth:jwt-invalid-restart";
 
 interface RestartMarkerStorage {
@@ -11,7 +12,7 @@ function resolveStorage(storage?: RestartMarkerStorage): RestartMarkerStorage | 
     return storage;
   }
   try {
-    return globalThis.localStorage;
+    return getBrowserLocalStorage();
   } catch {
     return null;
   }

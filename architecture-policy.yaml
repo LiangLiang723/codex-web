@@ -2104,6 +2104,13 @@ global:
   acceptedUpstreamSnapshot: scripts/architecture/upstream-snapshot.json
 
 exceptions:
+  - id: selfhost-browser-storage-existing-ui-edit
+    rule: unmanaged-new-file
+    paths:
+      - packages/ui/src/lib/sourceServerUpdatePreferences.ts
+      - packages/ui/src/lib/workflowRunAckStore.ts
+      - packages/ui/src/v4/startPlanQuotaReminderStore.ts
+    reason: 三个已入库的 UI 存储调用改用现有浏览器环境入口，自托管由账号状态提供存储。原有键、调用方和业务模块边界保持一致。
   - id: region-copy-suggested-prompts-edit
     rule: unmanaged-new-file
     paths: [packages/ui/src/v4/featureSuggestedPrompts.ts]
