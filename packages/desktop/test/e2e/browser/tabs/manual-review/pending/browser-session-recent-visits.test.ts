@@ -16,7 +16,6 @@ import {
   DEFAULT_WORKSPACE,
   clearAppData,
   clickTestIdByDom,
-  waitForWorkspaceApp,
 } from "#e2e/helpers/desktop-app";
 import { prepareV4ConversationE2E } from "#e2e/helpers/v4-conversation";
 import { sel } from "#e2e/helpers/selectors";

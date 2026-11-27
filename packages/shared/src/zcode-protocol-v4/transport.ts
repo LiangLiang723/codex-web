@@ -910,7 +910,7 @@ export const v4AttachmentBeginParamsSchema = z
       .string()
       .min(1)
       .max(255)
-      .regex(/^[^\0\r\n]+$/),
+      .refine((name) => !name.includes("\0") && !name.includes("\r") && !name.includes("\n")),
     mime: z
       .string()
       .min(3)

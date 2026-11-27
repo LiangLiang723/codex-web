@@ -2346,6 +2346,10 @@ exceptions:
     rule: unmanaged-new-file
     paths: [packages/ui/src/components/workflow-run-line/WorkflowRunRail.tsx]
     reason: Existing upstream workflow rail edited only to adapt native titles within the sidebar tooltip scope; workflow ownership and imports remain unchanged except for the shared UI tooltip adapter.
+  - id: startup-disk-sampler-existing-host-edit
+    rule: unmanaged-new-file
+    paths: [packages/desktop/src/host/startupDiskSampler.ts]
+    reason: 维护既有 Host 启动磁盘诊断，遍历保留采样前的作用域快照。
   - id: onboarding-existing-module-edit
     rule: unmanaged-new-file
     paths:

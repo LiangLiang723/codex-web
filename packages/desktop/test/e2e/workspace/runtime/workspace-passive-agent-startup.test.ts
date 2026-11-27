@@ -5,7 +5,6 @@ import {
   getPassiveAgentStartupWorkspacePaths,
 } from "#e2e/helpers/passive-agent-startup-fixture";
 import {
-  isMainRendererUrl,
   isResourceManagerUrl,
   openResourceManager,
   switchToElectronRendererTarget,

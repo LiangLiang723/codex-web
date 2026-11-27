@@ -20,7 +20,6 @@ import {
   clickTestIdByWebDriver,
   readSettings,
   seedSettings,
-  waitForTestIdByDom,
 } from "#e2e/helpers/desktop-app";
 
 describe("Marketing Touch 领取后的权益与模型连接", () => {
@@ -446,12 +445,6 @@ async function waitForTestIdMissing(testId: string) {
   );
 }
 
-async function readTestIdText(testId: string): Promise<string> {
-  return (await browser.execute(
-    (value) => document.querySelector(`[data-testid="${value}"]`)?.textContent?.trim() ?? "",
-    testId,
-  )) as string;
-}
 
 async function readMockRequests(): Promise<
   Array<{ headers: Record<string, string>; method: string; path: string }>

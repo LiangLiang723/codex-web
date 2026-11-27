@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { HOST_BINDING, lowerWorkflowScript } from "../src/lowering/index.js";
 
-// Lowering 快照 + 语义断言。快照是契约：人类可读的 lowered JS 落在 expected/<base>.js。
+// Lowering 快照 + 语义断言。快照是契约：人类可读的 lowered JS 落在 expected/<base>.js.snap。
 // 语义断言超出快照本身：站点 id 恰好一次、类型全擦除（把输出当 JS 解析证明）、无 facade
 // 脚本降级为纯 JS、确定性（两次降级逐字节相同）。
 const here = dirname(fileURLToPath(import.meta.url));
@@ -64,7 +64,7 @@ describe("lowering snapshots", () => {
     it(base, async () => {
       const source = readFileSync(join(dir, `${base}.ts`), "utf8");
       const { code } = assertLowered(source);
-      await expect(code).toMatchFileSnapshot(join(loweringDir, "expected", `${base}.js`));
+      await expect(code).toMatchFileSnapshot(join(loweringDir, "expected", `${base}.js.snap`));
     });
   }
 });

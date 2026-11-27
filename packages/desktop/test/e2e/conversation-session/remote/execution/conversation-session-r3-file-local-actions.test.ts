@@ -13,8 +13,6 @@ import {
 } from "@zcode/shared/test-ids";
 import {
   clearAppData,
-  clickTestIdByDom,
-  hoverTestIdByWebDriver,
   waitForTestIdByDom,
 } from "#e2e/helpers/desktop-app";
 import {

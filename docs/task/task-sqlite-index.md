@@ -179,6 +179,8 @@ Indexes cover active workspace list queries, pinned list queries, archived list 
 - Every task-index connection uses a bounded SQLite busy timeout. Additive schema migrations are
   idempotent under concurrent Host startup: after lock contention, a duplicate-column result is
   accepted only when the column is present.
+- Startup closes the migration connection and prepared repositories before reporting readiness.
+  If preparation and cleanup both fail, the Host reports the first failure.
 - `meta_json` is parsed with `zcodeTaskMetaSchema`; invalid rows fall back to scalar columns and log a warning.
 - SQLite row columns are authoritative for entity coordinates: reads must overwrite `meta_json` values with
   `task_id` and `workspace_path`. Because `(workspace_key, task_id)` is the actual query/primary-key boundary,

@@ -37,13 +37,13 @@ export async function connectDuringNextSourceUpdate(input: {
   await browser.execute(
     (channel, sourceId, target, logsRequest) => {
       const original = MessagePort.prototype.postMessage;
-      let port: MessagePort | undefined;
+      let releasePort: (() => void) | undefined;
       const probe: UpdateInflightProbe = {
         updatingSeen: false,
         responses: [],
         restore() {
           MessagePort.prototype.postMessage = original;
-          port?.removeEventListener("message", receive);
+          releasePort?.();
           delete window.__updateInflightProbe;
         },
       };
@@ -70,11 +70,11 @@ export async function connectDuringNextSourceUpdate(input: {
         );
       }
       MessagePort.prototype.postMessage = function (message: unknown, options?: unknown) {
-        if (!port && message instanceof Uint8Array) {
+        if (!releasePort && message instanceof Uint8Array) {
           const text = new TextDecoder().decode(message);
           if (text.includes(channel) && text.includes("updateSource")) {
-            port = this;
             this.addEventListener("message", receive);
+            releasePort = () => this.removeEventListener("message", receive);
           }
         }
         Reflect.apply(original, this, options === undefined ? [message] : [message, options]);

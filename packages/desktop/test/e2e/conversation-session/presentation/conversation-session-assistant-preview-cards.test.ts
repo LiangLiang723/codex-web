@@ -62,7 +62,6 @@ const OFFICE_FILES = [
   { fixture: "sample.pptx", name: "产品 路线.pptx" },
   { fixture: "sample.pdf", name: "审计 报告.pdf" },
 ] as const;
-const MEDIA_FILES = ["生成 视频.mp4", "生成 音频.wav"] as const;
 // 与 getFileManagerLabel 按平台取文案一致；E2E 进程与 Electron 同机，process.platform 等价于 UA 判断。
 const FILE_MANAGER_LABEL =
   process.platform === "darwin"

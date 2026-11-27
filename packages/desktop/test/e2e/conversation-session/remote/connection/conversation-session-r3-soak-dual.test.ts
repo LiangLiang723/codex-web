@@ -22,13 +22,11 @@ import {
 } from "#e2e/helpers/ssh-remote-lifecycle";
 import {
   readHostProcesses,
-  readRemoteTabSnapshot,
   runSSHCommand,
 } from "#e2e/helpers/ssh-remote-p0";
 import {
   getV4Messages,
   sendV4PromptAndWaitAccepted,
-  waitForV4AssistantMessageContaining,
   waitForV4ConversationState,
 } from "#e2e/helpers/v4-conversation";
 

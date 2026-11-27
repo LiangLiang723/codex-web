@@ -19,7 +19,6 @@ import {
   type HostSessionCreateTelemetryResponse,
   type HostPluginTelemetryResponse,
   type ProviderProvisioningLaneStatus,
-  type RemoteTarget,
   type TaskRealtimeHostDeliveryKind,
   type WorkspacePurpose,
   CREDENTIAL_KEY_SHARE_UNAVAILABLE_ERROR_CODE,

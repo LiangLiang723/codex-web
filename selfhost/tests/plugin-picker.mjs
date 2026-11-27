@@ -366,7 +366,6 @@ async function verify(page, origin) {
   await dockedPet.waitFor();
   const canvas = pet.locator("[data-codex-bot]");
   const anatomyEnabled = (await page.locator('meta[name="codex-bot-anatomy"]').count()) === 1;
-  const favicon = page.locator('link[rel="icon"]');
   await page.waitForFunction(() => {
     const href = document.querySelector('link[rel="icon"]')?.getAttribute("href");
     return href?.endsWith("codex-bot-dark.svg?v=4");

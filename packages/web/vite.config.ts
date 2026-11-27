@@ -35,106 +35,104 @@ export default defineConfig(({ mode, command }) => {
 
   return {
     plugins: [
-      ...[
-        {
-          name: "selfhost-web-entry",
-          resolveId(id: string) {
-            if (id === "virtual:selfhost-locale-messages") return "\0selfhost-locale-messages.js";
-            if (id === "virtual:zcode-projection-state") return "\0zcode-projection-state.js";
-            if (id === "virtual:gateway-terminal-stream") return "\0gateway-terminal-stream.js";
-            if (id === "virtual:selfhost-workspace-icons") return "\0selfhost-workspace-icons.js";
-          },
-          async load(id: string) {
-            if (id === "\0selfhost-locale-messages.js") return "export const LOCALE_MESSAGES = {};";
-            if (id === "\0selfhost-workspace-icons.js") {
-              const metadata = parseYaml(
-                await readFile(
-                  resolveDependency("@fortawesome/fontawesome-free/metadata/icons.yml"),
-                  "utf8",
-                ),
-              ) as Record<
-                string,
-                {
-                  label: string;
-                  styles: (keyof typeof fontAwesomePrefixes)[];
-                  search: { terms: string[] };
-                }
-              >;
-              // Tabby 也按 Font Awesome 的样式生成类名，浏览器只需要类名与搜索字段。
-              const icons = Object.entries(metadata).flatMap(([name, icon]) =>
-                icon.styles.map((style) => [
-                  `${fontAwesomePrefixes[style]} fa-${name}`,
-                  icon.label,
-                  icon.search.terms.join(" "),
-                ]),
-              );
-              return `export default ${JSON.stringify(icons)};`;
-            }
-            if (id === "\0zcode-projection-state.js") {
-              const path = resolve(
-                REPO_ROOT,
-                "apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/projection-state.ts",
-              );
-              const module = await bundleGatewayProtocol({
-                entryPoints: [path],
-                tsconfigRaw: {},
-                bundle: true,
-                platform: "browser",
-                format: "esm",
-                write: false,
-              });
-              return module.outputFiles[0].text;
-            }
-            if (id !== "\0gateway-terminal-stream.js") return;
-            const dir = resolve(__dirname, "../../upstream/codex-gateway");
-            const built = await bundleGatewayProtocol({
-              stdin: {
-                contents:
-                  'export * from "./shared/runtime/terminal-stream"; export {applyCanonicalEventToHistory} from "./shared/thread-history/canonical-events"; export {timelinePageToTurns} from "./shared/thread-history/app-server-timeline"; export {mergeThreadTurns} from "./shared/thread-history/turns";',
-                resolveDir: dir,
-              },
-              alias: { "~~": dir },
+      {
+        name: "selfhost-web-entry",
+        resolveId(id: string) {
+          if (id === "virtual:selfhost-locale-messages") return "\0selfhost-locale-messages.js";
+          if (id === "virtual:zcode-projection-state") return "\0zcode-projection-state.js";
+          if (id === "virtual:gateway-terminal-stream") return "\0gateway-terminal-stream.js";
+          if (id === "virtual:selfhost-workspace-icons") return "\0selfhost-workspace-icons.js";
+        },
+        async load(id: string) {
+          if (id === "\0selfhost-locale-messages.js") return "export const LOCALE_MESSAGES = {};";
+          if (id === "\0selfhost-workspace-icons.js") {
+            const metadata = parseYaml(
+              await readFile(
+                resolveDependency("@fortawesome/fontawesome-free/metadata/icons.yml"),
+                "utf8",
+              ),
+            ) as Record<
+              string,
+              {
+                label: string;
+                styles: (keyof typeof fontAwesomePrefixes)[];
+                search: { terms: string[] };
+              }
+            >;
+            // Tabby 也按 Font Awesome 的样式生成类名，浏览器只需要类名与搜索字段。
+            const icons = Object.entries(metadata).flatMap(([name, icon]) =>
+              icon.styles.map((style) => [
+                `${fontAwesomePrefixes[style]} fa-${name}`,
+                icon.label,
+                icon.search.terms.join(" "),
+              ]),
+            );
+            return `export default ${JSON.stringify(icons)};`;
+          }
+          if (id === "\0zcode-projection-state.js") {
+            const path = resolve(
+              REPO_ROOT,
+              "apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/projection-state.ts",
+            );
+            const module = await bundleGatewayProtocol({
+              entryPoints: [path],
               tsconfigRaw: {},
+              bundle: true,
               platform: "browser",
               format: "esm",
-              bundle: true,
               write: false,
             });
-            return built.outputFiles[0].text;
-          },
-          transformIndexHtml: {
-            order: "pre" as const,
-            handler: (html: string) => {
-              if (command !== "build") return html;
-              const scripts = Array.from(
-                html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi),
-                (match) =>
-                  "'sha256-" + createHash("sha256").update(match[1]).digest("base64") + "'",
-              );
-              const policy = [
-                "default-src 'self'",
-                "connect-src 'self'",
-                "script-src 'self' 'wasm-unsafe-eval' " + scripts.join(" "),
-                "worker-src 'self' blob:",
-                "style-src 'self' 'unsafe-inline'",
-                "font-src 'self' data:",
-                "img-src 'self' data: blob: https:",
-                "media-src 'self' blob: data:",
-                "frame-src 'self' blob:",
-                "object-src 'none'",
-                "base-uri 'self'",
-                "form-action 'self'",
-              ].join("; ");
-              return html.replace(
-                "<head>",
-                '<head><meta http-equiv="Content-Security-Policy" content="' +
-                  policy +
-                  '"><meta name="referrer" content="same-origin">',
-              );
+            return module.outputFiles[0].text;
+          }
+          if (id !== "\0gateway-terminal-stream.js") return;
+          const dir = resolve(__dirname, "../../upstream/codex-gateway");
+          const built = await bundleGatewayProtocol({
+            stdin: {
+              contents:
+                'export * from "./shared/runtime/terminal-stream"; export {applyCanonicalEventToHistory} from "./shared/thread-history/canonical-events"; export {timelinePageToTurns} from "./shared/thread-history/app-server-timeline"; export {mergeThreadTurns} from "./shared/thread-history/turns";',
+              resolveDir: dir,
             },
+            alias: { "~~": dir },
+            tsconfigRaw: {},
+            platform: "browser",
+            format: "esm",
+            bundle: true,
+            write: false,
+          });
+          return built.outputFiles[0].text;
+        },
+        transformIndexHtml: {
+          order: "pre" as const,
+          handler: (html: string) => {
+            if (command !== "build") return html;
+            const scripts = Array.from(
+              html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi),
+              (match) =>
+                "'sha256-" + createHash("sha256").update(match[1]).digest("base64") + "'",
+            );
+            const policy = [
+              "default-src 'self'",
+              "connect-src 'self'",
+              "script-src 'self' 'wasm-unsafe-eval' " + scripts.join(" "),
+              "worker-src 'self' blob:",
+              "style-src 'self' 'unsafe-inline'",
+              "font-src 'self' data:",
+              "img-src 'self' data: blob: https:",
+              "media-src 'self' blob: data:",
+              "frame-src 'self' blob:",
+              "object-src 'none'",
+              "base-uri 'self'",
+              "form-action 'self'",
+            ].join("; ");
+            return html.replace(
+              "<head>",
+              '<head><meta http-equiv="Content-Security-Policy" content="' +
+                policy +
+                '"><meta name="referrer" content="same-origin">',
+            );
           },
         },
-      ],
+      },
       pdfJsCMapsPlugin(),
       react(),
       tailwindcss(),

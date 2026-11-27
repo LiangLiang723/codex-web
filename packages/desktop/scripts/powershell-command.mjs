@@ -38,7 +38,7 @@ export function createEncodedPowerShellArgs(script, values = []) {
 
 export function escapePowerShellLiteral(value) {
   // PowerShell 将排版单引号也视为定界符，必须与 ASCII 单引号一样双写，防止路径变成代码。
-  if (/[\0\r\n]/u.test(value)) {
+  if (value.includes("\0") || value.includes("\r") || value.includes("\n")) {
     throw new Error("PowerShell path literal cannot contain NUL or newline characters");
   }
   return `'${value.replace(/['\u2018\u2019\u201A\u201B]/g, "$&$&")}'`;

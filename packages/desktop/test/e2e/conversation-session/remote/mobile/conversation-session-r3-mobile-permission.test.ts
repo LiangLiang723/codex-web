@@ -23,7 +23,6 @@ import {
 } from "#e2e/helpers/ssh-remote-lifecycle";
 import {
   readHostProcesses,
-  readRemoteTabSnapshot,
   runSSHCommand,
 } from "#e2e/helpers/ssh-remote-p0";
 import {
@@ -142,9 +141,6 @@ async function closeRemoteControlDialog(): Promise<void> {
     .catch(() => undefined);
 }
 
-async function mobileText(page: PwPage): Promise<string> {
-  return (await page.evaluate(() => document.body?.innerText ?? "")) as string;
-}
 
 const REMOTE_PERMISSION_DIR = "/home/dev/r3-workspace-a/.zcode-e2e/r3-mobile-permission";
 const REMOTE_PERMISSION_FILE = `${REMOTE_PERMISSION_DIR}/permission-output.txt`;
