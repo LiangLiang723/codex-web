@@ -164,6 +164,37 @@ async function verifyMaterialMotion(page) {
             throw new Error(`${mode} produced an empty material at ${width}px`);
           }
         }
+        const targetWidth = 112;
+        let layoutWidth = 0;
+        const observer = new ResizeObserver(([entry]) => {
+          layoutWidth = entry.contentRect.width;
+        });
+        observer.observe(player.el);
+        // 锁定锚点切换的起始缩放，先提交布局尺寸，再结束过渡。
+        const flight = host.animate(
+          [{ transform: "scale(0.25)" }, { transform: "none" }],
+          { duration: 600 },
+        );
+        try {
+          flight.pause();
+          flight.currentTime = 0;
+          player.el.style.width = `${targetWidth}px`;
+          player.el.style.height = `${targetWidth}px`;
+          await readyFor(() => layoutWidth === targetWidth);
+          flight.finish();
+          await flight.finished;
+          player.step();
+          const pixels = Math.ceil(targetWidth * Math.min(devicePixelRatio, 2.5));
+          if (canvas() !== active || active.width !== pixels || active.height !== pixels) {
+            throw new Error(
+              `${mode} painted ${active.width}×${active.height}px after zooming to ${targetWidth}px. ` +
+                `Expected ${pixels}×${pixels}px on the same canvas.`,
+            );
+          }
+        } finally {
+          flight.cancel();
+          observer.disconnect();
+        }
         for (const state of ["thinking", "progress", "radar"]) {
           player.setState(state);
           for (const step of [4, 4, 12]) {

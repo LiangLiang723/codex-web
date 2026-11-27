@@ -21,8 +21,7 @@ export function createBotMaterialLayer(svg, parent, refresh) {
   let canvas;
   let ctx;
   let size;
-  let visibleWidth = 0;
-  let observed;
+  let layoutWidth = 0;
   let observer;
 
   function hide() {
@@ -35,21 +34,22 @@ export function createBotMaterialLayer(svg, parent, refresh) {
 
   function draw(model, skin, eyePaths) {
     if (!skin) return hide();
-    if (!observed) {
-      observed = svg.closest("[data-codex-bot]") ?? svg;
-      visibleWidth = observed.getBoundingClientRect().width;
-      observer = new win.ResizeObserver(() => {
-        const width = observed.getBoundingClientRect().width;
-        if (width === visibleWidth) return;
-        visibleWidth = width;
+    if (!observer) {
+      const viewport = svg.closest("[data-codex-bot]") ?? svg;
+      // 锚点过渡会缩放外接矩形。缓存动画中的宽度会让画布在放大后一直沿用低分辨率。
+      layoutWidth = viewport.clientWidth;
+      observer = new win.ResizeObserver(([entry]) => {
+        const width = entry.contentRect.width;
+        if (width === layoutWidth) return;
+        layoutWidth = width;
         refresh();
       });
-      observer.observe(observed);
+      observer.observe(viewport);
     }
-    if (visibleWidth === 0 || doc.hidden) return hide();
+    if (layoutWidth === 0 || doc.hidden) return hide();
 
     const area = materialArea(model);
-    const pixels = Math.ceil(Math.min(320, visibleWidth * Math.min(win.devicePixelRatio, 2.5)));
+    const pixels = Math.ceil(Math.min(320, layoutWidth * Math.min(win.devicePixelRatio, 2.5)));
     const scale = pixels / model.size;
     const hasBody = area && Math.min(area.width, area.height) * scale >= 0.5;
     let frame;
@@ -101,7 +101,7 @@ export function createBotMaterialLayer(svg, parent, refresh) {
 
   return {
     draw,
-    fps: () => canvas?.dataset.botLiveMaterial ? Math.min(30, 8 + visibleWidth / 5) : undefined,
+    fps: () => canvas?.dataset.botLiveMaterial ? Math.min(30, 8 + layoutWidth / 5) : undefined,
     dispose: () => observer?.disconnect(),
   };
 }

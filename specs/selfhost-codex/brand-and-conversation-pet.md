@@ -27,6 +27,7 @@ HTML 启动壳从保存的偏好读取颜色和材质，立即以纯色播放轻
 - 绒毛和玻璃只在选用时加载对应的 WebGL2 材质模块。身体和眼睛由 [Open Bot Avatar 0.5.2](https://github.com/DominikScholz/open-bot-avatar/tree/e10afe49d46da8ffcc6545f5d6e8ba1de4ea8c5d) 的体积、眼珠与镜面着色器一起绘制。使用 Anatomy 当帧的可见眼形作为眼窝边界，保留原版眼珠高光和眨眼。Anatomy 的头部朝向同时驱动毛流、眼珠反光和玻璃光照，身体和眼睛的位置沿用 Anatomy 的投影。绒毛毛尖可以超出身体轮廓。
 - 绒毛根据绘制密度选择表面网格、毛层和采样次数。小尺寸网格复用完整网格的毛根位置。玻璃按造型缓存体积纹理，首次生成纹理时共用切片内的插值坐标。材质模块拥有网格和纹理缓存，Anatomy 提供当前帧与播放时钟。
 - 身体缩放或发生原生形变时，以同一选定材质连续绘制。进度环、笔迹等独立装饰按 Anatomy 的路径和图层使用对应的材质纹理。大小 Bot 共用选中材质的 WebGL2 上下文，根据画面大小调整绘制频率和采样分辨率。当前可见的播放器推进绘制，减少动态效果时绘制当前静帧。快速切换时以最新偏好为准，加载期间及 WebGL2 不可用时仍能绘制当帧轮廓和眼睛。
+- 材质画布按桌宠的布局宽度和屏幕像素比绘制。锚点切换中的缩放动画只作用于显示，布局放大时同一个材质画布按新尺寸重绘。
 - 参考仓库说明提取资料用于学习研究。本机预览通过 `node selfhost/prepare-bot-anatomy.mjs <已检出的参考仓库> <已构建的 Web 目录>` 装入固定版本。自托管构建可通过 `CODEX_WEB_BOT_ANATOMY=1` 选择在 Docker 构建阶段取同一固定版本。服务器无法访问 GitHub 时，构建上下文可提供 `selfhost/.anatomy-reference.tgz`，内含同一已检出的目录内容及其 `.git`。打包脚本校验固定提交及未修改的参考素材。参考素材保留在构建产物中。默认构建继续使用仓库的品牌 SVG。动画模块使用站点自己的静态资源路径。
 
 ## 状态所有者与顺序
@@ -51,6 +52,7 @@ flowchart LR
   Player --> Geometry[当前轮廓、可见眼形、朝向和图层]
   Geometry --> Paint[绘制原版体积材质与装饰纹理]
   Material --> Paint
+  Layout[桌宠布局宽度和屏幕像素比] --> Paint
   Activity --> Summary[工作与思考行]
   Preference --> Mood[当前页面的性格与短时心情]
   Gesture --> Mood
@@ -99,5 +101,6 @@ flowchart LR
 | SH-BOT-ALL-ACTIONS | 开启全部自主动作，在持续工作中推进实际桌宠的自主反应计时，然后等待桌宠小睡 | 53 个原生状态在当轮各播放一次，新会话活动可中断自主播放。工作行持续显示当前活动，桌宠醒来后继续自主播放。 |
 | SH-BOT-MATERIAL | 在桌面和手机设置依次选绒毛、玻璃、自选颜色，再刷新并恢复默认 | 纯色启动无需材质资源。选中材质才加载对应 WebGL2 模块。桌宠、所有设置示例、工作行、思考行、启动、品牌图标与标签图标共享当前外观。两种材质保留 Anatomy 眼睛路径，眼内像素分别显示绒毛眼窝与玻璃反光。切换时同一个播放器继续原动作，禁用 WebGL2 时按当前颜色显示纯色。 |
 | SH-BOT-MATERIAL-MOTION | 逐帧放大对比原版的毛尖、玻璃和眼珠，查看两种材质的转头、眨眼、形变，并在 20、79、81 和 144 像素宽度之间缩放 | 当帧眼形在着色器内完成绘制，眼缘连续，光照跟随朝向。缩放至工作行图标尺寸时仍画出有效材质像素，缩放和形变沿用同一材质画布。53 个状态仍使用原版播放数据。关闭材质、隐藏页面与减少动态效果符合现有播放规则。 |
+| SH-BOT-MATERIAL-RESIZE | 选用玻璃或绒毛，从较小尺寸过渡到较大尺寸 | 同一材质画布按目标布局宽度绘制，缩放结束时图像清晰，无需刷新。 |
 
 动作选择与触发条件参考 [VS Code Pets](https://github.com/tonybaloney/vscode-pets) 的候选状态、[oneko.js](https://github.com/adryd325/oneko.js) 的随机闲逛与休息，以及 [BongoCat](https://github.com/ayangweb/BongoCat) 的交互反馈。会话状态继续采用 [OpenMausBot](https://github.com/milind-soni/OpenMausBot#how-it-works) 的事件驱动思路。具体图形与片段沿用 Anatomy。
