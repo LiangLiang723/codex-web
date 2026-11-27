@@ -73,7 +73,7 @@ export function useBotBoundGroups(bot: BotConfig) {
     });
     return () => {
       alive.current = false;
-      ++revision.current;
+      revision.current += 1;
       subscription.dispose();
     };
   }, [broadcastService, reload]);

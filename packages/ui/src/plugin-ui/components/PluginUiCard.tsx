@@ -33,17 +33,18 @@ export function PluginUiCard(props: PluginUiCardProps) {
       return bindPluginUiPage(props.pageKey, node, props.fill === true);
   }, [props.pageKey, props.fill, props.visible]);
 
+  const { onWidthChange } = props;
   useLayoutEffect(() => {
     const node = containerRef.current;
-    if (!node || !props.onWidthChange || typeof ResizeObserver === "undefined") return;
+    if (!node || !onWidthChange || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width;
-      if (typeof width === "number") props.onWidthChange?.(width);
+      if (typeof width === "number") onWidthChange(width);
     });
     observer.observe(node);
-    props.onWidthChange(node.clientWidth);
+    onWidthChange(node.clientWidth);
     return () => observer.disconnect();
-  }, [props.onWidthChange]);
+  }, [onWidthChange]);
 
   const showError = props.phase === "error";
   return (

@@ -901,57 +901,61 @@ export function AnimatedSidePanePanel({
       </div>
     </div>
   );
+  const sidePaneOverviewLabels = useMemo(
+    () => ({
+      title: intl.formatMessage({ id: "sidePane.tabOverview" }),
+      searchPlaceholder: intl.formatMessage({
+        id: "sidePane.searchTabs",
+      }),
+      openTabs: intl.formatMessage({ id: "sidePane.openTabs" }),
+      recentlyClosedTabs: intl.formatMessage({
+        id: "sidePane.recentlyClosedTabs",
+      }),
+      noResults: intl.formatMessage({ id: "sidePane.noTabsFound" }),
+      closeTab: (title: string) => intl.formatMessage({ id: "sidePane.closeTab" }, { title }),
+      relativeTime: (timestamp: number) => formatTaskRelativeTime(timestamp, intl),
+      browserTitle: intl.formatMessage({ id: "browser.title" }),
+      reviewTitle: intl.formatMessage({ id: "sidePane.review" }),
+      fileManagerTitle: intl.formatMessage({ id: "fileManager.title" }),
+      codeViewerTitle: intl.formatMessage({ id: "codeViewer.title" }),
+      treemappingTitle: intl.formatMessage({ id: "treemapping.title" }),
+      whiteboardTitle: intl.formatMessage({ id: "whiteboard.title" }),
+      modelTrajectoryTitle: intl.formatMessage({
+        id: "modelTrajectory.title",
+      }),
+      newTabTitle: intl.formatMessage({ id: "sidePane.newTab" }),
+      pluginMarketTitle: intl.formatMessage({ id: "workspace.openPluginsSettings" }),
+      developerToolsTitle: intl.formatMessage({
+        id: "developerTools.title",
+      }),
+      extensionLogsTitle: intl.formatMessage({ id: "extensions.logs.title" }),
+      browserPermissionsTitle: intl.formatMessage({
+        id: "browser.permission.settings",
+      }),
+      terminalTitle: intl.formatMessage({ id: "terminal.title" }),
+      subagentTypeLabel: intl.formatMessage({ id: "sidePane.subagent" }),
+      subagentDirectoryTitle: intl.formatMessage({
+        id: "sidePane.subagentDirectory",
+      }),
+      selectionChatTitle: intl.formatMessage({
+        id: "sidePane.selectionChat",
+      }),
+      planTitle: intl.formatMessage({ id: "planTool.panel.planTab" }),
+      workflowRunTitle: intl.formatMessage({ id: "sidePane.workflowRun" }),
+      workflowDirectoryTitle: intl.formatMessage({ id: "sidePane.workflowDirectory" }),
+      workflowActorTitle: intl.formatMessage({ id: "sidePane.workflowActor" }),
+      workflowScriptTitle: intl.formatMessage({ id: "sidePane.workflowScript" }),
+      workflowArtifactTitle: intl.formatMessage({ id: "sidePane.workflowArtifact" }),
+      locale,
+    }),
+    [intl, locale],
+  );
   const sidePaneTabOverview = (
     <SidePaneTabOverview
       tabs={visibleTabs}
       activeTabId={visibleActiveTabId}
       recentClosedTabs={recentClosedSidePaneTabs}
-      labels={{
-        title: intl.formatMessage({ id: "sidePane.tabOverview" }),
-        searchPlaceholder: intl.formatMessage({
-          id: "sidePane.searchTabs",
-        }),
-        openTabs: intl.formatMessage({ id: "sidePane.openTabs" }),
-        recentlyClosedTabs: intl.formatMessage({
-          id: "sidePane.recentlyClosedTabs",
-        }),
-        noResults: intl.formatMessage({ id: "sidePane.noTabsFound" }),
-        closeTab: (title) => intl.formatMessage({ id: "sidePane.closeTab" }, { title }),
-        relativeTime: (timestamp) => formatTaskRelativeTime(timestamp, intl),
-        browserTitle: intl.formatMessage({ id: "browser.title" }),
-        reviewTitle: intl.formatMessage({ id: "sidePane.review" }),
-        fileManagerTitle: intl.formatMessage({ id: "fileManager.title" }),
-        codeViewerTitle: intl.formatMessage({ id: "codeViewer.title" }),
-        treemappingTitle: intl.formatMessage({ id: "treemapping.title" }),
-        whiteboardTitle: intl.formatMessage({ id: "whiteboard.title" }),
-        modelTrajectoryTitle: intl.formatMessage({
-          id: "modelTrajectory.title",
-        }),
-        newTabTitle: intl.formatMessage({ id: "sidePane.newTab" }),
-        pluginMarketTitle: intl.formatMessage({ id: "workspace.openPluginsSettings" }),
-        developerToolsTitle: intl.formatMessage({
-          id: "developerTools.title",
-        }),
-        extensionLogsTitle: intl.formatMessage({ id: "extensions.logs.title" }),
-        browserPermissionsTitle: intl.formatMessage({
-          id: "browser.permission.settings",
-        }),
-        terminalTitle: intl.formatMessage({ id: "terminal.title" }),
-        subagentTypeLabel: intl.formatMessage({ id: "sidePane.subagent" }),
-        subagentDirectoryTitle: intl.formatMessage({
-          id: "sidePane.subagentDirectory",
-        }),
-        selectionChatTitle: intl.formatMessage({
-          id: "sidePane.selectionChat",
-        }),
-        planTitle: intl.formatMessage({ id: "planTool.panel.planTab" }),
-        workflowRunTitle: intl.formatMessage({ id: "sidePane.workflowRun" }),
-        workflowDirectoryTitle: intl.formatMessage({ id: "sidePane.workflowDirectory" }),
-        workflowActorTitle: intl.formatMessage({ id: "sidePane.workflowActor" }),
-        workflowScriptTitle: intl.formatMessage({ id: "sidePane.workflowScript" }),
-        workflowArtifactTitle: intl.formatMessage({ id: "sidePane.workflowArtifact" }),
-        locale,
-      }}
+      labels={sidePaneOverviewLabels}
       onActivateTab={activateSidePaneTab}
       onCloseTab={onCloseTab}
       onReopenClosedTab={onReopenClosedTab}

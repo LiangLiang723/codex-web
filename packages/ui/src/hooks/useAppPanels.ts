@@ -374,7 +374,7 @@ export function useAppPanels(options: {
       sidePaneOwnerIdRef.current,
       false,
     );
-  }, []);
+  }, [setIsSidePaneCollapsed]);
 
   const commitSidePaneState = useCallback(
     (updater: (current: WorkspaceSidePaneState | null) => WorkspaceSidePaneState | null) => {
@@ -401,7 +401,7 @@ export function useAppPanels(options: {
       setSidePaneState(next);
       return next;
     },
-    [currentSidePaneScope],
+    [currentSidePaneScope, setIsSidePaneCollapsed],
   );
 
   const commitOpenedSidePaneState = useCallback(
@@ -469,7 +469,7 @@ export function useAppPanels(options: {
       restored.isSidePaneCollapsed;
     setIsSidePaneCollapsed(collapsed);
     commitSidePaneState(() => (moved ? moved.next : restored.sidePaneState));
-  }, [commitSidePaneState, sidePaneMemoryKey]);
+  }, [commitSidePaneState, sidePaneMemoryKey, setIsSidePaneCollapsed]);
 
   const markSidePaneDraftPromotion = useCallback((sessionId: string) => {
     pendingDraftPromotionRef.current = sessionId;
@@ -600,6 +600,7 @@ export function useAppPanels(options: {
     sidePaneOwnerId,
     pluginUiTarget.sessionId,
     pluginUiWorkspaceKey,
+    setIsSidePaneCollapsed,
   ]);
 
   const pendingFileManagerTarget = useOptionalTabStore((state) => state.pendingFileManagerTarget);
@@ -935,7 +936,6 @@ export function useAppPanels(options: {
       commitOpenedSidePaneState,
       revealSidePaneForCurrentOwner,
       supportsEmbeddedBrowser,
-      workspaceAbsPath,
       workspaceRemoteSessionId,
     ],
   );
@@ -1138,6 +1138,7 @@ export function useAppPanels(options: {
     platform,
     revealSidePaneForCurrentOwner,
     workspaceRemoteSessionId,
+    setIsSidePaneCollapsed,
   ]);
 
   useEffect(() => {
@@ -1478,7 +1479,7 @@ export function useAppPanels(options: {
         workspaceKey,
       });
     },
-    [commitOpenedSidePaneState],
+    [commitOpenedSidePaneState, setIsSidePaneCollapsed],
   );
 
   const handleOpenWorkflowRunDirectory = useCallback(
@@ -1496,7 +1497,7 @@ export function useAppPanels(options: {
         workspaceKey,
       });
     },
-    [commitOpenedSidePaneState],
+    [commitOpenedSidePaneState, setIsSidePaneCollapsed],
   );
 
   const handleOpenWorkflowActorSession = useCallback(
@@ -1516,7 +1517,7 @@ export function useAppPanels(options: {
         workspaceKey,
       });
     },
-    [commitOpenedSidePaneState],
+    [commitOpenedSidePaneState, setIsSidePaneCollapsed],
   );
 
   const handleOpenWorkflowWorkspace = useCallback(
@@ -1536,7 +1537,7 @@ export function useAppPanels(options: {
         workspaceKey,
       });
     },
-    [commitOpenedSidePaneState],
+    [commitOpenedSidePaneState, setIsSidePaneCollapsed],
   );
 
   /**
@@ -1578,7 +1579,7 @@ export function useAppPanels(options: {
       );
       return targetTabId;
     },
-    [commitOpenedSidePaneState],
+    [commitOpenedSidePaneState, setIsSidePaneCollapsed],
   );
 
   /**
@@ -1679,6 +1680,7 @@ export function useAppPanels(options: {
       openFileUrlInBrowserSidePane,
       supportsEmbeddedBrowser,
       zcodeAgentService,
+      setIsSidePaneCollapsed,
     ],
   );
 
@@ -1846,7 +1848,7 @@ export function useAppPanels(options: {
       const next = closeCodeViewerSidePane(current);
       return next;
     });
-  }, [commitSidePaneState, currentSidePaneScope, setIsSidePaneCollapsed, workspaceAbsPath]);
+  }, [commitSidePaneState, workspaceAbsPath]);
 
   const handleCloseGit = useCallback(() => {
     logger.info(`[App] 关闭右侧面板 mode=git workspace=${workspaceAbsPath}`);
@@ -1854,7 +1856,7 @@ export function useAppPanels(options: {
       const next = closeGitSidePane(current);
       return next;
     });
-  }, [commitSidePaneState, currentSidePaneScope, setIsSidePaneCollapsed, workspaceAbsPath]);
+  }, [commitSidePaneState, workspaceAbsPath]);
 
   const handleActivateSidePaneTab = useCallback(
     (tabId: string) => {

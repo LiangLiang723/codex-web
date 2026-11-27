@@ -101,10 +101,8 @@ export function useRemoteConnectionForm({
     [isLocalDevelopmentRuntime, isWindowsDesktop],
   );
 
-  const resetAssetInstallModeForNewFlow = useEffectEvent(() => {
-    // 打开不一定代表新建：收起恢复必须保留当前线路的下载选择。
-    if (!preserveDraftOnOpen) setAssetInstallMode(DEFAULT_REMOTE_ASSET_INSTALL_MODE);
-  });
+  // 打开不一定代表新建。只在打开既有流程时决定是否保留字段，避免归属变化重置活动表单。
+  const shouldPreserveDraft = useEffectEvent(() => preserveDraftOnOpen);
 
   useEffect(() => {
     if (availableKinds.includes(kind)) {
@@ -124,11 +122,12 @@ export function useRemoteConnectionForm({
 
     // 产品决策：资源下载方式只属于当前 SSH 线路，不再形成全局或“上次选择”偏好。
     // 弹窗常驻挂载，只有新流程恢复默认值；收起后的同一线路继续使用当前选择。
-    resetAssetInstallModeForNewFlow();
+    const preserve = shouldPreserveDraft();
+    if (!preserve) setAssetInstallMode(DEFAULT_REMOTE_ASSET_INSTALL_MODE);
     setSshConfigAliasesLoading(false);
     setSshConfigAliasesLoaded(false);
     setSshConfigAliasesError("");
-    if (!preserveDraftOnOpen) setSelectedSshConfigAlias(null);
+    if (!preserve) setSelectedSshConfigAlias(null);
     setWslOptionsLoaded(false);
     setWslOptionsLoading(false);
     setWslOptionsError("");
@@ -138,10 +137,10 @@ export function useRemoteConnectionForm({
     setDockerOptionsLoading(false);
     setDockerOptionsError("");
     setDockerContainers([]);
-    if (!preserveDraftOnOpen && preferredKind && availableKinds.includes(preferredKind)) {
+    if (!preserve && preferredKind && availableKinds.includes(preferredKind)) {
       setKind(preferredKind);
     }
-    if (!preserveDraftOnOpen && preferredWslDistro !== undefined) {
+    if (!preserve && preferredWslDistro !== undefined) {
       setWslDistro(preferredWslDistro);
     }
   }, [availableKinds, open, preferredKind, preferredWslDistro]);

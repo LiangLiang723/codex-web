@@ -76,23 +76,24 @@ export function useGitAutoRefresh({
       cancelled = true;
     };
   }, [canWatchCurrentWorkspace, gitSummary.isGitAvailable, gitSummary.isRepository, systemService]);
+  const { isGitAvailable, isRepository, repoRoot, workspacePath: summaryPath, autoRefreshWatchPaths } = gitSummary;
   const watchPathSignature = useMemo(
     () =>
       stringifyGitAutoRefreshWatchPaths(
         canWatchCurrentWorkspace
           ? buildGitAutoRefreshWatchPaths(
-              gitSummary,
+              { isGitAvailable, isRepository, repoRoot, workspacePath: summaryPath, autoRefreshWatchPaths },
               workspacePlatform ? { platform: workspacePlatform } : null,
             )
           : [],
       ),
     [
       canWatchCurrentWorkspace,
-      gitSummary.isGitAvailable,
-      gitSummary.isRepository,
-      gitSummary.repoRoot,
-      gitSummary.workspacePath,
-      gitSummary.autoRefreshWatchPaths,
+      isGitAvailable,
+      isRepository,
+      repoRoot,
+      summaryPath,
+      autoRefreshWatchPaths,
       workspacePlatform,
     ],
   );

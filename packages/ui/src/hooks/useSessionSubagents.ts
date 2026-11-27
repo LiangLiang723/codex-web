@@ -144,7 +144,6 @@ export function useSessionSubagents(options: {
     }
   }, [
     enabled,
-    options.remoteSessionId,
     options.sessionId,
     options.workspaceIdentity,
     options.workspacePath,

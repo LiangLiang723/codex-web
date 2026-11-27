@@ -174,6 +174,8 @@ type WebRemoteNavigationDragSession = {
 };
 
 type WorkspaceSidebarResizeSession = {
+  shellElement: HTMLElement;
+  panelElement: HTMLElement | null;
   containerWidthPx: number;
   pointerId: number;
   startWidthPx: number;
@@ -1059,7 +1061,10 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
       }
 
       const containerWidthPx = shellElement.getBoundingClientRect().width;
+      const panelElement = workspaceSidebarPanelElementRef.current;
       workspaceSidebarResizeSessionRef.current = {
+        shellElement,
+        panelElement,
         containerWidthPx,
         pointerId: event.pointerId,
         startWidthPx: workspaceSidebarPanelWidthPxRef.current,
@@ -1067,7 +1072,7 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
       };
       setWorkspaceSidebarResizeActive({
         active: true,
-        panelElement: workspaceSidebarPanelElementRef.current,
+        panelElement,
         shellElement,
       });
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -1104,8 +1109,8 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
       workspaceSidebarResizeSessionRef.current = null;
       setWorkspaceSidebarResizeActive({
         active: false,
-        panelElement: workspaceSidebarPanelElementRef.current,
-        shellElement: workspaceShellRef.current,
+        panelElement: resizeSession.panelElement,
+        shellElement: resizeSession.shellElement,
       });
       setWorkspaceSidebarPanelWidthPx((currentWidthPx) => {
         const finalWidthPx = workspaceSidebarPanelWidthPxRef.current;
@@ -1158,10 +1163,14 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
 
   useEffect(() => {
     return () => {
+      // 拖动期间 DOM 可能被替换。清理标记和发出结束事件时使用本次拖动绑定的节点。
+      const resizeSession = workspaceSidebarResizeSessionRef.current;
+      if (!resizeSession) return;
+      workspaceSidebarResizeSessionRef.current = null;
       setWorkspaceSidebarResizeActive({
         active: false,
-        panelElement: workspaceSidebarPanelElementRef.current,
-        shellElement: workspaceShellRef.current,
+        panelElement: resizeSession.panelElement,
+        shellElement: resizeSession.shellElement,
       });
     };
   }, []);
@@ -1363,11 +1372,12 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
     return activeWorkspaceKey === requestWorkspaceKey ? searchResultHighlightRequest : null;
   }, [activeTaskId, searchResultHighlightRequest, workspaceAbsPath, workspaceIdentity]);
   const renderChatFindDialog = () => <TaskFindDialog {...taskFindDialogProps} placement="chat" />;
+  const { staged, unstaged } = gitState.datasets;
   const gitDirtyFileCount = useMemo(() => {
     // 关键业务逻辑：同一个文件可能同时出现在 staged / unstaged。
     // 这里按 path 去重后再统计，避免入口里“未提交更改文件数”被重复计算。
-    return getGitDirtyFileCount(gitState.datasets);
-  }, [gitState.datasets.staged, gitState.datasets.unstaged]);
+    return getGitDirtyFileCount({ staged, unstaged });
+  }, [staged, unstaged]);
   // Bug 原因：此前本地 workspace 没有 identity 时只按路径取第一个 tab；同路径远程 tab 在前时，
   // 本地任务的 Header 会显示远程设备与连接状态。与 TabStore 共用匹配规则，未传 identity 只命中本地 tab。
   const currentWorkspaceTab = useMemo(
@@ -1769,11 +1779,6 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
     },
     [handleStartDraftInWorkspace, showChatMainView],
   );
-  const handleCreateProjectDraft = useCallback(
-    (path: string, identity?: string) =>
-      handleStartDraftInWorkspaceInChat(path, identity, undefined, "project"),
-    [handleStartDraftInWorkspaceInChat],
-  );
   const activeWorkspacePurpose = currentWorkspaceTab?.workspacePurpose ?? "project";
   const handleSelectConversationWorkspace = useCallback(async () => {
     if (!onResolveConversationWorkspace) {
@@ -2002,6 +2007,7 @@ const WorkspaceShellLayoutContent = memo(function WorkspaceShellLayoutComponent(
       activeWorkspacePurpose,
       gitDirtyFileCount,
       gitState.summary,
+      intl,
       handleRefreshGit,
       handleSelectConversationWorkspace,
       handleCreateTaskInChat,

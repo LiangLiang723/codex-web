@@ -25,19 +25,21 @@ function useDirectoryState(isDesktop: boolean) {
   // 手机有项目目录不代表拥有 Source 管理权限；名称注册表仅在桌面订阅，手机沿用 Host 目录标签。
   const deviceNames = useSourceServerDisplayNames(isDesktop);
   const groups = useTaskGroups(result.factTree);
+  const projectFacts = result.factTree.projects;
   const sortedProjects = useMemo(
-    () => selectSortedProjects(result.factTree),
-    [result.factTree.projects],
+    () => selectSortedProjects({ projects: projectFacts }),
+    [projectFacts],
   );
   const preferences = useProjectSidebarPreferences(
     sortedProjects,
     result.loading,
     result.availability,
   );
+  const sortProjects = preferences.sort;
   const projects = useMemo(() => {
-    const sorted = preferences.sort(sortedProjects);
+    const sorted = sortProjects(sortedProjects);
     return [...sorted.filter((p) => p.pinned), ...sorted.filter((p) => !p.pinned)];
-  }, [sortedProjects, preferences.order]);
+  }, [sortedProjects, sortProjects]);
   // 首次读取完成前 projects 只是空目录，上报会让手机短暂退回 position 顺序。
   useProjectDisplayOrderSync(projects, isDesktop && !result.loading);
   // Context 不受消费方 memo 保护；父级更新 children 时，等价目录不能再次广播。

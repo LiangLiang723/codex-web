@@ -55,8 +55,14 @@ export function resolveWorkspaceOpenInEditorTarget(
 export function useWorkspaceOpenInEditorTarget(scope: WorkspaceOpenInEditorScope) {
   const tabs = useOptionalTabStore((state) => state.tabs);
 
+  const { workspacePath, workspaceIdentity, workspaceRemoteSessionId } = scope;
   return useMemo(
-    () => resolveWorkspaceOpenInEditorTarget(tabs, scope),
-    [scope.workspaceIdentity, scope.workspacePath, scope.workspaceRemoteSessionId, tabs],
+    () =>
+      resolveWorkspaceOpenInEditorTarget(tabs, {
+        workspacePath,
+        workspaceIdentity,
+        workspaceRemoteSessionId,
+      }),
+    [tabs, workspaceIdentity, workspacePath, workspaceRemoteSessionId],
   );
 }

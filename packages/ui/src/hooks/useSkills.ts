@@ -71,13 +71,15 @@ export function useSkills(options: UseSkillsOptions): ConversationSkillCatalogSt
 
   // 用 scope 身份隔离渲染：key 切换后的 effect 尚未执行时也只返回空态，避免旧 Session
   // 或旧 remote attachment 的 Skill 在一帧内泄漏到新 Composer。
+  const enabled = options.enabled;
   const requestScope = useMemo(
-    () => ({}),
-    [options.enabled, remoteSessionId, requestKey, rpcReady, services],
+    () => ({ enabled, remoteSessionId, requestKey, rpcReady, services }),
+    [enabled, remoteSessionId, requestKey, rpcReady, services],
   );
 
   useEffect(() => {
-    if (!options.enabled || !options.workspacePath || !rpcReady) return;
+    const { enabled, remoteSessionId, requestKey, rpcReady, services } = requestScope;
+    if (!enabled || !options.workspacePath || !rpcReady) return;
     const seq = ++requestSeqRef.current;
     let cancelled = false;
     setScopedState({
@@ -119,17 +121,7 @@ export function useSkills(options: UseSkillsOptions): ConversationSkillCatalogSt
     return () => {
       cancelled = true;
     };
-  }, [
-    options.enabled,
-    options.sessionId,
-    options.workspaceIdentity,
-    options.workspacePath,
-    remoteSessionId,
-    requestKey,
-    requestScope,
-    rpcReady,
-    services,
-  ]);
+  }, [options.sessionId, options.workspaceIdentity, options.workspacePath, requestScope]);
 
   if (!options.enabled || !options.workspacePath || !rpcReady || scopedState.scope !== requestScope) {
     return EMPTY_STATE;

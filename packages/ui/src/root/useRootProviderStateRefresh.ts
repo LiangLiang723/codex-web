@@ -7,7 +7,7 @@ type RootProviderStateServices = Pick<
   "providerSettingsService"
 >;
 
-export async function refreshRootProviderState(
+async function refreshRootProviderState(
   services: RootProviderStateServices,
 ): Promise<void> {
   try {
@@ -21,8 +21,9 @@ export async function refreshRootProviderState(
 }
 
 export function useRootProviderStateRefresh(services: IServiceAccessor) {
+  const { providerSettingsService } = services;
   return useCallback(
-    () => refreshRootProviderState(services),
-    [services.providerSettingsService],
+    () => refreshRootProviderState({ providerSettingsService }),
+    [providerSettingsService],
   );
 }

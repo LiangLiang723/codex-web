@@ -51,7 +51,7 @@ export function useBrowserSitePermissions(origin: string, enabled: boolean) {
     if (!enabled) return;
     void refresh();
     return () => {
-      generation.current++;
+      generation.current += 1;
     };
   }, [enabled, origin, platform, refresh]);
 

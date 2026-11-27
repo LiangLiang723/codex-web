@@ -11,11 +11,10 @@ const feeds = new Map<ConversationProjectionStore, { count: number; off: () => v
 
 export function attachPluginUiResourceDeltaFeed(
   store: ConversationProjectionStore,
-  scope: PluginUiSessionScope,
+  sessionKey: string,
 ): () => void {
   let entry = feeds.get(store);
   if (!entry) {
-    const sessionKey = buildPluginUiSessionKey(scope);
     const off = store.onLiveDeltas((deltas) => {
       for (const delta of deltas) {
         if (
@@ -48,8 +47,8 @@ export function usePluginUiResourceDeltaFeed(
 ): void {
   const sessionKey = scope ? buildPluginUiSessionKey(scope) : null;
   useEffect(() => {
-    if (!store || !scope) return;
-    return attachPluginUiResourceDeltaFeed(store, scope);
-    // scope 按会话键比较（SessionPane 每次渲染可能新建对象），不把对象本身放进依赖。
+    if (!store || sessionKey === null) return;
+    // 订阅按 lease store 与会话键复用，重渲染时转换为同一个键便不会重绑。
+    return attachPluginUiResourceDeltaFeed(store, sessionKey);
   }, [store, sessionKey]);
 }

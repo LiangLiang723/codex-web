@@ -18,7 +18,7 @@ import {
   RequestSecurityWorkspaceBridge,
   setRequestSecurityReporter,
 } from "@/request-security-edition/index.js";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LucideProvider, RefreshCw } from "lucide-react";
 import {
   APP_RUNTIME_PREFERENCES_CHANGED_BROADCAST_CHANNEL,
@@ -75,7 +75,7 @@ import { StoreProvider, useZCodeStore } from "@/store/StoreProvider.js";
 import { setMcpStorePlatform } from "@/store/mcpStore.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 import { TabStoreProvider, useTabStore, useTabStoreApi } from "@/store/TabStoreProvider.js";
-import { isSettingsTab, isWorkspaceTab, type WorkspaceTabState } from "@/store/tabStore.js";
+import { isSettingsTab, isWorkspaceTab } from "@/store/tabStore.js";
 import { logger } from "@/logger.js";
 import { RootShell } from "@/root/RootShell.js";
 import { RootWorkspaceContent } from "@/root/RootWorkspaceContent.js";
@@ -414,34 +414,29 @@ function RootInner({
     services.zcodeAgentService,
   ]);
 
+  const runtimePreferencesLoaded = Boolean(appSettings);
+  const askUserQuestionAutoResolutionEnabled = appSettings?.askUserQuestionAutoResolutionEnabled;
+  const modelIoFullRetentionEnabled = appSettings?.modelIoFullRetentionEnabled;
+  const pluginAutoRecommendationEnabled = appSettings?.pluginAutoRecommendationEnabled;
   useEffect(() => {
-    if (!appSettings) {
-      return;
-    }
-    void services.zcodeAgentService
-      .syncAppRuntimePreferences({
-        askUserQuestionAutoResolutionEnabled:
-          appSettings.askUserQuestionAutoResolutionEnabled !== false,
-        modelIoFullRetentionEnabled: appSettings.modelIoFullRetentionEnabled === true,
-        pluginAutoRecommendationEnabled: appSettings.pluginAutoRecommendationEnabled === true,
-      })
-      .catch((error) => {
-        logger.warn("[settings] 初始化运行时偏好失败", error);
-      });
-    void services.botsService
-      .syncAppRuntimePreferences({
-        askUserQuestionAutoResolutionEnabled:
-          appSettings.askUserQuestionAutoResolutionEnabled !== false,
-        modelIoFullRetentionEnabled: appSettings.modelIoFullRetentionEnabled === true,
-        pluginAutoRecommendationEnabled: appSettings.pluginAutoRecommendationEnabled === true,
-      })
-      .catch((error) => {
-        logger.warn("[settings] 初始化 Bot 运行时偏好失败", error);
-      });
+    if (!runtimePreferencesLoaded) return;
+    // 等已加载的设置提供明确默认值。无关设置的更新不触发 Agent 和 Bot 同步。
+    const preferences = {
+      askUserQuestionAutoResolutionEnabled: askUserQuestionAutoResolutionEnabled !== false,
+      modelIoFullRetentionEnabled: modelIoFullRetentionEnabled === true,
+      pluginAutoRecommendationEnabled: pluginAutoRecommendationEnabled === true,
+    };
+    void services.zcodeAgentService.syncAppRuntimePreferences(preferences).catch((error) => {
+      logger.warn("[settings] 初始化运行时偏好失败", error);
+    });
+    void services.botsService.syncAppRuntimePreferences(preferences).catch((error) => {
+      logger.warn("[settings] 初始化 Bot 运行时偏好失败", error);
+    });
   }, [
-    appSettings?.askUserQuestionAutoResolutionEnabled,
-    appSettings?.modelIoFullRetentionEnabled,
-    appSettings?.pluginAutoRecommendationEnabled,
+    askUserQuestionAutoResolutionEnabled,
+    modelIoFullRetentionEnabled,
+    pluginAutoRecommendationEnabled,
+    runtimePreferencesLoaded,
     services.botsService,
     services.zcodeAgentService,
   ]);
@@ -557,11 +552,9 @@ function RootInner({
   const webRemoteControlFeatureEnabled = useWebRemoteControlFeatureEnabled();
   // Bugfix: WebRemoteControlDialog 只是可开关的展示入口，不能由它的本地 state 决定全局远控状态。
   // Root 直接轮询 main 进程状态，让远控会话 running/active 成为唯一真值来源。
-  const webRemoteControlStatus = useWebRemoteControlStatus({
+  useWebRemoteControlStatus({
     enabled: Boolean(webRemoteControlFeatureEnabled && isDesktop),
   });
-  const webRemoteControlSessionActive =
-    webRemoteControlStatus.status === "running" || webRemoteControlStatus.status === "active";
   const refreshProviderState = useRootProviderStateRefresh(services);
   useRootProviderSettingsSnapshot(services);
   useEffect(() => {

@@ -11,7 +11,7 @@ export function useBotPrivateDeliveryRetry(botId: string, deliveryId: string) {
     busy.current = false;
     setState("idle");
     return () => {
-      ++generation.current;
+      generation.current += 1;
     };
   }, [botId, deliveryId]);
   const retry = useCallback(async () => {

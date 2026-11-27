@@ -36,9 +36,10 @@ export function usePluginCreator(
     undefined,
     target?.workspaceIdentity,
   );
+  const { services, remoteSessionId, rpcReady } = resolution;
   const scope = useMemo(
-    () => ({ active: true }),
-    [targetKey, resolution.services, resolution.remoteSessionId, resolution.rpcReady, onCreateTask],
+    () => ({ active: true, targetKey, services, remoteSessionId, rpcReady, onCreateTask }),
+    [targetKey, services, remoteSessionId, rpcReady, onCreateTask],
   );
   useEffect(() => {
     scope.active = true;
@@ -49,8 +50,9 @@ export function usePluginCreator(
   const pending = useRef<object | null>(null);
   const [busyScope, setBusyScope] = useState<object | null>(null);
   const create = useCallback(async () => {
+    const { targetKey, services, rpcReady, onCreateTask } = scope;
     if (pending.current === scope || !target || !onCreateTask) return;
-    if (!resolution.rpcReady) {
+    if (!rpcReady) {
       toast(intl.formatMessage({ id: "pluginCreator.unavailable" }), { variant: "warning" });
       return;
     }
@@ -77,7 +79,7 @@ export function usePluginCreator(
     try {
       const prefill = await loadPluginCreatorPrefill(
         () =>
-          resolution.services.skillsService.list({
+          services.skillsService.list({
             workspacePath: target.workspacePath,
             workspaceIdentity: target.workspaceIdentity,
             provider: ZCODE_AGENT_PROVIDER,
@@ -100,6 +102,6 @@ export function usePluginCreator(
       if (pending.current === scope) pending.current = null;
       if (scope.active) setBusyScope(null);
     }
-  }, [intl, isWebRemoteControl, onCreateTask, resolution, scope, tabStore, target, targetKey]);
+  }, [intl, isWebRemoteControl, scope, tabStore, target]);
   return { create, busy: busyScope === scope, available: Boolean(target && onCreateTask) };
 }

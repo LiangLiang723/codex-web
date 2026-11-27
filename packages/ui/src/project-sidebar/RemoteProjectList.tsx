@@ -1,6 +1,6 @@
 import { formatProjectError } from "@/project-sidebar/view.js";
 import { useOptionalProjectDirectory } from "@/project-sidebar/ProjectDirectoryProvider.js";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft } from "lucide-react";
 import type {
   IProjectService,
@@ -67,6 +67,7 @@ export function RemoteProjectList({
   const [saving, setSaving] = useState(false);
   const [retry, setRetry] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const formatLoadError = useEffectEvent((cause: unknown) => formatProjectError(cause, intl.formatMessage));
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -82,7 +83,7 @@ export function RemoteProjectList({
         }
       })
       .catch((cause) => {
-        if (active) setError(formatProjectError(cause, intl.formatMessage));
+        if (active) setError(formatLoadError(cause));
       })
       .finally(() => {
         if (active) setLoading(false);

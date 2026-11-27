@@ -236,7 +236,7 @@ export function createPage(
         lease.release();
         connection.release();
       };
-      releaseFeed = attachPluginUiResourceDeltaFeed(lease.store, latest.current.scope);
+      releaseFeed = attachPluginUiResourceDeltaFeed(lease.store, buildPluginUiSessionKey(latest.current.scope));
       patch({ phase: "preparing", error: null, handle: null });
       createController();
     } catch (error) {

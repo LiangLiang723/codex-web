@@ -2108,6 +2108,14 @@ exceptions:
     rule: unmanaged-new-file
     paths: [packages/ui/src/v4/featureSuggestedPrompts.ts]
     reason: 上游 f3fcc23e04 已引入的模式推荐提示词仅替换「国内」为「中国」一处区域称谓；本次不接管整个 ui 未受管模块。
+  - id: workspace-renderer-existing-hook-dependencies
+    rule: unmanaged-new-file
+    paths:
+      - packages/ui/src/app-shell/useWorkflowRunPaneSettings.ts
+      - packages/ui/src/hooks/useBotBoundGroups.ts
+      - packages/ui/src/hooks/useBotPrivateDeliveryRetry.ts
+      - packages/ui/src/hooks/useBrowserSitePermissions.ts
+    reason: 已存在的工作流面板、Bot 群组与重试、浏览器权限 Hook 只收紧闭包依赖或清理代次，沿用原先的页面、服务和权限 owner。
   - id: workflow-fill-frames-scrollbar-loop-fix
     rule: unmanaged-new-file
     paths: [packages/ui/src/app-shell/WorkflowRunFillFrames.tsx]

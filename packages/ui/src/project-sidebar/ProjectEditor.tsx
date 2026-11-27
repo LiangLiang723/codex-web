@@ -178,7 +178,7 @@ export function ProjectEditor({
     alive.current = true;
     return () => {
       alive.current = false;
-      epoch.current++;
+      epoch.current += 1;
       saveFlight.current?.cancelTrust?.();
     };
   }, []);

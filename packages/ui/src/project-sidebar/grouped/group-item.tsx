@@ -184,19 +184,23 @@ export function GroupItem({
       groupId: node.group.id,
     },
   });
+  const { setNodeRef: registerDraggable } = groupDraggable;
+  const { setNodeRef: registerHeaderDropZone } = expandedGroupHeaderDroppable;
+  const { setNodeRef: registerCollapsedDropZone } = collapsedGroupDroppable;
+  const { setNodeRef: registerGroupDropZone } = groupOverDroppable;
   const setGroupHeaderNodeRef = useCallback(
     (element: HTMLDivElement | null) => {
-      groupDraggable.setNodeRef(element);
-      expandedGroupHeaderDroppable.setNodeRef(element);
+      registerDraggable(element);
+      registerHeaderDropZone(element);
     },
-    [expandedGroupHeaderDroppable.setNodeRef, groupDraggable.setNodeRef],
+    [registerDraggable, registerHeaderDropZone],
   );
   const setGroupItemNodeRef = useCallback(
     (element: HTMLDivElement | null) => {
-      collapsedGroupDroppable.setNodeRef(element);
-      groupOverDroppable.setNodeRef(element);
+      registerCollapsedDropZone(element);
+      registerGroupDropZone(element);
     },
-    [collapsedGroupDroppable.setNodeRef, groupOverDroppable.setNodeRef],
+    [registerCollapsedDropZone, registerGroupDropZone],
   );
   useLayoutEffect(() => {
     if (!renaming) {

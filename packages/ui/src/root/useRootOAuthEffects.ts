@@ -223,7 +223,7 @@ export function useRootOAuthEffects({
       disposed = true;
       disposable.dispose();
     };
-  }, [intl, onReauthenticationRequired, requestAlert, services.broadcastService, setUser]);
+  }, [intl, onReauthenticationRequired, requestAlert, services.broadcastService, services.oauthService, setUser]);
 
   useEffect(() => {
     if (selfHostedBuild) return;

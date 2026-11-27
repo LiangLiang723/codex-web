@@ -51,8 +51,6 @@ import {
 } from "@/lib/quickPickConversationNavigation.js";
 import {
   setPendingSettingsPluginIntent,
-  setPendingSettingsSection,
-  type SettingsSectionId,
 } from "@/lib/settingsNavigation.js";
 import { runWorkspaceVisibleCommand } from "@/lib/workspaceVisibleCommand.js";
 import { ZCODE_PRODUCT_DOCS_URL } from "@/lib/productDocs.js";
@@ -756,13 +754,6 @@ export function App({
   const handleSwitchTheme = useCallback(() => {
     setTheme(themeTarget);
   }, [setTheme, themeTarget]);
-  const handleOpenSettingsSection = useCallback(
-    (section: SettingsSectionId) => {
-      setPendingSettingsSection(section);
-      openSettingsTab();
-    },
-    [openSettingsTab],
-  );
   const { reloadSessionPending, handleReloadSession } = useWorkspaceSessionReload({
     intl,
     services,
@@ -1157,7 +1148,6 @@ export function App({
       handleOpenCommunity,
       handleOpenFeedback,
       handleOpenProductDocs,
-      handleOpenSettingsSection,
       handleSwitchTheme,
       handleOpenBrowserTab,
       handleOpenGitIfWritable,

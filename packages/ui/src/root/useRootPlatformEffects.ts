@@ -346,9 +346,15 @@ export function useRootPlatformEffects({
       disposeUpdateCheckResult();
     };
   }, [
+    activateTabByPath,
     activeWorkspaceIdentity,
     activeWorkspacePath,
+    allowOpenWorkspace,
+    intl,
+    openWorkspace,
+    openWorkspacePath,
     platform,
+    setWorkspaceActionError,
     startNewTaskFromActiveWorkspace,
     tabs,
   ]);

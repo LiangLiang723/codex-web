@@ -73,7 +73,7 @@ export function useProjectTree(isDesktop = false) {
   const [loading, setLoading] = useState(true);
   const serial = useRef(0);
   const reads = useMemo(
-    () => ({ flight: null as Promise<void> | null, dirty: false }),
+    () => ({ service, remoteService, flight: null as Promise<void> | null, dirty: false }),
     [service, remoteService],
   );
   const pendingCommits = useRef(
@@ -92,6 +92,7 @@ export function useProjectTree(isDesktop = false) {
     errors: ReadonlyMap<string, string>;
   } | null>(null);
   const readOnce = useCallback(async () => {
+    const { service, remoteService } = reads;
     const request = serial.current;
     // 读取在途期间被导航打开的任务（workspaceKey + taskId），见下方归档清理的修复说明。
     const navigatedDuringRead = new Set<string>();
@@ -254,7 +255,7 @@ export function useProjectTree(isDesktop = false) {
       navigation.dispose();
       if (request === serial.current) setLoading(false);
     }
-  }, [service, remoteService, removeTaskState]);
+  }, [reads, removeTaskState]);
   const refresh = useCallback(() => {
     reads.dirty = true;
     if (reads.flight) return reads.flight;
@@ -350,7 +351,9 @@ export function useProjectTree(isDesktop = false) {
     directory.hosts.map((host) => [host.id, host.membershipId, host.connectionStatus]).sort(),
   );
   const observeSources = useCallback(async () => {
-    if (!registry || !scopes.length) return;
+    if (!registry) return;
+    const workspaceScopes: typeof scopes = JSON.parse(scopeKey);
+    if (workspaceScopes.length === 0) return;
     // 原来活动 revision 反复注册观察并重读目录；观察只随 scope/Source 换代。
     // 返回行不进入项目树，显式刷新仍能重试失败的注册。
     await registry
@@ -363,7 +366,7 @@ export function useProjectTree(isDesktop = false) {
         },
         {
           kind: "timeline",
-          workspaceScopes: JSON.parse(scopeKey),
+          workspaceScopes,
           sortBy: "updated",
           limit: 0,
         },
@@ -383,7 +386,8 @@ export function useProjectTree(isDesktop = false) {
     return () => window.removeEventListener("focus", onFocus);
   }, [refreshDirectory]);
   useEffect(() => {
-    const subscriptions = (registry ? [] : scopes).map((scope) =>
+    const subscriptionScopes: typeof scopes = registry ? [] : JSON.parse(scopeKey);
+    const subscriptions = subscriptionScopes.map((scope) =>
       services.zcodeTaskService.onDynamicWorkspaceEvent(scope)((event) => {
         if (event.type === "workspace_task_list_changed") void refresh();
       }),

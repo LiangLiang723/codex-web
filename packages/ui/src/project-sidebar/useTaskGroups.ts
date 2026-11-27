@@ -42,7 +42,7 @@ export function useTaskGroups(tree: ProjectTree) {
       if (event.channel === "state:task-groups") void refresh();
     });
     return () => {
-      serial.current++;
+      serial.current += 1;
       subscription.dispose();
     };
   }, [services.broadcastService, refresh]);

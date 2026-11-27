@@ -65,23 +65,10 @@ export function SidePaneTabOverview({
           tab,
           title,
           hint,
-          openedAtLabel: labels.relativeTime(tab.openedAt ?? currentTime),
           searchFields: buildSearchFields(title, hint, typeLabel),
         };
       }),
-    [
-      currentTime,
-      labels.browserTitle,
-      labels.codeViewerTitle,
-      labels.relativeTime,
-      labels.reviewTitle,
-      labels.treemappingTitle,
-      labels.whiteboardTitle,
-      labels.developerToolsTitle,
-      labels.terminalTitle,
-      labels.subagentTypeLabel,
-      tabs,
-    ],
+    [labels, tabs],
   );
   const recentClosedItems = useMemo(
     () =>
@@ -93,23 +80,10 @@ export function SidePaneTabOverview({
           item,
           title,
           hint,
-          closedAtLabel: labels.relativeTime(item.closedAt),
           searchFields: buildSearchFields(title, hint, typeLabel),
         };
       }),
-    [
-      currentTime,
-      labels.browserTitle,
-      labels.codeViewerTitle,
-      labels.relativeTime,
-      labels.reviewTitle,
-      labels.treemappingTitle,
-      labels.whiteboardTitle,
-      labels.developerToolsTitle,
-      labels.terminalTitle,
-      labels.subagentTypeLabel,
-      recentClosedTabs,
-    ],
+    [labels, recentClosedTabs],
   );
   const filteredTabItems = useMemo(
     () => filterAndRankSearchItems(tabItems, queryParts),
@@ -126,6 +100,7 @@ export function SidePaneTabOverview({
       return;
     }
 
+    // 每分钟只更新展示用的相对时间，搜索数据由标签和本地化文案决定。
     setCurrentTime(Date.now());
     const interval = window.setInterval(() => setCurrentTime(Date.now()), 60_000);
     return () => window.clearInterval(interval);
@@ -182,7 +157,7 @@ export function SidePaneTabOverview({
                 heading={labels.openTabs}
                 className="border-border border-b p-1 last:border-b-0 **:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:py-2 **:[[cmdk-group-heading]]:text-ui-base **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-foreground-subtle"
               >
-                {filteredTabItems.map(({ tab, title, openedAtLabel }) => {
+                {filteredTabItems.map(({ tab, title }) => {
                   const isActive = tab.id === activeTabId;
                   return (
                     <CommandItem
@@ -204,7 +179,7 @@ export function SidePaneTabOverview({
                         {title}
                       </span>
                       <span className="mr-0.5 shrink-0 text-ui-base text-foreground-subtle">
-                        {openedAtLabel}
+                        {labels.relativeTime(tab.openedAt ?? currentTime)}
                       </span>
                       <Button
                         type="button"
@@ -235,7 +210,7 @@ export function SidePaneTabOverview({
                 heading={labels.recentlyClosedTabs}
                 className="border-border border-b p-1 last:border-b-0 **:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:py-2 **:[[cmdk-group-heading]]:text-ui-base **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-foreground-subtle"
               >
-                {filteredRecentClosedItems.map(({ item, title, closedAtLabel }) => (
+                {filteredRecentClosedItems.map(({ item, title }) => (
                   <CommandItem
                     key={item.tab.id}
                     value={title}
@@ -252,7 +227,7 @@ export function SidePaneTabOverview({
                       {title}
                     </span>
                     <span className="mr-0.5 shrink-0 text-ui-base text-foreground-subtle">
-                      {closedAtLabel}
+                      {labels.relativeTime(item.closedAt)}
                     </span>
                   </CommandItem>
                 ))}

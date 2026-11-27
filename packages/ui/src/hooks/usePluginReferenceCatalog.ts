@@ -121,11 +121,12 @@ export function usePluginReferenceCatalog(
   // 实例重连时都创建新的请求身份。渲染只接受同一 scope 的结果，因此 effect 尚未
   // 发出新请求的首帧也不会短暂泄露上一 authority 的 catalog。
   const requestScope = useMemo(
-    () => ({}),
+    () => ({ enabled, remoteSessionId, requestKey, rpcReady, services, workspacePath }),
     [enabled, remoteSessionId, requestKey, rpcReady, services, workspacePath],
   );
 
   useEffect(() => {
+    const { enabled, remoteSessionId, requestKey, rpcReady, services, workspacePath } = requestScope;
     if (!enabled || !workspacePath || !rpcReady) {
       return;
     }
@@ -199,19 +200,7 @@ export function usePluginReferenceCatalog(
       }
     };
     // requestKey 已涵盖 workspaceKey 与 sessionId 的组合变化。
-  }, [
-    enabled,
-    options?.dedupeSessionRequest,
-    options?.suppressErrorLog,
-    remoteSessionId,
-    requestKey,
-    requestScope,
-    rpcReady,
-    services,
-    sessionId,
-    workspaceIdentity,
-    workspacePath,
-  ]);
+  }, [options?.dedupeSessionRequest, options?.suppressErrorLog, requestScope, sessionId, workspaceIdentity]);
 
   if (!enabled || !workspacePath || !rpcReady || scopedState.scope !== requestScope) {
     return EMPTY_STATE;

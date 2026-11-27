@@ -80,18 +80,20 @@ function ProjectManagementContent() {
     [state.deviceNames],
   );
   // 「最近活动」与疑似原因按目录版本取一次当前时间，渲染之间保持稳定。
-  const now = useMemo(() => Date.now(), [state.tree]);
+  const treeSnapshot = useMemo(
+    () => ({ tree: state.tree, now: Date.now() }),
+    [state.tree],
+  );
   const rows = useMemo(
     () =>
       buildProjectManagementRows({
-        tree: state.tree,
+        ...treeSnapshot,
         availability: state.availability,
         directory: state.directory,
         canRemoveEntries: Boolean(state.remoteService),
-        now,
         hostLabel,
       }),
-    [state.tree, state.availability, state.directory, state.remoteService, now, hostLabel],
+    [treeSnapshot, state.availability, state.directory, state.remoteService, hostLabel],
   );
   const unused = useMemo(() => summarizeUnusedProjects(rows), [rows]);
   const visible = useMemo(
@@ -341,7 +343,7 @@ function ProjectManagementContent() {
             <ProjectManagementListRow
               key={row.key}
               row={row}
-              now={now}
+              now={treeSnapshot.now}
               checked={draft.has(row.key) && row.removal !== null}
               disabled={disabled}
               onEdit={canEdit(row) ? () => setEditingKey(row.key) : undefined}
