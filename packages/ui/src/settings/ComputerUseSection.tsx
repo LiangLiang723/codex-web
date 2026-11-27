@@ -284,7 +284,7 @@ export function ComputerUseSection({
       restartPromiseRef.current = operation;
       return operation;
     },
-    [path, workspaceIdentity, services, refresh, intl],
+    [path, workspaceIdentity, services, cuaPermissionService, refresh, intl],
   );
 
   const applyPendingGrant = useCallback(
@@ -355,7 +355,6 @@ export function ComputerUseSection({
       }
     },
     [
-      path,
       pluginManagementService,
       pluginToggleContextKey,
       refresh,
@@ -509,7 +508,7 @@ export function ComputerUseSection({
         }
       }
     },
-    [platform, path, services, workspaceIdentity, intl, applyPendingGrant, refresh],
+    [platform, path, cuaPermissionService, helperContextKey, workspaceIdentity, intl, applyPendingGrant, refresh],
   );
 
   const onManualRestart = useCallback((): void => {

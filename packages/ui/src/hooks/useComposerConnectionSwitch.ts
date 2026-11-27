@@ -61,7 +61,11 @@ export function useComposerConnectionSwitch({
   const { update, refresh: refreshSettings } = useSettings({ services: base });
   const { intl } = useZCodeIntl();
   const workspaceKey = workspaceIdentity?.trim() || workspacePath;
-  const token = useMemo(() => ({}), [target, base, workspaceKey, scopeId]);
+  // 对象身份区分 A → B → A 的两次选区。连接操作冻结本次用到的本地及目标 Host。
+  const token = useMemo(
+    () => ({ target, base, workspaceKey, scopeId }),
+    [target, base, workspaceKey, scopeId],
+  );
   const owner = useRef({ token, mounted: true });
   owner.current = { token, mounted: true };
   const inFlight = useRef(false);
@@ -138,6 +142,8 @@ export function useComposerConnectionSwitch({
     async (connection: ComposerConnection, previousKey?: string) => {
       if (inFlight.current || !rpcReady || connection.disabled) return;
       const currentOwner = owner.current;
+      if (currentOwner.token !== token) return;
+      const { base, target } = token;
       const stillCurrent = () =>
         owner.current.mounted && owner.current.token === currentOwner.token;
       inFlight.current = true;
@@ -299,7 +305,7 @@ export function useComposerConnectionSwitch({
     },
     [
       agentProvider,
-      base,
+      token,
       intl,
       normalizedValue,
       currentReasoningLevel,
@@ -307,7 +313,6 @@ export function useComposerConnectionSwitch({
       onPendingChange,
       refreshSettings,
       rpcReady,
-      target,
       update,
       workspaceIdentity,
       workspaceKey,

@@ -404,14 +404,14 @@ export function ProviderModelsSection({
     scopeKey: providerId,
     resolve: resolveAddModelConfig,
   });
-  const { draft: addDraft } = editor;
+  const { draft: addDraft, reset: resetAddDraft } = editor;
 
   const openAddDialog = useCallback(() => {
-    editor.reset(createEmptyModel());
+    resetAddDraft(createEmptyModel());
     setAddDraftErrorField(null);
     setAddCommitError(null);
     setAddDialogOpen(true);
-  }, [editor.reset]);
+  }, [resetAddDraft]);
 
   const updateAddDraft = (patch: Partial<ProviderModelDraftValues>) => {
     editor.change(patch);
@@ -425,18 +425,15 @@ export function ProviderModelsSection({
     editor.cancel();
   };
 
-  const handleAddDialogOpenChange = useCallback(
-    (open: boolean) => {
-      // 保存中的关闭/再打开会让旧请求结束掉新草稿，等待本次提交完成再结束编辑。
-      if (addSavingRef.current) return;
-      if (!open) {
-        cancelAddDialog();
-        return;
-      }
-      setAddDialogOpen(true);
-    },
-    [cancelAddDialog],
-  );
+  const handleAddDialogOpenChange = (open: boolean) => {
+    // 保存中的关闭/再打开会让旧请求结束掉新草稿，等待本次提交完成再结束编辑。
+    if (addSavingRef.current) return;
+    if (!open) {
+      cancelAddDialog();
+      return;
+    }
+    setAddDialogOpen(true);
+  };
 
   const commitAddDraft = useCallback(async (): Promise<boolean> => {
     if (addSavingRef.current) return false;

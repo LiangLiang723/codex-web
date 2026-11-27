@@ -7,6 +7,7 @@ import { build, preview } from "vite";
 import { repositorySummary } from "./fixtures/workspace-git.mjs";
 import { nativeUserInputItems } from "../../packages/web/src/selfhost/nativeTurnInput.ts";
 import { revealPickerItem, revealPickerOption } from "./fixtures/composer-picker.mjs";
+import { verifyConversationDraftRoundTrip } from "./fixtures/session-draft.mjs";
 import { trackMaterialRequests } from "./fixtures/brand-materials.mjs";
 import {
   verifyAnatomyCatalogue,
@@ -695,33 +696,9 @@ async function verify(page, origin) {
     assert.equal(await page.locator('[data-plugin-mention-id="' + pluginId + '"]').count(), 1);
   }
   assert.equal(submissions.length, 2, "replaying history must not send another turn");
-  await editor.focus();
-  await page.keyboard.insertText("管理页往返草稿");
-  await showTaskList();
-  await activate(page.getByTestId("plugin-store-sidebar-open"));
-  const extensions = page.getByTestId("workspace-extensions");
-  for (const section of ["plugins", "apps", "skills"]) {
-    await activate(extensions.getByTestId(`workspace-extensions-${section}`));
-    await extensions
-      .getByTestId(`workspace-extensions-${section}`)
-      .and(page.locator('[aria-pressed="true"]'))
-      .waitFor();
-  }
-  await activate(extensions.getByRole("button", { name: "返回", exact: true }));
-  if (mobile) await activate(page.getByTestId(`task-item-${threadId}`));
-  await editor.getByText("管理页往返草稿", { exact: true }).waitFor();
-  assert.equal(submissions.length, 2, "extension management must leave the draft unsent");
-  for (const [id, draft, otherDraft] of [
-    [draftThreadId, "会话二未发送草稿", "管理页往返草稿"],
-    [threadId, "管理页往返草稿", "会话二未发送草稿"],
-  ]) {
-    await showTaskList();
-    await activate(page.getByTestId(`task-item-${id}`));
-    await page.waitForURL((url) => url.searchParams.get("thread") === id);
-    await editor.getByText(draft, { exact: true }).waitFor();
-    assert.equal(await editor.getByText(otherDraft).count(), 0, "Drafts stay with their conversation");
-  }
-  assert.equal(submissions.length, 2, "Switching conversations must keep both drafts unsent");
+  await verifyConversationDraftRoundTrip(page, {
+    activate, showTaskList, mobile, editor, threadId, draftThreadId, submissions,
+  });
   await verifyBrandSettings(page, { activate, showTaskList, origin, threadId, anatomyEnabled, materialRequests });
   await showTaskList();
   await activate(page.getByTestId("task-new-button"));

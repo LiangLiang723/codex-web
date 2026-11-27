@@ -1,5 +1,5 @@
 /* oxlint-disable eslint(max-lines) -- provider 卡片同时承载名称、连接、鉴权、模型和映射编辑；本阶段先维持单组件，后续再按表单域拆分。 */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   getProviderFormApiKey,
   getProviderFormLabel,
@@ -202,8 +202,8 @@ export function InlineEditableProviderCard({
     () => authoritativeModels.map((model) => model.modelId),
     [authoritativeModels],
   );
-  const reorderModelIdsTargetRef = useRef(onReorderModelIds);
-  reorderModelIdsTargetRef.current = onReorderModelIds;
+  const reorderModelIdsTargetRef = useRef({ providerId: provider.providerId, reorder: onReorderModelIds });
+  reorderModelIdsTargetRef.current = { providerId: provider.providerId, reorder: onReorderModelIds };
   const nameCompositionActiveRef = useRef(false);
   const nameEditProviderIdRef = useRef<string | null>(null);
   const technicalInputCompositionActiveRef = useRef(false);
@@ -364,10 +364,12 @@ export function InlineEditableProviderCard({
 
   const persistModelOrder = useCallback(
     async (modelIds: readonly string[]) => {
-      const target = reorderModelIdsTargetRef.current;
-      if (!target) throw new Error("当前设置入口未装配 Model 调序能力");
+      const { providerId, reorder } = reorderModelIdsTargetRef.current;
+      if (providerId !== provider.providerId || !reorder) {
+        throw new Error("当前设置入口未装配 Model 调序能力");
+      }
       await runSaveOperation(async () => {
-        await target([...modelIds]);
+        await reorder([...modelIds]);
       });
     },
     [provider.providerId, runSaveOperation],
@@ -467,11 +469,12 @@ export function InlineEditableProviderCard({
     }
   };
 
+  const readDeleteRequested = useEffectEvent(() => deleteRequestedRef.current);
   useEffect(() => {
     return () => {
       cancelIdleDraftSave();
       const cleanupAction = resolveProviderDraftCleanupAction({
-        deleteRequested: deleteRequestedRef.current,
+        deleteRequested: readDeleteRequested(),
       });
       if (cleanupAction === "skip-delete") {
         // 确认删除会触发详情卡片卸载；如果 cleanup 继续补保存草稿，

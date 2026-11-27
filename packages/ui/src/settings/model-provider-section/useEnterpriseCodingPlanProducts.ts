@@ -104,7 +104,10 @@ export function useEnterpriseCodingPlanProducts({
     "unscoped",
   );
   // 原因：鉴权布尔值不能区分两个账号或同账号重新登录，旧目录必须按完整身份隔离。
-  const scope = useMemo(() => ({}), [service, family, authenticated, authScope, staticOnly]);
+  const scope = useMemo(
+    () => ({ service, family, authenticated, authScope, staticOnly }),
+    [service, family, authenticated, authScope, staticOnly],
+  );
   const owner = useRef({ scope, enabled, mounted: true });
   owner.current = { scope, enabled, mounted: true };
   const codingPlanProviderId = getModelProviderFamilySpec(family).individualCodingPlanProviderId;
@@ -117,8 +120,10 @@ export function useEnterpriseCodingPlanProducts({
     },
   });
   // 渲染时立即隔离，不能等 effect 清理，否则登出仍会暴露一帧旧组织。
-  const state =
-    owned.scope === scope ? owned.state : { snapshot: null, loading: enabled, error: null };
+  const state = useMemo(
+    () => owned.scope === scope ? owned.state : { snapshot: null, loading: enabled, error: null },
+    [owned, scope, enabled],
+  );
   const setState = useCallback(
     (
       next:

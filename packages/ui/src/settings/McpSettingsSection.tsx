@@ -565,6 +565,9 @@ interface McpSettingsSectionProps {
   cacheAuthorityKey?: string;
 }
 
+const EMPTY_MCP_SERVERS: ReturnType<typeof useMcpStore.getState>['servers'] = [];
+const EMPTY_MCP_STATUS_SNAPSHOTS: ReturnType<typeof useMcpStore.getState>['statusSnapshots'] = {};
+
 export function McpSettingsSection({
   workspacePath,
   workspaceIdentity,
@@ -619,8 +622,8 @@ export function McpSettingsSection({
   // snapshot 投影到 B，更不能让后续 effect 把这些敏感配置发送给 B 的 Agent。
   const mcpStoreMatchesActiveWorkspace =
     Boolean(activeWorkspaceKey) && currentMcpStoreWorkspaceKey === activeWorkspaceKey;
-  const servers = mcpStoreMatchesActiveWorkspace ? storedServers : [];
-  const statusSnapshots = mcpStoreMatchesActiveWorkspace ? storedStatusSnapshots : {};
+  const servers = mcpStoreMatchesActiveWorkspace ? storedServers : EMPTY_MCP_SERVERS;
+  const statusSnapshots = mcpStoreMatchesActiveWorkspace ? storedStatusSnapshots : EMPTY_MCP_STATUS_SNAPSHOTS;
   const isConfigLoaded = useMcpStore((s) => s.isConfigLoaded);
   const ensureLoadedForWorkspace = useMcpStore((s) => s.ensureLoadedForWorkspace);
   const loadMcpFromUserDirectory = useMcpStore((s) => s.loadMcpFromUserDirectory);

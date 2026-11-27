@@ -87,21 +87,22 @@ export function ModelRowInput({
     return true;
   };
 
+  const resetDraft = editor.reset;
   const cancelMetadataDialog = useCallback(() => {
-    editor.reset(model);
+    resetDraft(model);
     setDraftErrorField(null);
     setCommitErrorMessage(null);
     setMetadataDialogOpen(false);
-  }, [model]);
+  }, [model, resetDraft]);
 
   const openMetadataDialog = useCallback(() => {
     setEditingModel(model);
-    editor.reset(model);
+    resetDraft(model);
     setDraftErrorField(null);
     setCommitErrorMessage(null);
     setDraftBasedOnRevision(settingsRevision);
     setMetadataDialogOpen(true);
-  }, [model, settingsRevision]);
+  }, [model, resetDraft, settingsRevision]);
 
   const handleMetadataDialogOpenChange = useCallback(
     (open: boolean) => {
@@ -116,7 +117,7 @@ export function ModelRowInput({
     [cancelMetadataDialog, openMetadataDialog],
   );
 
-  const handleMetadataDialogCommit = useCallback(async (): Promise<boolean> => {
+  const handleMetadataDialogCommit = async (): Promise<boolean> => {
     if (metadataSavingRef.current) return false;
     metadataSavingRef.current = true;
     setMetadataSaving(true);
@@ -132,7 +133,7 @@ export function ModelRowInput({
       metadataSavingRef.current = false;
       setMetadataSaving(false);
     }
-  }, [commitDraft]);
+  };
 
   const handleTest = useCallback(async () => {
     if (!onTest || isTesting || !providerEnabled) {

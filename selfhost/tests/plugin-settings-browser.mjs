@@ -272,16 +272,20 @@ async function verify(page, origin) {
   await page.getByTestId("plugin-store-browse").click();
   await page.getByTestId("plugin-store-sources-open").click();
   await page.getByTestId("plugin-store-source-add").click();
-  await page.getByTestId("plugin-store-add-source-input").waitFor();
+  const sourceInput = page.getByTestId("plugin-store-add-source-input");
+  await sourceInput.waitFor();
+  await page.getByTestId("plugin-store-sources-dialog").waitFor({ state: "hidden" });
   await page.keyboard.press("Escape");
+  await sourceInput.waitFor({ state: "hidden" });
   const accountStatus = page.getByTestId("plugin-store-account-catalog");
   await accountStatus.and(page.locator('[data-status="loading"]')).waitFor();
   assert.equal(
     await accountStatus.getByTestId("plugin-store-codex-directory").getAttribute("href"),
     "https://chatgpt.com/plugins",
   );
-  await page.getByText("My account marketplace", { exact: true }).waitFor();
-  await page.getByText("My account review", { exact: true }).waitFor();
+  const marketplaceList = page.getByTestId("plugin-store-list");
+  await marketplaceList.getByRole("heading", { name: "My account marketplace", exact: true }).waitFor();
+  await marketplaceList.getByText("My account review", { exact: true }).waitFor();
   await page
     .locator(`[data-testid="plugin-store-card"][data-plugin-id="${personal.pluginId}"]`)
     .click();

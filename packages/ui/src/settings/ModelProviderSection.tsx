@@ -239,6 +239,8 @@ export function resolveModelProviderSideSelectionKey(
  * 模型 Provider 设置只由 SettingsPage 注入 Local Host；这里不接收 workspaceIdentity，
  * 防止远程 workspace 误将 Provider Settings 的读写路由到远端 Environment。
  */
+const EMPTY_CONNECTION_SELECTIONS: ProviderFamilyConnectionSelectionSettings = {};
+
 export function ModelProviderSection({
   workspacePath = "",
   connectivityWorkspacePath,
@@ -255,7 +257,7 @@ export function ModelProviderSection({
   const { intl, locale } = useZCodeIntl();
   const confirmDialog = useConfirmDialog();
   const platform = usePlatform();
-  const { modelSelectionService, oauthService } = useServices();
+  const { oauthService } = useServices();
   const {
     modelProviders,
     providerTemplates,
@@ -444,7 +446,8 @@ export function ModelProviderSection({
       authenticatedZaiEnterpriseProducts.snapshot?.productList,
     ],
   );
-  const connectionSelections = sharedSettings?.providerFamilyConnectionSelections ?? {};
+  const connectionSelections =
+    sharedSettings?.providerFamilyConnectionSelections ?? EMPTY_CONNECTION_SELECTIONS;
   const familyConnectionSettingsFailed = sharedSettingsError !== null && sharedSettings === null;
   const effectiveConnectionSelections = useMemo(
     () => ({
@@ -541,7 +544,6 @@ export function ModelProviderSection({
       refreshCodingPlanEntitlements,
       refreshCodingPlanProducts,
       refreshCodingPlanPurchaseTokenState,
-      refreshModelProviderPanelAfterAuthChange,
     ],
   );
 
@@ -890,9 +892,7 @@ export function ModelProviderSection({
       platform,
       updateSharedSettings,
       sharedSettings?.providerFamilyDomain,
-      modelSelectionService,
       refresh,
-      refreshCodingPlanEntitlements,
       refreshCodingPlanProducts,
       refreshCodingPlanPurchaseTokenState,
     ],

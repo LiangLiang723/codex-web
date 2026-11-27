@@ -34,13 +34,16 @@ export function useProviderModelDraft({
     setDraftScope(scopeKey);
     setRawDraft(createProviderModelDraftValues(model));
   }
-  const resolveRef = useRef(resolve);
-  resolveRef.current = resolve;
+  const resolveRef = useRef({ scopeKey, resolve });
+  resolveRef.current = { scopeKey, resolve };
   const resolveRecommended = useCallback(
     (id: string) => {
-      if (!resolveRef.current) throw new Error("Model Config Resolution 未配置");
+      const target = resolveRef.current;
+      if (target.scopeKey !== scopeKey || !target.resolve) {
+        throw new Error("Model Config Resolution 未配置");
+      }
       // 公共草稿持有个人意图；只向 Host 取推荐基线，不用半有效表单拼装第二份 Overlay。
-      return resolveRef.current(id, {});
+      return target.resolve(id, {});
     },
     [scopeKey],
   );

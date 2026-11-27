@@ -80,7 +80,6 @@ export function usePlanIdentitySnapshot(
       }),
     [
       codingPlanEntitlement.snapshot,
-      connectionSelection,
       normalizedDomain,
       startPlanEntitlement.snapshot,
     ],

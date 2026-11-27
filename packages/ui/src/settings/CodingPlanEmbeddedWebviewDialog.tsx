@@ -237,7 +237,7 @@ export function CodingPlanEmbeddedWebviewDialog({
         });
       }
     },
-    [oauthService, embeddedTheme, funnelContext, platform, provider, userId, webviewLocale],
+    [oauthService, embeddedTheme, funnelContext, platform, provider, webviewLocale],
   );
 
   // App locale 运行时变化时，对已 dom-ready 的 webview 注入 lang 更新脚本，
@@ -265,7 +265,7 @@ export function CodingPlanEmbeddedWebviewDialog({
   }, [oauthService]);
   useEffect(() => {
     if (open && webviewReadyRef.current) void injectAuthRef.current(webviewRef.current);
-  }, [open, injectAuth]);
+  }, [open, injectAuth, userId]);
 
   const syncNavigationState = useCallback((webview: ElectronWebviewTag | null) => {
     if (!webview) {
@@ -427,7 +427,7 @@ export function CodingPlanEmbeddedWebviewDialog({
         element.removeEventListener("ipc-message", handleIpcMessage);
       };
     },
-    [syncNavigationState],
+    [provider, syncNavigationState],
   );
 
   useEffect(() => {

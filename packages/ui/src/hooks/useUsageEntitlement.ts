@@ -210,7 +210,10 @@ export function useUsageEntitlementWithService(
   );
 
   // 原因：effect 清理之前也可能收到旧回包；请求归属必须跟随渲染时的服务、身份和 enabled。
-  const requestScope = useMemo(() => ({}), [usageStatsService, enabled, freshnessKey]);
+  const requestScope = useMemo(
+    () => ({ usageStatsService, enabled, freshnessKey }),
+    [usageStatsService, enabled, freshnessKey],
+  );
   const currentRequestScope = useRef<object | null>(requestScope);
   currentRequestScope.current = requestScope;
   useEffect(() => {
@@ -299,9 +302,9 @@ export function useUsageEntitlementWithService(
       }
       logger.debug("[useUsageEntitlement] 开始读取权益信息", {
         reason,
-        includeSubscription,
-        preferredProviderId,
-        accountAccess,
+        includeSubscription: requestOptions.includeSubscription,
+        preferredProviderId: requestOptions.preferredProviderId,
+        accountAccess: requestOptions.accountAccess,
         cacheKey,
         freshnessKey,
       });
@@ -364,7 +367,7 @@ export function useUsageEntitlementWithService(
         });
         const message = getErrorMessage(error);
         logger.warn("[useUsageEntitlement] 读取权益信息失败", {
-          includeSubscription,
+          includeSubscription: requestOptions.includeSubscription,
           error: message,
         });
         if (
@@ -479,10 +482,9 @@ export function useUsageEntitlementWithService(
     usageStatsService,
   ]);
 
-  return {
-    snapshot: enabled && activeFreshnessKeyRef.current === freshnessKey ? state.snapshot : null,
-    loading: enabled && state.loading,
-    error: enabled && activeFreshnessKeyRef.current === freshnessKey ? state.error : null,
-    refresh,
-  };
+  const isCurrent = enabled && activeFreshnessKeyRef.current === freshnessKey;
+  const snapshot = isCurrent ? state.snapshot : null;
+  const loading = enabled && state.loading;
+  const error = isCurrent ? state.error : null;
+  return useMemo(() => ({ snapshot, loading, error, refresh }), [snapshot, loading, error, refresh]);
 }

@@ -1201,37 +1201,37 @@ export function PluginsSection({
     <SettingsScopeBlockedNotice state={scopeBlocked} device={scope.device} />
   ) : null;
 
-  const updatePluginCount = useCallback(
-    (count: number) => {
+  // 计数回报随当前范围重新绑定，切换后忽略上一范围仍在途的结果。
+  const countTarget = useMemo(
+    () => ({ scope: selectedScope.key, workspace: selectedTargetKey }),
+    [selectedScope.key, selectedTargetKey],
+  );
+  const activeCountTarget = useRef(countTarget);
+  activeCountTarget.current = countTarget;
+  const updateCapabilityCount = useCallback(
+    (kind: PluginTabTarget, count: number) => {
+      if (activeCountTarget.current !== countTarget) return;
       setCapabilityCounts((current) =>
-        current.plugins === count ? current : { ...current, plugins: count },
+        current[kind] === count ? current : { ...current, [kind]: count },
       );
     },
-    [selectedScope.key, selectedTargetKey],
+    [countTarget],
+  );
+  const updatePluginCount = useCallback(
+    (count: number) => updateCapabilityCount("plugins", count),
+    [updateCapabilityCount],
   );
   const updateMcpCount = useCallback(
-    (count: number) => {
-      setCapabilityCounts((current) =>
-        current.mcps === count ? current : { ...current, mcps: count },
-      );
-    },
-    [selectedScope.key, selectedTargetKey],
+    (count: number) => updateCapabilityCount("mcps", count),
+    [updateCapabilityCount],
   );
   const updateSkillCount = useCallback(
-    (count: number) => {
-      setCapabilityCounts((current) =>
-        current.skills === count ? current : { ...current, skills: count },
-      );
-    },
-    [selectedScope.key, selectedTargetKey],
+    (count: number) => updateCapabilityCount("skills", count),
+    [updateCapabilityCount],
   );
   const updateCommandCount = useCallback(
-    (count: number) => {
-      setCapabilityCounts((current) =>
-        current.commands === count ? current : { ...current, commands: count },
-      );
-    },
-    [selectedScope.key, selectedTargetKey],
+    (count: number) => updateCapabilityCount("commands", count),
+    [updateCapabilityCount],
   );
   const handleMcpEditorOpenChange = useCallback((open: boolean) => {
     setMcpEditorOpen(open);

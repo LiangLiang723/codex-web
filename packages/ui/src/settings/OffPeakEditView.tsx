@@ -352,6 +352,7 @@ export function OffPeakEditView({
     onBack,
     onSubmit,
     prompt,
+    showToast,
     title,
     workspacePath,
     selectedProject,

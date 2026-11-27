@@ -1,6 +1,6 @@
 /* eslint-disable max-lines -- 定时任务编辑整页集中维护 Settings/History 两个 tab、cron builder、项目/模型选择器与运行历史，集中更利于交互一致。 */
 import { useStartPlanRecommendation } from "@/hooks/useStartPlanRecommendation.js";
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type FormEvent } from "react";
 import { completeNewModelSelection } from "@zcode/provider";
 import {
   ArrowLeft,
@@ -523,9 +523,10 @@ function EndDatePicker({
   const minDate = parseDateInputValue(min);
   const [visibleMonth, setVisibleMonth] = useState(() => selectedDate ?? minDate ?? new Date());
 
+  const selectedDateTime = selectedDate?.getTime();
   useEffect(() => {
-    if (open && selectedDate) setVisibleMonth(selectedDate);
-  }, [open, selectedDate?.getTime()]);
+    if (open && selectedDateTime !== undefined) setVisibleMonth(new Date(selectedDateTime));
+  }, [open, selectedDateTime]);
 
   const year = visibleMonth.getFullYear();
   const month = visibleMonth.getMonth();
@@ -1281,6 +1282,9 @@ export function AutomationEditView({
   const workspaceOptionsRef = useRef(workspaceOptions);
   workspaceOptionsRef.current = workspaceOptions;
 
+  // 语种变化由标题同步 effect 处理，初始化读取最新默认标题并保留正在编辑的其他字段。
+  const readDefaultCreateTitle = useEffectEvent(() => localizedDefaultCreateTitle);
+
   // 打开/切换编辑对象时重置表单。
   useEffect(() => {
     setTab("settings");
@@ -1315,7 +1319,7 @@ export function AutomationEditView({
       titleTouchedRef.current = false;
       modelManuallyChangedRef.current = false;
       thoughtManuallyChangedRef.current = false;
-      setTitle(initialDraft?.title ?? localizedDefaultCreateTitle);
+      setTitle(initialDraft?.title ?? readDefaultCreateTitle());
       setPrompt(initialDraft?.prompt ?? "");
       modelSelection.current = "";
       setModel("");
@@ -1395,8 +1399,9 @@ export function AutomationEditView({
   // 切到 History tab(编辑态)时加载运行历史，并在停留期间轻量刷新。
   // cron run/outcome 由 scheduler/host 异步写入；只加载一次会让用户看到会话已结束但历史仍为空。
   // onLoadRuns 由父组件 inline 传入，不能作为依赖，否则每次 runsCache 更新都会重启 effect 形成请求循环。
+  const editingAutomationId = editing?.automationId;
   useEffect(() => {
-    if (tab !== "history" || !editing) {
+    if (tab !== "history" || !editingAutomationId) {
       return;
     }
     onLoadRunsRef.current?.();
@@ -1404,7 +1409,7 @@ export function AutomationEditView({
       onLoadRunsRef.current?.();
     }, 5_000);
     return () => window.clearInterval(timer);
-  }, [tab, editing?.automationId]);
+  }, [tab, editingAutomationId]);
 
   const isSessionCreatedAutomation = resolveIsSessionCreatedAutomation(editing);
   // 会话来源但无法由 UI 安全回显的旧 cron 保持只读；用户显式重设后以持久化标记退出该路径。
@@ -1744,6 +1749,8 @@ export function AutomationEditView({
   const hasUnsavedChanges = Boolean(editing) && changedFields.length > 0;
 
   const recommendStartPlan = useStartPlanRecommendation(modelSelectionView);
+  const selectedProjectId = selectedWorkspace?.projectId;
+  const hasSelectedWorkspace = Boolean(selectedWorkspace);
   const submitAutomation = useCallback(
     async (options: { validationSource: "save" | "run-now"; returnToList?: boolean }) => {
       if (saving) return false;
@@ -1755,8 +1762,8 @@ export function AutomationEditView({
       if (modelSelection.current !== model || thoughtLevelRef.current !== thoughtLevel)
         return false;
       const input: CreateAutomationInput | UpdateAutomationInput = {
-        ...(!editing && selectedWorkspace?.projectId
-          ? { projectId: selectedWorkspace.projectId }
+        ...(!editing && selectedProjectId
+          ? { projectId: selectedProjectId }
           : {}),
         // Bugfix: 权限下拉和保存按钮是两个独立控件，快速选择 Plan 后立即保存时，
         // React state 可能还没刷新到 submit 闭包；用 ref 保留最后一次选择，避免落库成默认 build。
@@ -1770,10 +1777,10 @@ export function AutomationEditView({
             workspacePath: editing.workspacePath,
             workspaceIdentity: editing.workspaceIdentity,
           }
-        : selectedWorkspace
+        : hasSelectedWorkspace
           ? {
-              workspacePath: selectedWorkspace.workspacePath,
-              workspaceIdentity: selectedWorkspace.workspaceIdentity,
+              workspacePath: selectedWorkspacePath,
+              workspaceIdentity: selectedWorkspaceIdentity,
             }
           : null;
       // 只禁用按钮无法覆盖快捷键或异步回调；提交边界也必须拒绝无有效项目的新建。
@@ -1816,9 +1823,10 @@ export function AutomationEditView({
       saving,
       model,
       thoughtLevel,
-      selectedWorkspace?.workspaceIdentity,
-      selectedWorkspace?.workspacePath,
-      selectedWorkspace?.projectId,
+      hasSelectedWorkspace,
+      selectedWorkspaceIdentity,
+      selectedWorkspacePath,
+      selectedProjectId,
     ],
   );
 
