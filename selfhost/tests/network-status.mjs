@@ -74,6 +74,7 @@ async function verifyNetworkStatus(page, origin) {
   const anotherHost = { ...host, name: "Second Account SSH" };
   const anotherCatalogRequested = Promise.withResolvers();
   const anotherCatalogRelease = Promise.withResolvers();
+  const anotherStateRelease = Promise.withResolvers();
   const anotherChallengeSent = Promise.withResolvers();
   const retry = (message, id = turnId) => ({
     type: "error.reported",
@@ -108,11 +109,16 @@ async function verifyNetworkStatus(page, origin) {
   await page.addInitScript(() => {
     if (!localStorage.getItem("selfhost.auth"))
       localStorage.setItem("selfhost.auth", "network-test-fixture");
-    localStorage.setItem("zcode-locale-preference", "zh-CN");
   });
   // Vite 的源模块也可能含有 /api/ 目录，只模拟网关的根 API。
   await page.route(new URL("/api/**", origin).href, (route) => {
     const url = new URL(route.request().url());
+    if (url.pathname === "/api/selfhost/browser-state") {
+      const locale = { "zcode-locale-preference": "zh-CN" };
+      return route.request().headers().authorization === `Bearer ${anotherToken}`
+        ? anotherStateRelease.promise.then(() => route.fulfill({ json: locale }))
+        : route.fulfill({ json: locale });
+    }
     if (
       url.pathname === "/api/hosts" &&
       route.request().headers().authorization === `Bearer ${anotherToken}`
@@ -371,9 +377,11 @@ async function verifyNetworkStatus(page, origin) {
         throw Error("The second account did not request its host catalog and receive a challenge");
       }),
     ]);
+    anotherStateRelease.resolve();
     await page.getByText("正在读取服务器配置…", { exact: true }).waitFor();
     assert.equal(await mfaDialog.count(), 0);
   } finally {
+    anotherStateRelease.resolve();
     anotherCatalogRelease.resolve();
   }
   await mfaDialog
