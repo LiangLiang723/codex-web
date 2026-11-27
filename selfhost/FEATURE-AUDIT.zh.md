@@ -32,7 +32,7 @@
 | 复制与桌面专属会话工具 | `thread/read` 的 `path`、Web 剪贴板、SSH 文件树 | 保留可获取的路径和会话 ID。移除本机文件管理器、ZCode 日志、调用轨迹、反馈和重启入口。 |
 | 项目操作 | SSH 目录登记及浏览。较新 Codex 有项目协议，当前最低版本提供 Thread 目录信息。 | 保留目录登记、目录浏览、会话创建和网页排序。隐去对旧桌面与原生项目无法写回的控件。 |
 | MCP 和钩子 | `mcpServerStatus/list`、`hooks/list` | 提供当前主机状态、钩子目录和刷新。OAuth 需要远端回调链路，写入由远端原生配置负责。 |
-| 一般设置及 Agent 行为 | 网页界面、通知、终端字体与消息展示由 Web 消费 | 隐去终端启动配置、代理、数据目录、引导、ZCode Agent 特有参数及其搜索结果。 |
+| 一般设置及 Agent 行为 | 网页界面、通知、终端字体、消息展示与后续消息默认方式由 Web 消费 | 「交互行为」选择排队或引导。终端启动配置、代理、数据目录、首次使用引导和 ZCode Agent 特有参数属于桌面入口。 |
 | 数据与扩展 | App、插件、技能、归档和私有分享已有服务。Codex 从 SSH 用户目录加载个性化指令。 | 私有分享管理使用中心登录态。个性化读取和保存原生指令文件。ZCode 的自动归档、模型供应商、记忆模板、浏览器控制和桌面设置入口退场。 |
 
 会话、应用与状态的协议依据是 [官方 App Server 文档](https://learn.chatgpt.com/docs/app-server) 和 [Codex 0.170 原生方法定义](https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/app-server-protocol/schema/typescript/ClientRequest.ts)。验收场景见[会话操作与设置兼容性](../specs/selfhost-codex/README.md#会话操作与设置兼容性)。

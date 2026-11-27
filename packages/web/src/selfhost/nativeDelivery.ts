@@ -153,9 +153,15 @@ export async function submitNativeInput(
   const { active, first, running, followupMode } = context;
   const queue = rec(active?.nativeControls).queue === true;
   const requested = p.requestedDelivery;
+  const expectedTurnId = str(p.expectedTurnId);
   const compacting = nativeTurnIsCompacting(active);
   if (!first && requested === "queue" && !queue) throw Error("当前 Codex 主机不支持队列");
-  if (!first && requested === "guide" && (!running || compacting))
+  // 附件或浏览器草稿落库期间轮次可能更换，旧引导不能被投递到新轮次。
+  if (
+    !first &&
+    requested === "guide" &&
+    (!running || compacting || (expectedTurnId && expectedTurnId !== running))
+  )
     throw Error("当前轮次无法引导，请重新选择发送方式");
   if (!first && requested === "startNow" && running)
     throw Error("当前轮次正在运行，请选择引导或排队");
@@ -187,7 +193,7 @@ export async function submitNativeInput(
       return gateway.call("turn.steer", {
         ...args,
         clientUserMessageId: commandId,
-        expectedTurnId: running,
+        expectedTurnId: expectedTurnId || running,
       });
     return gateway.call("turn.start", {
       ...args,

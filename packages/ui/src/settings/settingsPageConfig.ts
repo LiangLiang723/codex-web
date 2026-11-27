@@ -261,7 +261,6 @@ const SELFHOST_HIDDEN_SETTINGS_ROWS = new Set([
   "settings.totalTokensReminder",
   "settings.agentAlwaysBackground",
   "settings.replyLanguage",
-  "settings.zcodeInteractionBehavior",
   "settings.askUserQuestionAutoResolution",
   "settings.modelIoFullRetention",
   "settings.dynamicWorkflow",

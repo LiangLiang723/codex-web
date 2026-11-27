@@ -4043,7 +4043,7 @@ const zhCN: Record<string, string> = {
   "settings.messageStreamShowTodosDescription": "在消息流中展示 Todo 工具卡片。",
   "settings.zcodeInteractionBehavior": "交互行为",
   "settings.zcodeInteractionBehaviorDescription":
-    "在 ZCode 运行时将后续操作加入队列，或引导至下一轮工具调用后运行。",
+    "选择任务运行时，后续消息默认引导当前任务，还是等当前轮次结束后发送。",
   "settings.zcodeInteractionBehavior.option.queue": "队列",
   "settings.zcodeInteractionBehavior.option.guide": "引导",
   "settings.pluginAutoRecommendation": "插件自动推荐",
@@ -6456,6 +6456,7 @@ const zhCN: Record<string, string> = {
   "chat.message.turnSteer.guided": "已引导对话",
   "chat.message.turnSteer.pending": "等待引导当前任务…",
   "chat.followup.guideCurrent": "引导当前任务",
+  "chat.followup.sendOptions": "发送方式",
   "chat.followup.sendNow": "立即发送",
   "chat.followup.addToQueue": "加入队列",
   "chat.modelChangeNotice.changed": "已从 {fromModel} 切换至 {toModel}",

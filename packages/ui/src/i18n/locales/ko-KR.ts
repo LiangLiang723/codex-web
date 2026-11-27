@@ -3823,7 +3823,7 @@ const koKR: Record<string, string> = {
     "연속된 Write, Edit, ApplyPatch 호출을 변경 사항 섹션으로 묶습니다.",
   "settings.zcodeInteractionBehavior": "상호 작용 방식",
   "settings.zcodeInteractionBehaviorDescription":
-    "ZCode가 실행 중일 때 후속 동작을 대기열에 추가하거나, 다음 도구 호출 후 실행되도록 안내합니다.",
+    "후속 메시지로 현재 작업의 방향을 조정할지, 작업이 끝난 후 메시지를 보낼지 선택합니다.",
   "settings.zcodeInteractionBehavior.option.queue": "대기열",
   "settings.zcodeInteractionBehavior.option.guide": "안내",
   "settings.askUserQuestionAutoResolution": "질문 자동 계속",
@@ -6389,6 +6389,7 @@ const koKR: Record<string, string> = {
   "chat.message.turnSteer.guided": "대화 방향이 조정되었습니다",
   "chat.message.turnSteer.pending": "현재 실행의 방향 조정 대기 중…",
   "chat.followup.guideCurrent": "현재 실행 방향 조정",
+  "chat.followup.sendOptions": "전송 옵션",
   "chat.followup.sendNow": "지금 보내기",
   "chat.followup.addToQueue": "대기열에 추가",
   "chat.modelChangeNotice.changed": "{fromModel}에서 {toModel}(으)로 전환했습니다",

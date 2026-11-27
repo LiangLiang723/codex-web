@@ -81,6 +81,7 @@ import type {
 } from "@zcode/shared/zcode-protocol-v4";
 import {
   ArrowUpIcon,
+  ChevronDownIcon,
   ClipboardPenLineIcon,
   InfoIcon,
   RotateCcwIcon,
@@ -110,6 +111,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog.js";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu.js";
 import { Spinner } from "@/components/ui/spinner.js";
 import {
   useComposerVoiceInput,
@@ -176,8 +183,9 @@ import type {
 } from "@/v4/composer/useDraftConfigControl.js";
 import { V4_DRAFT_SCOPE_ROOT, type V4ComposerDraft } from "@/v4/composer/composerDraftStore.js";
 import {
-  resolveOppositeFollowupDelivery,
   resolveFollowupModifierTooltip,
+  resolveNativeFollowupDelivery,
+  resolveOppositeFollowupDelivery,
   shouldEnableModifiedEnterSubmit,
   shouldReverseFollowupDeliveryForPointer,
 } from "@/v4/composer/followupModeSettings.js";
@@ -272,6 +280,8 @@ export interface ConversationComposerSendOptions {
   telemetrySeed?: ConversationPromptTelemetrySeed;
   /** 本次 busy input 的一次性投递覆盖，不改 session 偏好。 */
   requestedDelivery?: "startNow" | "queue" | "guide";
+  /** 自托管引导提交时选中的轮次。 */
+  expectedTurnId?: string;
   /** 提交命令创建后由 Composer 订阅权威 projection，覆盖 ACK 丢失后的收口。 */
   onCommandCreated?: (commandId: string) => void;
   sharedContextRefs?: Array<{ kind: "shared_context_import"; context_id: string }>;
@@ -281,11 +291,13 @@ export interface ConversationComposerSendOptions {
 
 export type ConversationComposerSendResult = "sent" | "blocked" | "confirmationRequired";
 
+type ComposerDelivery = Pick<ConversationComposerSendOptions, "requestedDelivery" | "expectedTurnId">;
+
 type ComposerSubmit = (
   heldQueueDisposition?: "clearQueueAndSend" | "keepQueueAndSend",
   expectedHeldQueueItemIds?: readonly string[],
   existingTelemetrySeed?: ConversationPromptTelemetrySeed,
-  requestedDelivery?: "startNow" | "queue" | "guide",
+  delivery?: ComposerDelivery,
 ) => Promise<void>;
 function getComposerAttachmentTypeLabel(filename: string, mimeType: string): string {
   const leaf = filename.split(/[\\/]/u).at(-1) ?? filename;
@@ -774,7 +786,7 @@ function ConversationComposerImpl({
   const [heldQueueConfirmation, setHeldQueueConfirmation] = useState<{
     queueItemIds: readonly string[];
     telemetrySeed: ConversationPromptTelemetrySeed;
-    requestedDelivery?: "startNow" | "queue" | "guide";
+    delivery?: ComposerDelivery;
   } | null>(null);
   const [sendTooltipOpen, setSendTooltipOpen] = useState(false);
   // submit 经 ref 读取最新文本/pending，避免回调随每次输入变更引用。
@@ -1530,7 +1542,7 @@ function ConversationComposerImpl({
       heldQueueDisposition?: "clearQueueAndSend" | "keepQueueAndSend",
       expectedHeldQueueItemIds?: readonly string[],
       existingTelemetrySeed?: ConversationPromptTelemetrySeed,
-      requestedDelivery?: "startNow" | "queue" | "guide",
+      delivery?: ComposerDelivery,
     ) => {
       // 连接 pending 同步进入 ref，覆盖菜单点击后 React 尚未提交的一帧及快捷键提交。
       // 只阻止新输入，不取消正在执行或已排队消息，也不清空草稿。
@@ -1564,7 +1576,7 @@ function ConversationComposerImpl({
           heldQueueDisposition,
           expectedHeldQueueItemIds,
           existingTelemetrySeed,
-          requestedDelivery,
+          delivery,
         );
       }
       const submittedAt = performance.timeOrigin + performance.now();
@@ -1877,7 +1889,7 @@ function ConversationComposerImpl({
           }
         }
         claimSubmittedDraft();
-        if (requestedDelivery === "startNow") {
+        if (delivery?.requestedDelivery === "startNow") {
           // 原子抢占需要等旧 turn 退出并提交新 TurnStarted ACK；
           // 若编辑器也等整条链路才清空，用户会误以为快捷键未生效。
           // 先清空可见正文；命令拒绝时用冻结 editor state 原样恢复。
@@ -1907,7 +1919,7 @@ function ConversationComposerImpl({
             : {}),
           telemetrySeed,
           onCommandCreated: subscribeToCommandResolution,
-          ...(requestedDelivery ? { requestedDelivery } : {}),
+          ...delivery,
           ...(heldQueueDisposition ? { heldQueueDisposition } : {}),
           ...(expectedHeldQueueItemIds ? { expectedHeldQueueItemIds } : {}),
           ...(readyAttachmentRefs.length > 0 ? { attachments: readyAttachmentRefs } : {}),
@@ -1950,7 +1962,7 @@ function ConversationComposerImpl({
           setHeldQueueConfirmation({
             // 标记 queueConfirmed：确认后复用该 seed 落定，send_cost_ms 含用户在弹窗上的停留。
             telemetrySeed: { ...telemetrySeed, queueConfirmed: true },
-            ...(requestedDelivery ? { requestedDelivery } : {}),
+            delivery,
             queueItemIds:
               latestQueueItemIds.length > 0 ? latestQueueItemIds : submittedQueueItemIds,
           });
@@ -2125,40 +2137,66 @@ function ConversationComposerImpl({
     });
   }, [conversationTelemetry, sessionId]);
 
-  // 编辑器提交（Enter / 发送键 form submit 同路径）。返回 false：编辑器不自行 reset，
-  // 由 submit 成功后经 inputApiRef.clear() 清空——失败时草稿留在输入框。
-  const handleEditorSubmit = useCallback(
-    (value: string) => {
-      textRef.current = value;
-      const reverseDelivery = reversePointerDeliveryRef.current;
-      reversePointerDeliveryRef.current = false;
-      const followupMode = snapshotRef.current?.config.followupMode;
+  const submitByDelivery = useCallback(
+    (requestedDelivery?: ComposerDelivery["requestedDelivery"]) => {
+      const nativeSteer = selfHostedBuild && requestedDelivery === "guide";
+      const expectedTurnId = nativeSteer ? snapshotRef.current?.inputRouting.steerTurnId : undefined;
+      if (nativeSteer && !expectedTurnId) return;
       void submit(
         undefined,
         undefined,
         undefined,
-        reverseDelivery && followupMode ? resolveOppositeFollowupDelivery(followupMode) : undefined,
+        requestedDelivery ? { requestedDelivery, expectedTurnId } : undefined,
       );
-      return false;
     },
     [submit],
   );
 
-  const handleModifiedEditorSubmit = useCallback(
-    (value: string) => {
-      const followupMode = snapshotRef.current?.config.followupMode;
+  // Enter 与发送键共用同一次提交。编辑器由提交回执清空，失败时保留草稿。
+  const submitFromEditor = useCallback(
+    (value: string, reverse: boolean) => {
       textRef.current = value;
-      // inputRouting 在 turn 启动初期可能仍为 startNow，不能用它
-      // 推断空闲。组合键始终表达单次反向 delivery；空闲时 CLI 自然 startNow。
-      void submit(
-        undefined,
-        undefined,
-        undefined,
-        followupMode ? resolveOppositeFollowupDelivery(followupMode) : undefined,
-      );
+      const current = snapshotRef.current;
+      const followupMode = current?.config.followupMode;
+      if (selfHostedBuild) {
+        submitByDelivery(
+          resolveNativeFollowupDelivery(
+            current?.inputRouting,
+            current?.availability.setFollowupMode.allowed === true,
+            reverse,
+          ),
+        );
+      } else {
+        // 启动初期投影可能仍显示 startNow，组合键交给 CLI 按真实运行态裁决。
+        submitByDelivery(
+          reverse && followupMode ? resolveOppositeFollowupDelivery(followupMode) : undefined,
+        );
+      }
       return false;
     },
-    [submit],
+    [submitByDelivery],
+  );
+
+  const handleEditorSubmit = useCallback(
+    (value: string) => {
+      const reverseDelivery = reversePointerDeliveryRef.current;
+      reversePointerDeliveryRef.current = false;
+      return submitFromEditor(value, reverseDelivery);
+    },
+    [submitFromEditor],
+  );
+
+  const handleModifiedEditorSubmit = useCallback(
+    (value: string) => submitFromEditor(value, true),
+    [submitFromEditor],
+  );
+
+  const handleFollowupSend = useCallback(
+    (delivery: "guide" | "queue") => {
+      sendTriggerRef.current = "button";
+      submitByDelivery(delivery);
+    },
+    [submitByDelivery],
   );
 
   const handleClearQueueSend = useCallback(() => {
@@ -2167,7 +2205,7 @@ function ConversationComposerImpl({
       "clearQueueAndSend",
       heldQueueConfirmation.queueItemIds,
       heldQueueConfirmation.telemetrySeed,
-      heldQueueConfirmation.requestedDelivery,
+      heldQueueConfirmation.delivery,
     );
   }, [heldQueueConfirmation, submit]);
 
@@ -2177,7 +2215,7 @@ function ConversationComposerImpl({
       "keepQueueAndSend",
       heldQueueConfirmation.queueItemIds,
       heldQueueConfirmation.telemetrySeed,
-      heldQueueConfirmation.requestedDelivery,
+      heldQueueConfirmation.delivery,
     );
   }, [heldQueueConfirmation, submit]);
 
@@ -2244,21 +2282,41 @@ function ConversationComposerImpl({
       : workingDurationLabel
         ? intl.formatMessage({ id: "chat.history.workingFor" }, { duration: workingDurationLabel })
         : intl.formatMessage({
-            id: resolveChatPlaceholderKey({
-              hasHistoryMessages: (snapshot?.rows.totalCount ?? 0) > 0,
-              isTaskProcessing: pending || inputPending || canStop,
-              // 单行输入框放不下完整的新任务提示，沿用手机远控的短文案。
-              compactNewTask: compactMobilePlaceholder || layout === "inline",
-            }),
+            id:
+              selfHostedBuild && mode === "guide"
+                ? "chat.placeholder.followUpAsk"
+                : resolveChatPlaceholderKey({
+                    hasHistoryMessages: (snapshot?.rows.totalCount ?? 0) > 0,
+                    isTaskProcessing: pending || inputPending || canStop,
+                    // 单行输入框放不下完整的新任务提示，沿用手机远控的短文案。
+                    compactNewTask: compactMobilePlaceholder || layout === "inline",
+                  }),
           });
-  const sendTooltipTitle = intl.formatMessage({
-    id: mode === "enqueue" ? "chat.queue.enqueue" : "chat.send",
-  });
+  const showFollowupMenu =
+    selfHostedBuild &&
+    canSend &&
+    !canReload &&
+    Boolean(snapshot?.inputRouting.steerTurnId) &&
+    snapshot?.availability.setFollowupMode.allowed === true;
+  const steerLabel = intl.formatMessage({ id: "chat.followup.guideCurrent" });
+  const queueLabel = intl.formatMessage({ id: "chat.queue.enqueue" });
+  const sendTooltipTitle =
+    mode === "enqueue"
+      ? queueLabel
+      : selfHostedBuild && mode === "guide"
+        ? steerLabel
+        : intl.formatMessage({ id: "chat.send" });
+  const followupMode = snapshot?.config.followupMode;
+  const alternateDelivery = selfHostedBuild
+    ? showFollowupMenu
+      ? resolveNativeFollowupDelivery(snapshot?.inputRouting, true, true)
+      : undefined
+    : followupMode && resolveOppositeFollowupDelivery(followupMode);
   const modifierTooltip = resolveFollowupModifierTooltip({
     enabled: modifiedEnterReversesDelivery,
     canSend,
     modifierPressed: primaryModifierPressed,
-    followupMode: snapshot?.config.followupMode,
+    delivery: alternateDelivery,
     isApplePlatform: appleKeyboardPlatform,
   });
   const resolvedSendTooltipTitle = modifierTooltip
@@ -2867,6 +2925,31 @@ function ConversationComposerImpl({
             disabled={voiceInputBlocked}
           />
         ) : null}
+        {showFollowupMenu ? (
+          <DropdownMenu>
+            <ControlHintTooltip title={intl.formatMessage({ id: "chat.followup.sendOptions" })}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-md"
+                  className="rounded-full text-foreground-subtle"
+                  aria-label={intl.formatMessage({ id: "chat.followup.sendOptions" })}
+                >
+                  <ChevronDownIcon className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+            </ControlHintTooltip>
+            <DropdownMenuContent align="end" side="top">
+              <DropdownMenuItem onSelect={() => handleFollowupSend("guide")}>
+                {steerLabel}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => handleFollowupSend("queue")}>
+                {queueLabel}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
         {showStopControl ? (
           <ControlHintTooltip title={stopTooltipTitle} shortcut="Esc">
             <Button
@@ -2925,6 +3008,7 @@ function ConversationComposerImpl({
       draftMode,
       handleStopClick,
       handleSendButtonClick,
+      handleFollowupSend,
       handleConfigPickerOpenChange,
       highspeedCard,
       highspeedEntranceAnimated,
@@ -2953,6 +3037,9 @@ function ConversationComposerImpl({
       sessionId,
       pluginUiSessionId,
       showStopControl,
+      showFollowupMenu,
+      steerLabel,
+      queueLabel,
       stopTooltipTitle,
       workspaceIdentity,
       workspacePath,

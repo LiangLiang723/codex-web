@@ -36,6 +36,11 @@ function database() {
 }
 
 const keyWhere = "user_id = ? AND host_id = ? AND remote_key = ? AND command_id = ?";
+const nonSteerableTurnError = z.object({
+  codexErrorInfo: z.object({
+    activeTurnNotSteerable: z.object({ turnKind: z.enum(["review", "compact"]) }),
+  }),
+});
 
 function receipt(scope: Scope, commandId: string): DeliveryRow | undefined {
   return database()
@@ -136,12 +141,13 @@ export async function recordNativeDelivery(
 function rejectedBeforeAdmission(error: unknown) {
   if (!(error instanceof CodexRpcError)) return false;
   if (error.rpcCode === -32601 || error.rpcCode === -32602) return true;
-  // 两版原生 steer 仅以消息区分这两个在 admission 前拒绝的 RPC 条件。
+  // App Server 以结构化数据标识审查和压缩，以消息标识目标轮次已失效。
   return (
     error.rpcMethod === "turn/steer" &&
     error.rpcCode === -32600 &&
     (error.message === "no active turn to steer" ||
-      error.message.startsWith("expected active turn id "))
+      error.message.startsWith("expected active turn id ") ||
+      nonSteerableTurnError.safeParse(error.rpcData).success)
   );
 }
 

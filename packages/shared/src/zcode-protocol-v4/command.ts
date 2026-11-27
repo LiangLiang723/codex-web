@@ -146,6 +146,8 @@ export const commandPayloadSchemas = {
       // Desktop Cmd/Ctrl+Enter 只覆盖本次 busy input，不改 session followupMode。
       // startNow 由 CLI 原子抢占当前 turn，不经过 queue admission。
       requestedDelivery: z.enum(["startNow", "queue", "guide"]).optional(),
+      // 自托管引导固定点击时的原生轮次，App Server 接纳前校验。
+      expectedTurnId: z.string().min(1).optional(),
       genUiContext: genUiModelContextSchema.optional(),
       browserAmbientContext: zcodeBrowserAmbientContextSchema.optional(),
       // Share handover 只允许当前 session 的一个已导入上下文；完整正文由 runtime 从

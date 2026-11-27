@@ -71,7 +71,7 @@ sequenceDiagram
 
 侧栏右键和手机长按菜单提供「永久删除」，打开确认框并显示会话标题。归档管理的单条和批量删除使用同一原生操作。取消不提交写入，运行中的会话不可删除。网关只向选中的 SSH 主机发送 `thread/delete`，Codex 删除目标会话及其派生的子智能体记录。确认文案说明无法恢复。已独立创建的分支、项目文件及发布的私有分享各有自己的生命周期。删除成功后使该原生 ID 的缓存失效，刷新同一账号的列表并退出被删会话。断线后的列表仍以原生结果为准。远端拒绝时保留会话并展示错误。
 
-自托管设置提供界面语言、主题、界面与终端显示、浏览器内快捷键、原生扩展、MCP 运行状态、钩子目录、归档和私有分享。MCP 使用 `mcpServerStatus/list` 并允许刷新。官方 OAuth 登录还需要能访问 SSH 主机回调地址的授权链路，当前网页显示认证状态。钩子目录通过 `hooks/list` 读取当前 SSH 工作目录的原生配置和错误。ZCode 的 MCP 与钩子写入表单、记忆编辑、浏览器控制、子智能体模板、斜杠命令和专用 Agent 运行参数依赖不同的数据格式或运行时。自托管呈现能够从所选 Codex 主机读取或生效的操作。SSH 项目目录支持单目录登记、导航、建对话和网页排序。旧桌面和原生项目的组织元数据继续由来源持有。侧栏和设置不提供未接通的编辑、置顶、移动会话或删除项目操作。设置不呈现仅由 ZCode 桌面执行的终端启动配置、代理、存储目录、引导和自动归档。
+自托管设置提供界面语言、主题、界面与终端显示、浏览器内快捷键、后续消息默认方式、原生扩展、MCP 运行状态、钩子目录、归档和私有分享。MCP 使用 `mcpServerStatus/list` 并允许刷新。官方 OAuth 登录还需要能访问 SSH 主机回调地址的授权链路，当前网页显示认证状态。钩子目录通过 `hooks/list` 读取当前 SSH 工作目录的原生配置和错误。ZCode 的 MCP 与钩子写入表单、记忆编辑、浏览器控制、子智能体模板、斜杠命令和专用 Agent 运行参数依赖不同的数据格式或运行时。自托管呈现能够从所选 Codex 主机读取或生效的操作。SSH 项目目录支持单目录登记、导航、建对话和网页排序。旧桌面和原生项目的组织元数据继续由来源持有。侧栏和设置不提供未接通的编辑、置顶、移动会话或删除项目操作。设置不呈现仅由 ZCode 桌面执行的终端启动配置、代理、存储目录、首次使用引导和自动归档。
 
 个性化编辑器读取所选 SSH 用户的 `CODEX_HOME`。优先编辑有效的 `AGENTS.override.md`，其余情况编辑 `AGENTS.md`。输入落盘前在同一远端锁内比对已读文件路径和文本，发生外部修改时保留网页草稿并报告冲突。清空覆盖文件后 Codex 读取常规指令。新会话重新加载指令链。见 [Codex 自定义指令](https://learn.chatgpt.com/docs/agent-configuration/agents-md)。
 
@@ -154,6 +154,7 @@ sequenceDiagram
 | SH-HISTORY-FORMAT | 打开 legacy、分页历史、其他写者或提供商不匹配的 Thread | Codex 持有读写资格。legacy 按轮次游标读取，分页历史沿用时间线。写者冲突或提供商不兼容时历史可读。新会话尚未落盘时复用已接纳的原生订阅。 |
 | SH-REPLAY | 激活与订阅之间完成一轮、仅 SSH 断开、快照读取途中出现增量、上翻跨页长轮 | Gateway 给出与快照内容一致的回放边界，Web 按订阅世代及有序事件 ID 应用增量。恢复后文字完整、终态稳定、用户行位置稳定。失败保留已读内容并可重试。 |
 | SH-SEND | 创建成功或首轮接纳后丢回执、忙时带图引导、顺序完成 65 个上传 | 先绑定真实 Thread ID，再发送首轮。已发但未确认时按原生用户行的 clientId 查账，缺乏正向证据保留待确认输入。输入引用一致进入 start 或 steer。上传完成释放活跃配额，同一上传 ID 的完成回执可重读。 |
+| SH-STEER | 运行时发送后续消息，或在发送中更换当前轮次 | 发送方式、同轮接纳、草稿恢复和原生队列遵循[运行中发送后续消息](#运行中发送后续消息)。 |
 | SH-INTERACTIONS | 同命令多个审批、两端同时决定、同题面不同题目 ID、无轮次的 MCP 表单 | 原生请求 ID 独立清场。显示真实命令、主机、范围和期限。问题按 ID 回答，支持跳过、部分答案和掩码输入。拒绝或失败保留真实结果，无轮次请求不产生可控制的活动轮次。 |
 | SH-LIST-SHARE | 同时查询两个目录、按创建时间排序、归档后恢复、在 600 条 Thread 中查询已知 ID 与目录预览、分享跨页选择 | 原生项目及归档状态和账号置顶各有单一所有者。已知 ID 定点或批量读取，目录预览仅读首个原生页，同范围并发查询复用。需要精确总数时完成分页。分享预检与发布使用同一组所选原生轮次，缺少一轮即报告。 |
 | SH-CATALOG | 旧 Thread 使用另一提供商、模型目录失败、引用同名 Skill 或插件、MCP 发现失败或要求重新认证 | 目录按主机、目录及 Thread 提供商选择。目录故障独立于历史和文件。选中的原生 skill/mention 随最终输入发送。MCP 设置及工作流文件管理复用已注册服务。两条 MCP 状态查询共用 Codex 运行状态、认证及工具发现结果。旧响应仍能凭已初始化服务或工具返回连接状态。 |
@@ -180,6 +181,39 @@ sequenceDiagram
     G->>F: 核实前后内容、记录并执行事务
     F-->>W: 经 Gateway 同步结果
 ```
+
+## 运行中发送后续消息
+
+自托管桌面和手机 Web 的输入框从当前会话快照读取发送方式。有可提交的内容，且当前原生轮次支持引导、主机也支持队列时，发送键旁的「发送方式」菜单提供「引导当前任务」和「加入队列」，选中即提交当前草稿。桌面键盘的 `Cmd/Ctrl+Enter` 和修饰键点击发送使用另一种方式。设置中的「行为与工具 → 交互行为」通过现有账号设置保存默认选项，初始默认为队列。主机缺少队列接口时，普通运行轮次的发送键直接引导。空闲时提交开始新轮次，压缩和已知审查轮次有队列时只提供排队。
+
+引导将点击时看到的原生 Turn ID 随 `sendText` 发送，由 Gateway 转为 `turn/steer` 的 `expectedTurnId`。Codex App Server 接纳后，消息仍属于同一轮次，何时接收到新指令由运行中的 Codex 决定。App Server 同样拥有未来轮次的队列。Gateway 的现有发送回执按账号、已验证主机、Thread 和命令 ID 去重。目标轮次已经结束、更换或拒绝引导时，输入框保留原草稿供再次操作。回执不明时通过原命令身份和原生用户消息查账。桌面和手机 Web 读取同一可回放投影，原生 Electron 连续链路的发送合同见 [ZCode 交互行为](../../docs/chat/interaction-behavior.md)。
+
+```mermaid
+sequenceDiagram
+    participant W as 自托管桌面或手机 Web
+    participant G as Gateway
+    participant C as 所选 SSH 主机上的 Codex
+    C-->>W: 通过 Gateway 投影当前 Thread 和可引导的 Turn
+    alt 引导当前任务
+        W->>G: sendText、命令 ID、目标 Turn ID
+        G->>C: turn/steer 与 expectedTurnId
+        C-->>G: 原 Turn ID 或接纳前拒绝
+    else 加入队列
+        W->>G: sendText、命令 ID、queue
+        G->>C: thread/queue/add
+        C-->>G: 队列接纳
+    end
+    G-->>W: 回执及原生时间线或队列更新
+```
+
+| 用例 | 操作 | 通过条件与证据 |
+| --- | --- | --- |
+| SH-STEER-CHOICE | 在桌面和手机宽度打开运行中的会话，分别排队、从菜单引导。桌面再使用组合键。 | Gateway 收到原生队列调用与同轮 steer，正文与已有队列项可见。空闲时只显示普通发送，旧主机只显示引导。`selfhost/tests/followup-browser.mjs` |
+| SH-STEER-DEFAULT | 在设置将队列改成引导，再重新加载会话并发送。 | 现有账号设置可回读，普通发送引导，单次菜单排队不修改偏好。`selfhost/tests/followup-browser.mjs` |
+| SH-STEER-TARGET | 发送时原轮次已完成或切换，或 App Server 在接纳前拒绝。 | 原草稿保留，拒绝无需待确认，且不会投递到新轮次或改为排队。`selfhost/tests/followup-browser.mjs`、`selfhost/tests/native-delivery.mjs`、`selfhost/tests/native-delivery-gateway.mjs` |
+| SH-STEER-NATIVE | 在隔离 Codex 和本机模型夹具中，让模型请求保持未完成，提交同轮输入。 | 原生接纳返回同一 Turn ID，同轮用户行及后续模型请求带有追加信息；可从冷启动历史读回。`selfhost/tests/native-extension-composer.mjs` |
+
+参见 [App Server 的引导接口](https://learn.chatgpt.com/docs/app-server#steer-an-active-turn)和 [OpenAI 的后续消息说明](https://learn.chatgpt.com/docs/prompting#steering-and-queuing)。
 
 ## 输入框应用、插件和技能
 

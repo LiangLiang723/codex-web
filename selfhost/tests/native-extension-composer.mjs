@@ -26,6 +26,11 @@ const marketplace = "composer-fixture";
 const pluginId = `${pluginName}@${marketplace}`;
 const app = { type: "mention", name: "Fixture App", path: "app://fixture_app" };
 const instructionPhrase = "CODEX_NATIVE_INSTRUCTION_FIXTURE_2A93FE";
+const originalPrompt = "Fixture turn to steer";
+const steerPrompt = "Change the fixture plan in this turn";
+const steerClientId = "fixture-same-turn-input";
+const initialModelRequest = Promise.withResolvers();
+const releaseModelRequest = Promise.withResolvers();
 const env = {
   HOME: fixtureHome,
   CODEX_HOME: codexHome,
@@ -35,6 +40,7 @@ const env = {
 };
 
 const requests = [];
+let heldOriginalRequest = false;
 const server = createServer(async (request, response) => {
   if (request.method !== "POST" || request.url !== "/v1/responses") {
     response.writeHead(404).end();
@@ -42,7 +48,8 @@ const server = createServer(async (request, response) => {
   }
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
-  requests.push(JSON.parse(Buffer.concat(chunks)));
+  const payload = JSON.parse(Buffer.concat(chunks));
+  requests.push(payload);
   const id = `response_${requests.length}`;
   const message = {
     type: "message",
@@ -51,11 +58,28 @@ const server = createServer(async (request, response) => {
     status: "completed",
     content: [{ type: "output_text", text: "Fixture response", annotations: [] }],
   };
+  const initialSteerStep =
+    !heldOriginalRequest && JSON.stringify(payload.input).includes(originalPrompt);
+  if (initialSteerStep) {
+    heldOriginalRequest = true;
+    initialModelRequest.resolve(payload);
+    await releaseModelRequest.promise;
+  }
+  const item = initialSteerStep
+    ? {
+        type: "function_call",
+        id: "fixture-tool-item",
+        call_id: "fixture-tool-call",
+        name: "exec_command",
+        arguments: JSON.stringify({ cmd: "printf fixture" }),
+        status: "completed",
+      }
+    : message;
   response.writeHead(200, { "Content-Type": "text/event-stream" });
   for (const event of [
     { type: "response.created", response: { id, model: "gpt-5" } },
-    { type: "response.output_item.done", output_index: 0, item: message },
-    { type: "response.completed", response: { id, status: "completed", output: [message] } },
+    { type: "response.output_item.done", output_index: 0, item },
+    { type: "response.completed", response: { id, status: "completed", output: [item] } },
   ]) {
     response.write("data: " + JSON.stringify(event) + "\n\n");
   }
@@ -69,12 +93,14 @@ async function startAppServer() {
   const appServer = child;
   const pending = new Map();
   const completed = new Map();
+  const started = [];
   const deleted = new Set();
   let nextId = 0;
   const lines = createInterface({ input: appServer.stdout });
   lines.on("line", (line) => {
     const value = JSON.parse(line);
     pending.get(value.id)?.(value);
+    if (value.method === "turn/started") started.push(value.params);
     if (value.method === "turn/completed") {
       completed.set(value.params.turn.id, value.params.turn);
       lines.emit("turnCompleted", value.params.turn);
@@ -110,6 +136,7 @@ async function startAppServer() {
 
   return {
     rpc,
+    started,
     version: info.userAgent.split(" ")[0],
     async waitForDeletion(threadId) {
       const signal = AbortSignal.timeout(15000);
@@ -263,8 +290,63 @@ trust_level = "trusted"
     sent.push({ threadId: thread.id, turnId: turn.id, text, input });
   }
 
+  const { thread: steeredThread } = await active.rpc("thread/start", { cwd });
+  const { turn: steeredTurn } = await active.rpc("turn/start", {
+    threadId: steeredThread.id,
+    input: nativeUserInputItems({ text: originalPrompt }),
+  });
+  const input = nativeUserInputItems({ text: steerPrompt });
+  const signal = AbortSignal.timeout(15000);
+  const request = await Promise.race([
+    initialModelRequest.promise,
+    once(signal, "abort").then(() => {
+      throw signal.reason;
+    }),
+  ]);
+  assert.ok(
+    request.tools.some(({ name }) => name === "exec_command"),
+    JSON.stringify(request.tools.map(({ name }) => name)),
+  );
+  await assert.rejects(
+    active.rpc("turn/steer", {
+      threadId: steeredThread.id,
+      expectedTurnId: "stale-turn",
+      input,
+    }),
+    /expected active turn id/iu,
+  );
+  const steered = await active.rpc("turn/steer", {
+    threadId: steeredThread.id,
+    expectedTurnId: steeredTurn.id,
+    clientUserMessageId: steerClientId,
+    input,
+  });
+  assert.equal(steered.turnId, steeredTurn.id);
+  releaseModelRequest.resolve();
+  const completed = await active.waitForTurn(steeredTurn.id);
+  assert.equal(completed.status, "completed", JSON.stringify(completed.error));
+  assert.deepEqual(
+    active.started
+      .filter(({ threadId }) => threadId === steeredThread.id)
+      .map(({ turn }) => turn.id),
+    [steeredTurn.id],
+  );
+  assert.ok(requests.some(({ input }) => JSON.stringify(input).includes(steerPrompt)));
+
   await stopAppServer();
   const reopened = await startAppServer();
+  const { data: steeredHistory } = await reopened.rpc("thread/turns/list", {
+    threadId: steeredThread.id,
+    limit: 5,
+    itemsView: "full",
+  });
+  const restoredSteer = steeredHistory
+    .find(({ id }) => id === steeredTurn.id)
+    ?.items.find((item) => item.type === "userMessage" && item.clientId === steerClientId);
+  assert.deepEqual(restoredSteer?.content, input);
+  console.log(
+    `PASS native steer ${active.version}: stale target, same active turn, model input and cold history`,
+  );
   for (const { threadId, turnId, text, input } of sent) {
     const { thread } = await reopened.rpc("thread/read", { threadId, includeTurns: true });
     const { data: turns } = await reopened.rpc("thread/turns/list", { threadId, limit: 5 });
@@ -305,6 +387,7 @@ trust_level = "trusted"
     `PASS native thread/delete ${reopened.version}: archived and active files, notifications, cold read`,
   );
 } finally {
+  releaseModelRequest.resolve();
   await stopAppServer();
   if (server.listening) {
     const closed = once(server, "close");

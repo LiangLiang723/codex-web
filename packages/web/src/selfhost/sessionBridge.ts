@@ -42,6 +42,7 @@ export class SessionBridge {
     private readonly emit: Emit,
     private readonly nativeProjectId: (id: string) => Promise<string | undefined>,
     loadModelCatalog?: (provider?: string) => Promise<RemoteModel[]>,
+    initialFollowupMode: "queue" | "guide" = "queue",
   ) {
     this.tasks = new NativeThreadCatalog(gateway, hostId, cwd);
     this.streams = new SessionSubscriptions(
@@ -53,6 +54,7 @@ export class SessionBridge {
       (path) => this.tasks.threads(path),
       loadModelCatalog,
     );
+    this.streams.followupMode = initialFollowupMode;
     this.turnFiles = new TurnFileBridge(
       gateway,
       hostId,
@@ -364,7 +366,8 @@ export class SessionBridge {
       followupMode: this.streams.followupMode,
     });
     if (input.delivery === "queue") this.streams.refreshThreadControls(id);
-    else if (turnId) this.streams.lastTurn.set(id, turnId);
+    // 引导回执只确认原轮次。回执晚于完成或新轮开始时不能倒写当前轮次。
+    else if (input.delivery === "startNow" && turnId) this.streams.lastTurn.set(id, turnId);
     return input;
   }
 }

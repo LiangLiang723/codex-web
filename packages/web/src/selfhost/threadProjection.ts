@@ -289,6 +289,15 @@ function nativeCompactionItem(turn: Message | undefined) {
 export function nativeTurnIsCompacting(activation: Message | undefined) {
   return Boolean(nativeCompactionItem(array(rec(rec(activation?.history).thread).turns).at(-1)));
 }
+
+function nativeSteerTurnId(turn: Message | undefined) {
+  const id = str(turn?.id);
+  // 审查和上下文压缩不接纳当前轮引导。
+  if (!id || turn?.status !== "inProgress") return undefined;
+  if (nativeCompactionItem(turn) || array(turn.items).some(({ type }) => type === "enteredReviewMode"))
+    return undefined;
+  return id;
+}
 export function threadPhase(status: unknown): SessionPhase {
   switch (status) {
     case "inProgress":
@@ -746,9 +755,17 @@ export function projectThread(
   result.availability.setFollowupMode = queueAvailable
     ? { allowed: true }
     : { allowed: false, reasonCode: "codex.nativeQueueUnavailable" };
+  const steerTurnId = nativeSteerTurnId(last);
+  const nonSteerable = phase === "running" && !steerTurnId;
   result.inputRouting =
-    compaction && !queueAvailable
-      ? { mode: "reject", reasonCode: "compactOperationLock" }
-      : computeInputRouting(context, followupMode);
+    nonSteerable && !queueAvailable
+      ? {
+          mode: "reject",
+          reasonCode: compaction ? "compactOperationLock" : "codex.nativeSteerUnavailable",
+        }
+      : {
+          ...computeInputRouting(context, nonSteerable ? "queue" : followupMode),
+          ...(steerTurnId && activation.readOnly !== true ? { steerTurnId } : {}),
+        };
   return result;
 }

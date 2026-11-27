@@ -1013,37 +1013,37 @@ export function AgentBehaviorSectionContent({
       ) : null}
 
       <SettingsGroupCard>
+        {!selfHostedBuild ? <ReplyLanguageSetting value={replyLanguage} /> : null}
+        <SettingsRow
+          searchId="settings.zcodeInteractionBehavior"
+          label={intl.formatMessage({ id: "settings.zcodeInteractionBehavior" })}
+          description={intl.formatMessage({ id: "settings.zcodeInteractionBehaviorDescription" })}
+          control={
+            <Select
+              value={zcodeInteractionBehavior}
+              onValueChange={(value) => {
+                void onZCodeInteractionBehaviorChange(value as ZCodeInteractionBehavior);
+              }}
+            >
+              <SelectTrigger
+                size="lg"
+                className="w-[260px] min-w-0 justify-between"
+                aria-label={intl.formatMessage({ id: "settings.zcodeInteractionBehavior" })}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ZCODE_INTERACTION_BEHAVIOR_OPTIONS.map((behavior) => (
+                  <SelectItem key={behavior} value={behavior}>
+                    {intl.formatMessage({ id: `settings.zcodeInteractionBehavior.option.${behavior}` })}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          }
+        />
         {!selfHostedBuild ? (
           <>
-            <ReplyLanguageSetting value={replyLanguage} />
-            <SettingsRow
-              searchId="settings.zcodeInteractionBehavior"
-              label={intl.formatMessage({ id: "settings.zcodeInteractionBehavior" })}
-              description={intl.formatMessage({
-                id: "settings.zcodeInteractionBehaviorDescription",
-              })}
-              control={
-                <Select
-                  value={zcodeInteractionBehavior}
-                  onValueChange={(value) => {
-                    void onZCodeInteractionBehaviorChange(value as ZCodeInteractionBehavior);
-                  }}
-                >
-                  <SelectTrigger size="lg" className="w-[260px] min-w-0 justify-between">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ZCODE_INTERACTION_BEHAVIOR_OPTIONS.map((behavior) => (
-                      <SelectItem key={behavior} value={behavior}>
-                        {intl.formatMessage({
-                          id: `settings.zcodeInteractionBehavior.option.${behavior}`,
-                        })}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              }
-            />
             <SettingsRow
               searchId="settings.askUserQuestionAutoResolution"
               label={intl.formatMessage({

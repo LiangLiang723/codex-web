@@ -4319,7 +4319,7 @@ const enUS: Record<string, string> = {
   "settings.messageStreamShowTodosDescription": "Show Todo tool cards inside the message stream. ",
   "settings.zcodeInteractionBehavior": "Interaction behavior",
   "settings.zcodeInteractionBehaviorDescription":
-    "While ZCode is running, add follow-up actions to the queue or guide them to run after the next tool call.",
+    "Choose whether follow-up messages steer the current run or wait for it to finish by default.",
   "settings.zcodeInteractionBehavior.option.queue": "Queue",
   "settings.zcodeInteractionBehavior.option.guide": "Guide",
   "settings.pluginAutoRecommendation": "Automatic plugin recommendations",
@@ -6915,6 +6915,7 @@ const enUS: Record<string, string> = {
   "chat.message.turnSteer.guided": "Conversation steered",
   "chat.message.turnSteer.pending": "Waiting to steer the current run…",
   "chat.followup.guideCurrent": "Steer current run",
+  "chat.followup.sendOptions": "Send options",
   "chat.followup.sendNow": "Send now",
   "chat.followup.addToQueue": "Add to queue",
   "chat.modelChangeNotice.changed": "Switched from {fromModel} to {toModel}",

@@ -3891,7 +3891,7 @@ const ruRU: Record<string, string> = {
     "Объединять последовательные вызовы Write, Edit и ApplyPatch в раздел «Изменения».",
   "settings.zcodeInteractionBehavior": "Поведение взаимодействия",
   "settings.zcodeInteractionBehaviorDescription":
-    "Пока ZCode работает, добавлять последующие действия в очередь или направлять их на выполнение после следующего вызова инструмента.",
+    "Выберите, будут ли новые сообщения по умолчанию корректировать текущую задачу или ждать её завершения.",
   "settings.zcodeInteractionBehavior.option.queue": "Очередь",
   "settings.zcodeInteractionBehavior.option.guide": "Направлять",
   "settings.askUserQuestionAutoResolution": "Автоматически продолжать вопросы",
@@ -6518,6 +6518,7 @@ const ruRU: Record<string, string> = {
   "chat.message.turnSteer.guided": "Диалог скорректирован",
   "chat.message.turnSteer.pending": "Ожидание корректировки текущего запуска…",
   "chat.followup.guideCurrent": "Скорректировать текущий запуск",
+  "chat.followup.sendOptions": "Способ отправки",
   "chat.followup.sendNow": "Отправить сейчас",
   "chat.followup.addToQueue": "Добавить в очередь",
   "chat.modelChangeNotice.changed": "Переключено с {fromModel} на {toModel}",

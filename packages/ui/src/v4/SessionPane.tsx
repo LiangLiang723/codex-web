@@ -4331,16 +4331,9 @@ export function SessionPane({
           text,
           ...submission,
           ...(options?.requestedDelivery ? { requestedDelivery: options.requestedDelivery } : {}),
+          ...(options?.expectedTurnId ? { expectedTurnId: options.expectedTurnId } : {}),
           conversationQuotes: options?.conversationQuotes,
           ...(readyAttachments.length > 0 ? { attachments: readyAttachments } : {}),
-          ...(sessionId && options?.requestedDelivery
-            ? {
-                // Bug 根因：立即发送曾先投影 QueueItem，再等待二次
-                // sendQueuedNow，导致队列中间态外泄且输入框延迟清空。现在由
-                // CLI 原子 stop + start，accepted ACK 即是 Composer 清空边界。
-                requestedDelivery: options.requestedDelivery,
-              }
-            : {}),
           ...(heldQueueDisposition ? { heldQueueDisposition } : {}),
           ...(expectedHeldQueueItemIds ? { expectedHeldQueueItemIds } : {}),
           ...(sharedContextRefs?.length ? { context_refs: sharedContextRefs } : {}),
@@ -4381,7 +4374,9 @@ export function SessionPane({
           );
           return "blocked" as const;
         }
-        throw new Error(ack.reasonCode ?? "sendText 被拒绝");
+        throw new Error(
+          (selfHostedBuild ? ack.message : undefined) ?? ack.reasonCode ?? "sendText 被拒绝",
+        );
       }
       if (draftBinding) {
         // 合并后普通首发漏传 commandId；只在 accepted 边界统计，避免预热空创建重复计数。
@@ -4510,7 +4505,7 @@ export function SessionPane({
           code:
             getRemoteConnectionFailureCode(error) ??
             (runtimeModelUnavailable ? "ZCODE_RUNTIME_MODEL_UNAVAILABLE" : "SEND_FAILED"),
-          message: runtimeModelUnavailable
+          message: runtimeModelUnavailable || (selfHostedBuild && options?.expectedTurnId)
             ? detail
             : intl.formatMessage({ id: "chat.error.sendFailed" }),
           detail,

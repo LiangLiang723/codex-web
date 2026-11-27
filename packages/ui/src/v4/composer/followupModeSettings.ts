@@ -15,6 +15,17 @@ export function resolveOppositeFollowupDelivery(
   return mode === "guide" ? "queue" : "startNow";
 }
 
+export function resolveNativeFollowupDelivery(
+  routing: InputRouting | undefined,
+  queueAvailable: boolean,
+  reverse: boolean,
+): "queue" | "guide" | undefined {
+  if (routing?.mode === "enqueue") return reverse && routing.steerTurnId ? "guide" : "queue";
+  if (routing?.mode === "guide" && routing.steerTurnId)
+    return reverse && queueAvailable ? "queue" : "guide";
+  return undefined;
+}
+
 export function shouldEnableModifiedEnterSubmit({
   inputRoutingMode,
   isMobileTextInputViewport,
@@ -62,29 +73,33 @@ export function isPrimaryFollowupModifierPressed({
 }
 
 export interface FollowupModifierTooltip {
-  delivery: "startNow" | "queue";
+  delivery: "startNow" | "queue" | "guide";
   shortcut: string;
-  titleId: "chat.followup.sendNow" | "chat.followup.addToQueue";
+  titleId: "chat.followup.sendNow" | "chat.followup.addToQueue" | "chat.followup.guideCurrent";
 }
 
 export function resolveFollowupModifierTooltip({
   enabled,
   canSend,
   modifierPressed,
-  followupMode,
+  delivery,
   isApplePlatform,
 }: {
   enabled: boolean;
   canSend: boolean;
   modifierPressed: boolean;
-  followupMode: SessionConfigState["followupMode"] | undefined;
+  delivery: FollowupModifierTooltip["delivery"] | undefined;
   isApplePlatform: boolean;
 }): FollowupModifierTooltip | null {
-  if (!enabled || !canSend || !modifierPressed || !followupMode) return null;
-  const delivery = resolveOppositeFollowupDelivery(followupMode);
+  if (!enabled || !canSend || !modifierPressed || !delivery) return null;
   return {
     delivery,
     shortcut: isApplePlatform ? "⌘ + Enter" : "Ctrl + Enter",
-    titleId: delivery === "startNow" ? "chat.followup.sendNow" : "chat.followup.addToQueue",
+    titleId:
+      delivery === "startNow"
+        ? "chat.followup.sendNow"
+        : delivery === "guide"
+          ? "chat.followup.guideCurrent"
+          : "chat.followup.addToQueue",
   };
 }

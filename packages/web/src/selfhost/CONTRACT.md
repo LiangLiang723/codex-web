@@ -10,6 +10,8 @@ Web 入口是 index.ts。协议类型位于 contract.ts，运行模块位于本�
 
 项目归属、写锁冲突、历史分页和首轮命名以 [自托管会话规格](../../../../specs/selfhost-codex/README.md) 为准。
 
+运行中发送沿用 `sendText` 和原生输入回执。会话快照的 `inputRouting.steerTurnId` 是 App Server 当前可引导的轮次，前端选择引导时将该值作为 `expectedTurnId` 随命令提交。App Server 持有引导消息和队列，Gateway 按原会话及命令身份核对回执。见[运行中发送后续消息](../../../../specs/selfhost-codex/README.md#运行中发送后续消息)。
+
 自托管的现有 TaskService/Controller 会话删除命令调用远端 `thread/delete`。只有显式确认且目标属于仍挂载的工作区时才提交，执行前读原生状态拒绝正在运行的目标。Codex 拥有历史存在性。中心账号组织服务拥有未读标记与置顶，浏览器从目录与定点查询读取投影。原生删除通知按验证后的 SSH Host 与原生 Thread 处理，切换主机不复用先前的操作或缓存。见[会话操作与设置兼容性](../../../../specs/selfhost-codex/README.md#会话操作与设置兼容性)。
 
 个性化复用 SettingService 的编辑器。Codex 用户目录由已认证 SSH worker 解析，保存携带先前所读内容和实际路径，远端锁内比对并原子写回，浏览器不能指定写入其他文件。

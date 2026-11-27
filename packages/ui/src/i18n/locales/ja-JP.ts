@@ -3920,7 +3920,7 @@ const jaJP: Record<string, string> = {
     "連続する Write、Edit、ApplyPatch の呼び出しを「変更」セクションにまとめます。",
   "settings.zcodeInteractionBehavior": "操作の動作",
   "settings.zcodeInteractionBehaviorDescription":
-    "ZCode の実行中に追加した操作を、キューに入れるか、軌道修正として次のツール呼び出しの後に反映します。",
+    "追加メッセージで現在の実行を軌道修正するか、実行の完了後に送るかを選びます。",
   "settings.zcodeInteractionBehavior.option.queue": "キュー",
   "settings.zcodeInteractionBehavior.option.guide": "ガイド",
   "settings.askUserQuestionAutoResolution": "質問を自動で続行",
@@ -6545,6 +6545,7 @@ const jaJP: Record<string, string> = {
   "chat.message.turnSteer.guided": "軌道修正しました",
   "chat.message.turnSteer.pending": "現在の実行の軌道修正を待っています…",
   "chat.followup.guideCurrent": "現在の実行を軌道修正",
+  "chat.followup.sendOptions": "送信方法",
   "chat.followup.sendNow": "今すぐ送信",
   "chat.followup.addToQueue": "キューに追加",
   "chat.modelChangeNotice.changed": "{fromModel} から {toModel}に切り替えました",

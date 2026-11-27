@@ -182,6 +182,8 @@ export const inputRoutingSchema = z.object({
   mode: z.enum(["startNow", "enqueue", "guide", "reject", "choice"]),
   // mode=reject 必带；enqueue/guide/choice 可带（如 guide 不合格回退原因）。
   reasonCode: z.string().optional(),
+  // 自托管 App Server 允许引导的当前原生轮次。
+  steerTurnId: z.string().min(1).optional(),
 });
 export type InputRouting = z.infer<typeof inputRoutingSchema>;
 

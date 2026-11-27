@@ -142,7 +142,13 @@ try {
       const guided = await run("sendText", {
         text: "Now",
         requestedDelivery: "guide",
+        expectedTurnId: "running",
         attachments,
+      });
+      const staleGuide = await run("sendText", {
+        text: "This was meant for the earlier turn",
+        requestedDelivery: "guide",
+        expectedTurnId: "earlier",
       });
       const deleted = await run("deleteQueueItem", { queueItemId: queuedInput.id });
       const { rows } = await afterReload.handle("conversationRowsRangeV4", { sessionId: threadId });
@@ -228,6 +234,26 @@ try {
         [],
         new Map(),
       );
+      const reviewing = projectThread(
+        {
+          nativeControls: { queue: true },
+          history: {
+            thread: {
+              turns: [
+                {
+                  ...runningTurn,
+                  items: [{ id: "review", type: "enteredReviewMode", review: "fixture" }],
+                },
+              ],
+            },
+          },
+        },
+        threadId,
+        "epoch",
+        2,
+        [],
+        new Map(),
+      );
       bridge.dispose();
       afterReload.dispose();
       return {
@@ -238,12 +264,14 @@ try {
         controls,
         queued,
         guided,
+        staleGuide,
         deleted,
         fork,
         staleFork,
         busyCompact,
         compact,
         compacting,
+        reviewing,
       };
     });
     assert.equal(
@@ -270,6 +298,8 @@ try {
     );
     assert.equal(result.queued.result.delivery, "queue");
     assert.equal(result.guided.result.delivery, "guide");
+    assert.equal(result.staleGuide.status, "failed");
+    assert(!result.calls.some(({ text }) => text === "This was meant for the earlier turn"));
     const queue = result.calls.find(({ type }) => type === "thread.queue.add");
     const steer = result.calls.find(({ type }) => type === "turn.steer");
     assert.equal(steer.expectedTurnId, "running");
@@ -290,6 +320,10 @@ try {
       result.compacting.control.activeWorks.map(({ kind }) => kind),
       ["compact"],
     );
+    assert.equal(result.compacting.inputRouting.mode, "enqueue");
+    assert.equal(result.compacting.inputRouting.steerTurnId, undefined);
+    assert.equal(result.reviewing.inputRouting.mode, "enqueue");
+    assert.equal(result.reviewing.inputRouting.steerTurnId, undefined);
     console.log("Native delivery, queue and completed turn projection verified");
   } finally {
     await browser.close();

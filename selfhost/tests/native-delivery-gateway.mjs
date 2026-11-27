@@ -48,7 +48,12 @@ try {
     memory:
       "export const currentGatewayUserId = () => 1; export const runWithGatewayUser = (_, fn) => fn();",
     hosts: "export const hostStore = {};",
-    errors: "export class CodexRpcError extends Error {}",
+    errors: `export class CodexRpcError extends Error {
+      constructor(rpcMethod, rpcCode, message, rpcData) {
+        super(message);
+        Object.assign(this, { rpcMethod, rpcCode, rpcData });
+      }
+    }`,
     database: "export const gatewayDatabase = () => globalThis.deliveryFixture.db;",
     broker:
       "export const threadBroker = { getHostClient: async () => globalThis.deliveryFixture.client };",
@@ -60,6 +65,7 @@ try {
         export { createNativeDeliveryThread, recordNativeDelivery, queryNativeDelivery }
           from './server/utils/selfhost-delivery';
         export { remoteHosts } from './server/utils/gateway/state/remote-hosts';
+        export { CodexRpcError } from './server/utils/gateway/http/errors';
       `,
     },
     bundle: true,
@@ -181,6 +187,30 @@ try {
   ]);
   assert.equal(legacy.state, "accepted");
   assert.equal(legacy.turnId, "old-turn");
+  for (const [message, data] of [
+    ["no active turn to steer"],
+    ["expected active turn id old-turn but found new-turn"],
+    [
+      "cannot steer the active turn",
+      { codexErrorInfo: { activeTurnNotSteerable: { turnKind: "review" } } },
+    ],
+  ]) {
+    const commandId = randomUUID();
+    const refused = await gateway.recordNativeDelivery(
+      host,
+      threadId,
+      commandId,
+      "guide",
+      async () => {
+        throw new gateway.CodexRpcError("turn/steer", -32600, message, data);
+      },
+    );
+    assert.equal(refused.state, "rejected");
+    const [stored] = await gateway.queryNativeDelivery(host, cwd, [
+      { sessionId: threadId, commandId },
+    ]);
+    assert.equal(stored.state, "rejected");
+  }
   gateway.remoteHosts.bind(host, "different-key:epoch-3", {}, "different-key");
   const [wrongHost] = await gateway.queryNativeDelivery(host, cwd, lookup);
   assert.equal(wrongHost.state, "missing");

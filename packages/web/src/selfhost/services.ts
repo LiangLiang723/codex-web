@@ -216,6 +216,7 @@ export async function openWorkspace(
           (await gateway.projects(hostId)).find((project) => project.nativeId === projectId)
             ?.nativeId,
         catalog,
+        preferences.zcodeInteractionBehavior === "guide" ? "guide" : "queue",
       );
       bridges.set(target, bridge);
     }

@@ -5757,6 +5757,24 @@ nodes:
       - symbol: "NativeCommandActivity"
         file: "packages/ui/src/v4/ConversationRowView.tsx"
 
+  - id: "capability.selfhost-codex-followup"
+    kind: "capability"
+    label: "Send a follow-up to a running Codex turn or native queue"
+    aliases: ["直接插入消息", "引导当前任务", "发送方式", "Codex turn/steer"]
+    docs: ["specs/selfhost-codex/README.md", "packages/web/src/selfhost/CONTRACT.md"]
+    codeSeeds:
+      - symbol: "ConversationComposer"
+        file: "packages/ui/src/v4/ConversationComposer.tsx"
+      - symbol: "AgentBehaviorSectionContent"
+        file: "packages/ui/src/settingsPageHelpers.tsx"
+      - symbol: "submitNativeInput"
+        file: "packages/web/src/selfhost/nativeDelivery.ts"
+      - symbol: "recordNativeDelivery"
+        file: "selfhost/gateway/overlay/utils/selfhost-delivery.ts"
+    invariants:
+      - "The selected Codex App Server owns active turns and queued inputs. A steer targets the turn seen at submission and uses the existing delivery receipt."
+      - "Desktop and phone Web use the same replayable projection. The account setting controls the default and the one-message choice does not change the setting."
+
   - id: "capability.selfhost-brand-pet"
     kind: "capability"
     label: "Codex Web marks, theme and conversation pet"
@@ -5822,6 +5840,10 @@ nodes:
       - "The active native request supplies the displayed approval decisions and the exact prefix tokens returned to Codex."
 
 edges:
+  - from: "capability.selfhost-codex-followup"
+    to: "surface.selfhost-codex-conversation"
+    type: "renders-in"
+    rank: "must-inspect"
   - from: "capability.selfhost-brand-pet"
     to: "surface.selfhost-codex-conversation"
     type: "renders-in"
