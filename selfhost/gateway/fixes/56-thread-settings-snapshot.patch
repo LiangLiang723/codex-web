@@ -1,0 +1,36 @@
+--- a/server/utils/gateway/runtime/thread-settings.ts
++++ b/server/utils/gateway/runtime/thread-settings.ts
+@@ -3,6 +3,7 @@
+ import { buildAppServerCollaborationMode } from "../protocol/thread-payload";
+ import { parseTurnSettingsUpdateResponse } from "~~/shared/runtime/app-server";
+ import { writeThreadName } from "../../selfhost-thread-title";
++import { threadRuntimeEvents } from "./thread-runtime-events";
+ 
+ export class ThreadSettingsService {
+   constructor(private readonly registry: ControllerRegistry) {}
+@@ -44,6 +45,24 @@
+       params.collaborationMode = buildAppServerCollaborationMode(input.collaborationMode);
+     }
+     return this.registry.withScopedSubscription(host, threadId, (controller) =>
+-      controller.enqueue(() => controller.client.request("thread/settings/update", params)),
++      controller.enqueue(async () => {
++        const before = controller.getOpenSnapshot()?.threadSettings ?? controller.getResumeSettings();
++        const result = await controller.client.request("thread/settings/update", params);
++        const after = controller.getOpenSnapshot()?.threadSettings ?? controller.getResumeSettings();
++        // 原生成功回执可以是空对象，设置通知也不是逐请求回执。仅在通知尚未更新快照时，
++        // 将 App Server 已接受的配置合入原有快照和重放流，重开会话即可读到同一状态。
++        const collaboration = input.collaborationMode ?? before?.collaborationMode;
++        if (before && before === after && collaboration) {
++          threadRuntimeEvents.record(host.id, threadId, {
++            type: "thread.settings.updated",
++            threadSettings: {
++              ...before,
++              ...input,
++              collaborationMode: buildAppServerCollaborationMode(collaboration),
++            },
++          });
++        }
++        return result;
++      }),
+     );
+   }

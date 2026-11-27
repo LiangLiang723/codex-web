@@ -8,12 +8,12 @@ const vite = await createServer({
   configFile: resolve(root, "vite.config.ts"),
   mode: "selfhost",
   logLevel: "error",
-  server: { middlewareMode: true, hmr: false, watch: null },
+  server: { middlewareMode: true, hmr: false, watch: null, ws: false },
 });
 const rows = [
-  { id: "a-old", cwd: "/A", createdAt: 1, updatedAt: 9, pinned: true },
-  { id: "b-new", cwd: "/B", createdAt: 5, updatedAt: 5 },
-  { id: "a-new", cwd: "/A", createdAt: 4, updatedAt: 4 },
+  { id: "a-old", cwd: "/A", createdAt: 1, recencyAt: 9, updatedAt: 9, pinned: true },
+  { id: "b-new", cwd: "/B", createdAt: 5, recencyAt: 5, updatedAt: 5 },
+  { id: "a-new", cwd: "/A", createdAt: 4, recencyAt: 4, updatedAt: 4 },
 ].map((t) => ({ ...t, name: t.id, status: { type: "idle" } }));
 const calls = [];
 const listCalls = [];
@@ -90,12 +90,14 @@ const gateway = {
       const cwd = u.searchParams.get("cwd");
       const ids = u.searchParams.get("includedThreadIds")?.split(",");
       const archived = u.searchParams.get("archived") === "true";
-      const sortKey = u.searchParams.get("sortKey") === "created_at" ? "createdAt" : "updatedAt";
+      const sortKey = u.searchParams.get("sortKey");
+      const sortTime = (t) => sortKey === "created_at" ? t.createdAt :
+        sortKey === "recency_at" ? (t.recencyAt ?? t.createdAt) : t.updatedAt;
       const offset = Number(u.searchParams.get("cursor") ?? 0);
       const limit = Number(u.searchParams.get("limit") ?? 100);
       const scoped = threadRows
         .filter((t) => !!t.archived === archived && (!cwd || t.cwd === cwd) && (!ids || ids.includes(t.id)))
-        .sort((a, b) => b[sortKey] - a[sortKey]);
+        .sort((a, b) => sortTime(b) - sortTime(a));
       return schema.parse({
         nextCursor: offset + limit < scoped.length ? String(offset + limit) : null,
         data: scoped.slice(offset, offset + limit),
@@ -142,7 +144,27 @@ const gateway = {
 globalThis.document = Object.assign(new EventTarget(), { hidden: true });
 globalThis.window = new EventTarget();
 
+async function verifyNativeRecency(tasks) {
+  const original = threadRows;
+  const query = { kind: "timeline", workspaceScopes: "host", sortBy: "updated" };
+  const order = async () => (await tasks.listTaskList(query)).items.map((item) => item.taskId);
+  try {
+    assert.deepEqual(await order(), ["a-old", "b-new", "a-new"]);
+    threadRows = threadRows.map((thread) =>
+      thread.id === "a-new" ? { ...thread, updatedAt: 20 } : thread,
+    );
+    assert.deepEqual(await order(), ["a-old", "b-new", "a-new"], "stream writes must preserve order");
+    threadRows = threadRows.map((thread) =>
+      thread.id === "a-new" ? { ...thread, recencyAt: 21 } : thread,
+    );
+    assert.deepEqual(await order(), ["a-new", "a-old", "b-new"]);
+  } finally {
+    threadRows = original;
+  }
+}
+
 async function verifyNativeCatalogBudget(tasks) {
+  await verifyNativeRecency(tasks);
   const originalRows = threadRows;
   threadRows = Array.from({ length: 600 }, (_, index) => ({
     id: `large-${index}`,
@@ -211,7 +233,7 @@ async function verifyNativeCatalogBudget(tasks) {
     await new Promise((done) => setImmediate(done));
     assert.equal(listCalls.length, 1, "directory preview should stop after the first page");
     assert.equal(listCalls[0].get("limit"), "25");
-    assert.equal(listCalls[0].get("sortKey"), "updated_at");
+    assert.equal(listCalls[0].get("sortKey"), "recency_at");
     assert.equal(listCalls[0].get("discoverProjects"), "false");
     assert.equal(listCalls[0].get("cursor"), null);
     console.log("PASS 600 threads: scoped IDs, concurrent exact total, refreshed reads and one-page preview");

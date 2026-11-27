@@ -79,7 +79,9 @@ export function resolveAssistantCopyText(
 
   const segments =
     unit.assistantTextRows.length > 0
-      ? unit.assistantTextRows.map((segment) => segment.text)
+      ? unit.assistantTextRows
+          .filter((segment) => segment.presentation !== "progress")
+          .map((segment) => segment.text)
       : [unit.latestAssistantTextRow.text];
   const includedSegments = new Set(segments);
   for (const row of unit.assistantWorkRows) {

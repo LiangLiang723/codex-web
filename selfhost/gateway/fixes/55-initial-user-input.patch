@@ -1,0 +1,72 @@
+--- a/server/utils/gateway/runtime/accepted-user-message.ts
++++ b/server/utils/gateway/runtime/accepted-user-message.ts
+@@ -9,8 +9,10 @@
+   turnId: string;
+   clientUserMessageId: string;
+   content: Record<string, unknown>[];
++  startsTurn?: boolean;
+ }) {
+-  if (acceptedUserMessageAlreadyRecorded(input)) return;
++  const recorded = recordedUserMessage(input);
++  if (recorded && (!input.startsTurn || recorded.startsTurn === true)) return;
+ 
+   // App Server persists accepted turn/start and turn/steer input before it necessarily emits the
+   // matching user-message lifecycle item. The submitting browser has an optimistic row, but every
+@@ -23,32 +25,32 @@
+     type: "timeline.item.upsert",
+     item: {
+       type: "userMessage",
+-      id: input.clientUserMessageId,
++      id: recorded?.id ?? input.clientUserMessageId,
+       clientId: input.clientUserMessageId,
+       turnId: input.turnId,
+-      content: input.content,
++      // 首条输入的回执可能排在答复之后。用接纳类型补齐次序事实，已到达的原生正文保持原样。
++      ...(input.startsTurn ? { startsTurn: true } : {}),
++      content: recorded?.content ?? input.content,
+     },
+   });
+ }
+ 
+-function acceptedUserMessageAlreadyRecorded(input: {
++function recordedUserMessage(input: {
+   hostId: number;
+   threadId: string;
+   clientUserMessageId: string;
+ }) {
+   const snapshot = threadSnapshotStore.get(input.hostId, input.threadId);
+-  if (
+-    snapshot?.history.thread.turns.some((turn) =>
+-      turn.items?.some((item) => item.clientId === input.clientUserMessageId),
+-    ) === true
+-  ) {
+-    return true;
++  for (const turn of snapshot?.history.thread.turns ?? []) {
++    const item = turn.items?.find((item) => item.clientId === input.clientUserMessageId);
++    if (item) return item;
+   }
+ 
+-  // Notifications can win the RPC-response race before a snapshot exists. Check the bounded event
+-  // replay buffer as well so a late command acknowledgement never overwrites the provider item.
+-  return gatewayEventStore.list(input.hostId, input.threadId, 0, 500).some((event) => {
+-    if (event.event.type !== "timeline.item.upsert") return false;
+-    return recordFromUnknown(event.event.item)?.clientId === input.clientUserMessageId;
+-  });
++  // 原生通知也可能先于 RPC 回执，按同一个客户端消息 ID 更新原生条目。
++  for (const event of gatewayEventStore.list(input.hostId, input.threadId, 0, 500).toReversed()) {
++    if (event.event.type !== "timeline.item.upsert") continue;
++    const item = recordFromUnknown(event.event.item);
++    if (item?.clientId === input.clientUserMessageId) return item;
++  }
++  return undefined;
+ }
+--- a/server/utils/gateway/runtime/turn-commands.ts
++++ b/server/utils/gateway/runtime/turn-commands.ts
+@@ -56,6 +56,7 @@
+           hostId: host.id,
+           threadId,
+           turnId,
++          startsTurn: true,
+           clientUserMessageId,
+           content: buildUserInput(input),
+         });

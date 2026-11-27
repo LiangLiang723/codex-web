@@ -1,4 +1,5 @@
 import type { ZCodeTaskMeta } from "@zcode/shared";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import type { TaskListRowActivity } from "@/v4/taskListRowActivity.js";
 
 // 行根同时承载选择、拖拽和菜单；行内按钮、交互胶囊与工作流运行行有自己的点击语义，
@@ -35,13 +36,24 @@ export function deriveTaskLeadingIndicator(
     return "error";
   }
 
+  // Codex 等待用户操作时由独立提示展示，只有正在执行时才继续转圈。
+  const isWorking = activity?.phase === "prewarming" || activity?.phase === "running";
+  if (
+    selfHostedBuild &&
+    isWorking &&
+    !activity?.pendingInteractions?.permissionCount &&
+    !activity?.pendingInteractions?.userInputCount
+  ) {
+    return "loading";
+  }
+
   // unread 是 tasks-index membership 字段，蓝点必须直接读取当前
   // query-cache row；不再回退旧 Zustand map，避免两个未读权威互相打架。
   if (typeof task.unreadAt === "number") {
     return "unread";
   }
 
-  if (activity?.phase === "prewarming" || activity?.phase === "running") {
+  if (!selfHostedBuild && isWorking) {
     return "loading";
   }
 

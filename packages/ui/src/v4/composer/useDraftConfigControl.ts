@@ -30,10 +30,14 @@ import { useZCodeSessionService } from "@/hooks/useZCodeSessionService.js";
 import { useSettings } from "@/hooks/useSettingService.js";
 import { parseModelPickerValue } from "@/lib/zcodeSessionProjection.js";
 import {
+  acceptComposerRecentReceipt,
   isSameModelSelection,
+  prepareComposerRecentReceipt,
+  readComposerRecent,
   replaceComposerRecentModelSelection,
   resolveDraftInitialModelSelection,
 } from "@/lib/composerRecent.js";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { initializeNewTaskDraft } from "@/v4/composer/newTaskDraft.js";
 import { useComposerClientNamespace, useOptionalServices } from "@/hooks/useServices.js";
 import { resolveComposerScope, composerScopeKey } from "@/v4/composer/composerDraftStore.js";
@@ -382,11 +386,15 @@ export function useDraftConfigControl(params: {
     if (firstSnapshot && currentState.initialization === "session") {
       // 草稿正文存在时曾保留旧模型，导致离开期间已确认的调档在返回发送时被撤销。
       // 普通会话配置以 Session 为准，保留正文；新任务和消息编辑 scope 不走此恢复分支。
+      // App Server 重启会重置运行时设置。会话自己的确认回执单独保存下一轮输入选择。
+      const remembered = selfHostedBuild
+        ? readComposerRecent(workspacePath, workspaceIdentity, undefined, rootScope, sessionId)
+        : null;
       draft = {
         ...draft,
-        mode: currentMode,
-        planEnabled: currentPlan,
-        modelSelection: sessionConfig.modelSelection,
+        mode: remembered?.mode && remembered.mode !== "plan" ? remembered.mode : currentMode,
+        planEnabled: remembered?.planEnabled ?? currentPlan,
+        modelSelection: remembered?.modelSelection ?? sessionConfig.modelSelection,
       };
     } else if (previous) {
       // 只处理本次打开后出现的新关联；使用最新快照值，不能从历史事件推导固定 yolo/Plan。
@@ -1180,11 +1188,16 @@ export function useDraftConfigControl(params: {
         workspaceIdentity: workspaceIdentity ?? null,
       });
       updateDraftConfig((current) => applyDraftModelSelection(current, modelSelection));
+      if (selfHostedBuild && sessionId === null) {
+        acceptComposerRecentReceipt(prepareComposerRecentReceipt(rootScope, { modelSelection }));
+      }
     },
     [
       modelSelectionView,
       modelSelectionRead.state,
       updateDraftConfig,
+      rootScope,
+      sessionId,
       workspaceIdentity,
       workspacePath,
     ],
@@ -1214,29 +1227,40 @@ export function useDraftConfigControl(params: {
           thought,
         };
       });
+      if (selfHostedBuild && sessionId === null) {
+        acceptComposerRecentReceipt(prepareComposerRecentReceipt(rootScope, {
+          modelSelection: draftConfigRef.current.modelSelection,
+        }));
+      }
     },
-    [updateDraftConfig],
+    [draftConfigRef, rootScope, sessionId, updateDraftConfig],
   );
 
   const handleDraftSwitchMode = useCallback(
     (mode: string) => {
       if (mode === "plan" || mode === "plan-off") {
+        const planEnabled = mode === "plan";
         updateComposerDraft((current) => ({
           ...current,
           mode: current.mode === "plan" ? "build" : (current.mode ?? "build"),
-          planEnabled: mode === "plan",
+          planEnabled,
         }));
+        if (selfHostedBuild && sessionId === null)
+          acceptComposerRecentReceipt(prepareComposerRecentReceipt(rootScope, { planEnabled }));
         return;
       }
       // 模式与模型同属当前 scope；不再写全局偏好，避免别的任务反向覆盖。
       const parsed = submissionModeSchema.safeParse(mode);
-      if (parsed.success)
+      if (parsed.success) {
         updateComposerDraft((current) => ({
           ...current,
           mode: parsed.data,
         }));
+        if (selfHostedBuild && sessionId === null)
+          acceptComposerRecentReceipt(prepareComposerRecentReceipt(rootScope, { mode: parsed.data }));
+      }
     },
-    [updateComposerDraft],
+    [rootScope, sessionId, updateComposerDraft],
   );
 
   const keepEditConfigOnExit = useCallback(

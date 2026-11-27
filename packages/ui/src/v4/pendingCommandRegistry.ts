@@ -403,7 +403,7 @@ export class PendingCommandRegistry {
   private acceptComposer(entry: PendingCommandEntry): boolean {
     const composer = entry.clientContext?.composer;
     if (!composer) return true;
-    if (!acceptComposerRecentReceipt(composer, this.storage)) return false;
+    if (!acceptComposerRecentReceipt(composer, this.storage, entry.sessionId)) return false;
     try {
       if (composer.draftId && this.ownsPendingDraft(entry)) {
         const workspace = entry.clientContext?.workspace;

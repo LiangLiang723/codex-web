@@ -1,6 +1,7 @@
 import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 import { isHighspeedProviderId } from "@zcode/shared";
 import { modelSelectionSchema, type ModelSelection } from "@zcode/shared/model-selection";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { submissionModeSchema, type SubmissionMode } from "@zcode/shared/zcode-protocol-v4";
 import type { ModelSelectionView } from "@zcode/services";
 import { logger } from "@/logger.js";
@@ -17,6 +18,7 @@ interface StorageLike {
 interface ComposerRecent {
   readonly modelSelection?: ModelSelection;
   readonly mode?: SubmissionMode;
+  readonly planEnabled?: boolean;
 }
 
 interface RecentScopeReceipt {
@@ -29,7 +31,7 @@ export interface FullAccessRecentReceipt extends RecentScopeReceipt {
 }
 
 export interface ComposerRecentReceipt extends RecentScopeReceipt {
-  selection: { modelSelection: ModelSelection; mode: SubmissionMode };
+  selection: ComposerRecent;
 }
 let lastReceiptOrder = 0;
 export function captureRecentOrder(): number {
@@ -50,39 +52,43 @@ export function prepareComposerRecentReceipt(
 export function acceptComposerRecentReceipt(
   receipt: ComposerRecentReceipt | FullAccessRecentReceipt,
   storage: StorageLike | null = browserStorage(),
+  sessionId?: string | null,
 ): boolean {
   if (!storage) return false;
   const submission = "selection" in receipt ? receipt.selection : undefined;
   const selection = modelSelectionSchema.safeParse(submission?.modelSelection);
   const mode = submissionModeSchema.safeParse("mode" in receipt ? receipt.mode : submission?.mode);
-  if (
-    !mode.success ||
-    (submission && (!selection.success || isHighspeedProviderId(selection.data.providerId)))
-  )
-    return true;
-  const key = resolveComposerRecentKey("", undefined, receipt.scope);
+  if (!selfHostedBuild && (!mode.success || (submission && !selection.success))) return true;
+  if (selection.success && isHighspeedProviderId(selection.data.providerId)) return true;
+  const keys = [resolveComposerRecentKey("", undefined, receipt.scope)];
+  if (selfHostedBuild && sessionId)
+    keys.push(resolveComposerRecentKey("", undefined, receipt.scope, sessionId));
   try {
-    let previous: { order?: number; modeOrder?: number } | null = null;
-    try {
-      previous = JSON.parse(storage.getItem(key) ?? "null");
-    } catch {
-      /* 损坏偏好可被真实接纳替换。 */
+    for (const key of keys) {
+      let previous: { order?: number; modeOrder?: number; planOrder?: number } | null = null;
+      try {
+        previous = JSON.parse(storage.getItem(key) ?? "null");
+      } catch {
+        /* 损坏偏好可被真实接纳替换。 */
+      }
+      if (!selfHostedBuild && typeof previous?.order === "number" && previous.order >= receipt.order)
+        continue;
+      // 三项选择独立确认，避免迟到或重复的回执回滚已经保存的选择。
+      const updateModel = selection.success && receipt.order > (previous?.order ?? -1);
+      const updateMode = mode.success && receipt.order > (previous?.modeOrder ?? previous?.order ?? -1);
+      const updatePlan =
+        typeof submission?.planEnabled === "boolean" && receipt.order > (previous?.planOrder ?? -1);
+      if (!updateModel && !updateMode && !updatePlan) continue;
+      storage.setItem(
+        key,
+        JSON.stringify({
+          ...previous,
+          ...(updateModel ? { modelSelection: selection.data, order: receipt.order } : {}),
+          ...(updateMode ? { mode: mode.data, modeOrder: receipt.order } : {}),
+          ...(updatePlan ? { planEnabled: submission.planEnabled, planOrder: receipt.order } : {}),
+        }),
+      );
     }
-    // 回执/查询/快照可能重复到达；持久化顺序让刷新后的旧回执也不能回滚默认配置。
-    if (typeof previous?.order === "number" && previous.order >= receipt.order) return true;
-    // 授权只推进权限顺序。较早提交的回执仍可补齐模型，但不能撤销较新的授权。
-    const updateMode = receipt.order > (previous?.modeOrder ?? previous?.order ?? -1);
-    if (!submission && !updateMode) return true;
-    storage.setItem(
-      key,
-      JSON.stringify({
-        ...previous,
-        ...(submission && selection.success
-          ? { modelSelection: selection.data, order: receipt.order }
-          : {}),
-        ...(updateMode ? { mode: mode.data, modeOrder: receipt.order } : {}),
-      }),
-    );
     return true;
   } catch (error) {
     logger.warn("[ComposerRecent] 接纳配置交接失败，保留命令恢复线索", error);
@@ -97,8 +103,17 @@ function resolveComposerRecentKey(
   workspacePath: string,
   workspaceIdentity?: string,
   scope?: ComposerScope,
+  sessionId?: string,
 ): string {
-  if (scope) return `zcode-composer-recent:v2:${composerScopeKey(scope)}`;
+  if (scope) {
+    // 账号存储已经隔离用户，命名空间再按 SSH 主机和目录限定。
+    // 项目仍隔离草稿正文，同目录的新任务沿用最近选择。
+    const recentScope = selfHostedBuild
+      ? { ...scope, projectId: null }
+      : scope;
+    const key = `zcode-composer-recent:v2:${composerScopeKey(recentScope)}`;
+    return selfHostedBuild && sessionId ? `${key}:thread:${JSON.stringify(sessionId)}` : key;
+  }
   const workspaceKey = workspaceIdentity?.trim() || workspacePath;
   return `${COMPOSER_RECENT_KEY_PREFIX}:${workspaceKey}`;
 }
@@ -108,10 +123,15 @@ export function readComposerRecent(
   workspaceIdentity?: string,
   storage: StorageLike | null = browserStorage(),
   scope?: ComposerScope,
+  sessionId?: string,
 ): ComposerRecent | null {
   if (!storage) return null;
   try {
-    const raw = storage.getItem(resolveComposerRecentKey(workspacePath, workspaceIdentity, scope));
+    const key = resolveComposerRecentKey(workspacePath, workspaceIdentity, scope, sessionId);
+    const legacyProjectKey = selfHostedBuild && !sessionId && scope?.projectId
+      ? `zcode-composer-recent:v2:${composerScopeKey(scope)}`
+      : undefined;
+    const raw = storage.getItem(key) ?? (legacyProjectKey ? storage.getItem(legacyProjectKey) : null);
     if (!raw) return null;
     const record: unknown = JSON.parse(raw);
     if (!record || typeof record !== "object" || Array.isArray(record)) return null;
@@ -127,10 +147,13 @@ export function readComposerRecent(
       selection.success && !isHighspeedProviderId(selection.data.providerId)
         ? selection.data
         : undefined;
-    if (!healedSelection && !mode.success) return null;
+    const planEnabled = "planEnabled" in record && typeof record.planEnabled === "boolean"
+      ? record.planEnabled : undefined;
+    if (!healedSelection && !mode.success && planEnabled === undefined) return null;
     return {
       ...(healedSelection ? { modelSelection: healedSelection } : {}),
       ...(mode.success ? { mode: mode.data } : {}),
+      ...(planEnabled === undefined ? {} : { planEnabled }),
     };
   } catch {
     return null;

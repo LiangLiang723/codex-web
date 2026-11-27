@@ -5,7 +5,7 @@
    cursor: z.string().trim().nullable().optional(),
    useRemoteStateIndexOnly: z.coerce.boolean().optional(),
 -});
-+  sortKey: z.enum(["created_at", "updated_at"]).optional(),
++  sortKey: z.enum(["created_at", "updated_at", "recency_at"]).optional(),
 +  discoverProjects: z.enum(["true", "false"]).transform(value => value === "true").optional(),
 +  includedThreadIds: z.string()
 +    .transform(value => [...new Set(value.split(",").map(id => id.trim()))])
@@ -104,11 +104,11 @@
    cachedThreads: AppServerThread[],
    indexedThreads: ReturnType<typeof threadMetadataStore.list>,
    searchTerm: string | null,
-+  sortKey?: "created_at" | "updated_at",
++  sortKey?: "created_at" | "updated_at" | "recency_at",
  ) {
    const metadataById = new Map(indexedThreads.map((thread) => [thread.id, thread]));
    const threadsById = new Map(remoteThreads.map((thread) => [thread.id, thread]));
-@@ -115,9 +150,9 @@
+@@ -115,9 +150,10 @@
          .filter((value): value is string => typeof value === "string")
          .some((value) => String(value).toLowerCase().includes(normalizedSearch));
      })
@@ -120,6 +120,7 @@
 +    .sort((left, right) => {
 +      if (sortKey === "created_at") return right.createdAt - left.createdAt || left.id.localeCompare(right.id);
 +      if (sortKey === "updated_at") return right.updatedAt - left.updatedAt || left.id.localeCompare(right.id);
++      if (sortKey === "recency_at") return (right.recencyAt ?? right.createdAt) - (left.recencyAt ?? left.createdAt) || left.id.localeCompare(right.id);
 +      return Number(right.recencyAt ?? right.updatedAt ?? 0) - Number(left.recencyAt ?? left.updatedAt ?? 0);
 +    }) satisfies GatewayThread[];
  }

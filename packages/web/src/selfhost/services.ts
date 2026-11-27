@@ -10,7 +10,7 @@ import {
   type Project,
   type RemoteModel,
 } from "./gateway.js";
-import { rec, str, array, num, providerId } from "./threadProjection.js";
+import { rec, str, array, num, providerId, threadName } from "./threadProjection.js";
 import { codexRequest, extensionRequest } from "./capabilities.js";
 import { createCodexAppsService } from "./codexApps.js";
 import { FileWatches } from "./fileWatches.js";
@@ -234,12 +234,14 @@ export async function openWorkspace(
     if (document.hidden || polling) return;
     polling = true;
     try {
-      const page = await bridge.tasks.page({ sortKey: "updated_at" }, 25);
+      const page = await bridge.tasks.page({}, 25);
       const signature = JSON.stringify(
-        page.data.slice(0, 25).map((t) => [t.id, t.title, t.updatedAt, t.status]),
+        page.data.map((t) => [t.id, threadName(t), t.recencyAt ?? t.createdAt, t.status]),
       );
-      if (lastList && signature !== lastList)
+      if (lastList && signature !== lastList) {
         emit("broadcast", "onMessage", { channel: "state:projects", payload: {} });
+        for (const source of bridges.values()) source.refreshIndex();
+      }
       lastList = signature;
     } catch {
     } finally {

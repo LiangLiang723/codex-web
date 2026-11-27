@@ -9,6 +9,7 @@ import { type Gateway, type Message, type RemoteModel } from "./gateway.js";
 import {
   array,
   nativeMode,
+  nativeSandboxPolicy,
   num,
   projectThread,
   rec,
@@ -65,6 +66,9 @@ export class SessionBridge {
   }
   get epoch() {
     return this.streams.epoch;
+  }
+  refreshIndex() {
+    this.streams.refreshIndex();
   }
   dispose() {
     this.streams.dispose();
@@ -191,7 +195,7 @@ export class SessionBridge {
           model,
           effort,
           ...(nativeProjectId ? { projectId: nativeProjectId } : {}),
-          ...(config.mode ? nativeMode(config.mode) : {}),
+          ...(first.mode || config.mode ? nativeMode(first.mode ?? config.mode) : {}),
         },
       );
       // 网关已在首轮提交前绑定真实 Thread；任何晚回执都查询同一个创建命令。
@@ -199,8 +203,7 @@ export class SessionBridge {
         !previous && firstInputExpected
           ? await this.sendText(id, { ...first, modelSelection: selection }, commandId, true)
           : undefined;
-      for (const s of this.streams.subscriptions.values())
-        if (s.kind === "index") this.streams.defer(s, 0);
+      this.refreshIndex();
       this.emit("zcode-task", "onDynamicWorkspaceEvent", {
         type: "workspace_task_list_changed",
         workspacePath: this.cwd,
@@ -325,24 +328,27 @@ export class SessionBridge {
     }
     if (type === "switchModelConfig" || type === "switchCollaborationMode") {
       const settings: Message = { hostId: this.hostId, threadId: sessionId };
-      if (model) settings.model = model;
-      if (effort) settings.effort = effort;
-      if (p.mode) settings.approvalPolicy = nativeMode(p.mode).approvalPolicy;
-      if (typeof p.planEnabled === "boolean" || p.mode !== undefined)
+      const current = rec(opened?.threadSettings ?? rec(opened?.history).settings);
+      if (type === "switchModelConfig") {
+        if (model) settings.model = model;
+        if (effort) settings.effort = effort;
+      } else if (typeof p.planEnabled === "boolean" || p.mode === "plan") {
+        const activeModel = str(current.model) || str(rec(opened?.thread).model);
+        if (!activeModel) throw Error("Codex 会话模型尚未同步");
         settings.collaborationMode = {
-          mode: p.planEnabled || p.mode === "plan" ? "plan" : "default",
+          mode: (p.planEnabled ?? p.mode === "plan") ? "plan" : "default",
           settings: {
-            model: model ?? this.models.find((m) => m.isDefault)?.model ?? this.models[0]?.model,
-            reasoningEffort: effort ?? null,
+            model: activeModel,
+            reasoningEffort: str(current.effort ?? rec(opened?.thread).reasoningEffort) || null,
             developerInstructions: null,
           },
         };
+      } else {
+        settings.approvalPolicy = nativeMode(p.mode).approvalPolicy;
+        settings.sandboxPolicy = nativeSandboxPolicy(p.mode, rec(current.sandboxPolicy));
+      }
+      // 原生设置更新通知与历史快照共用一条路径。重新激活暖缓存可能取回旧设置。
       await this.gateway.request("/api/threads/settings", z.unknown(), "POST", settings);
-      for (const s of this.streams.subscriptions.values())
-        if (s.session === sessionId) {
-          this.streams.invalidate(s);
-          this.streams.defer(s);
-        }
       return;
     }
     throw Error("This operation is unavailable for the selected Codex CLI: " + type);

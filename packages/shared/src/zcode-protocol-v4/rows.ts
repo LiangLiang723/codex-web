@@ -178,6 +178,8 @@ export type UserInputRow = z.infer<typeof userInputRowSchema>;
 export const assistantTextRowSchema = z.object({
   ...rowBaseFields,
   kind: z.literal("assistantText"),
+  // 适配器提供的展示语义；缺省时沿用 CLI 正文和历史分组规则。
+  presentation: z.enum(["progress", "finalAnswer"]).optional(),
   // 同一模型 response 的正文与工具共享此 ID；optional 兼容旧 snapshot。
   assistantResponseId: z.string().min(1).optional(),
   text: z.string(),

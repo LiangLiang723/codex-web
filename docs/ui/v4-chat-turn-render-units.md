@@ -65,6 +65,8 @@ turn actions 逐行消费 `row.actions`。任何带 action 的 assistant row 都
 - `turnHeader.executionKind` 是是否存在 Agent 工作生命周期的权威事实。`controlOnly` 轮只承载可见控制输入，不产生 work status；字段缺失的旧 snapshot 只在有真实 work row、running 或正工时时兼容派生。
 - `lightBoundary`（例如 model change）先从 assistant work rows 分离，再计算 work status；边界行本身不能把 control-only query 推成“工作中/已工作”。
 
+自托管 Codex 通过可选的 `assistantText.presentation` 提供展示语义。`progress` 行按工作过程显示，`finalAnswer` 行提供明确的最终答复锚点，分支权限仍由对应行的 `actions` 提供。共享时间线只在视觉工作段内将该答复放在过程之后，过程行保留原顺序，协议行序用于历史、回放与定位。回合没有可折叠过程时，耗时显示为静态标签。详见[自托管回合规格](../../specs/selfhost-codex/README.md#回合工作过程折叠)。
+
 ```text
 turn
   workSegment(initial)

@@ -351,6 +351,8 @@ export const commandPayloadSchemas = {
   // 值域 = core CollaborationMode 的可切换子集（auto 非用户可切，不进 UI 命令面）。
   switchCollaborationMode: z.object({
     mode: z.enum(["build", "edit", "plan", "yolo", "guarded"]),
+    // 原生 Codex 的 Plan 开关独立于权限，切出 Plan 时保留原沙箱。
+    planEnabled: z.boolean().optional(),
   }),
   setFollowupMode: z.object({ mode: z.enum(["queue", "guide"]) }),
   pauseGoal: z.object({}),

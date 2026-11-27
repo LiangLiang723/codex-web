@@ -1,0 +1,69 @@
+--- a/server/utils/gateway/http/validation/threads.ts
++++ b/server/utils/gateway/http/validation/threads.ts
+@@ -102,6 +102,7 @@
+ });
+ 
+ export const turnStartSchema = z.object({
++  sandboxPolicy: sandboxPolicySchema.optional(),
+   hostId: z.coerce.number().int().positive(),
+   threadId: z.string().trim().min(1),
+   text: z.string().trim().default(""),
+--- a/server/utils/gateway/realtime/turn-start.ts
++++ b/server/utils/gateway/realtime/turn-start.ts
+@@ -23,6 +23,7 @@
+     effort: input.effort,
+     summary: input.summary,
+     approvalPolicy: input.approvalPolicy,
++    sandboxPolicy: input.sandboxPolicy,
+     collaborationMode: input.collaborationMode,
+     images: input.images,
+     files: input.files,
+--- a/server/utils/gateway/runtime/types.ts
++++ b/server/utils/gateway/runtime/types.ts
+@@ -30,6 +30,7 @@
+ }
+ 
+ export interface TurnStartInput {
++  sandboxPolicy?: import("~~/shared/permissions").SandboxPolicy;
+   text: string;
+   cwd?: string | null;
+   clientUserMessageId?: string | null;
+--- a/server/utils/gateway/protocol/thread-payload.ts
++++ b/server/utils/gateway/protocol/thread-payload.ts
+@@ -38,6 +38,7 @@
+     // Explicit "none" remains valid; steer does not start a turn or change its settings.
+     summary: input.summary ?? DEFAULT_REASONING_SUMMARY,
+     approvalPolicy: input.approvalPolicy ?? null,
++    ...(input.sandboxPolicy ? { sandboxPolicy: input.sandboxPolicy } : {}),
+     collaborationMode:
+       input.collaborationMode !== null && input.collaborationMode !== undefined
+         ? buildAppServerCollaborationMode(input.collaborationMode)
+--- a/shared/runtime/realtime/client-message-schema.ts
++++ b/shared/runtime/realtime/client-message-schema.ts
+@@ -4,7 +4,7 @@
+ import type { RealtimeClientMessage } from "../../types";
+ import { agentProviderIdSchema } from "../../agent/providers";
+ import { reasoningSummarySchema } from "../../reasoning-summary";
+-import { sandboxModeSchema } from "../../permissions";
++import { sandboxModeSchema, sandboxPolicySchema } from "../../permissions";
+ import { uploadedFileSchema } from "../uploaded-file";
+ import { webPushEndpointSchema, webPushSubscriptionSchema } from "../../notifications/web-push";
+ import {
+@@ -223,6 +223,7 @@
+     z
+       .object({
+         type: z.literal("turn.start"),
++        sandboxPolicy: sandboxPolicySchema.optional(),
+         ...trackedDeliveryFields,
+         ...requestIdField,
+         ...threadScopeFields,
+--- a/shared/types/realtime.ts
++++ b/shared/types/realtime.ts
+@@ -191,6 +191,7 @@
+     }
+   | {
+       type: "turn.start";
++      sandboxPolicy?: import("../permissions").SandboxPolicy;
+       deliveryId?: string;
+       requestId: string;
+       hostId: number;

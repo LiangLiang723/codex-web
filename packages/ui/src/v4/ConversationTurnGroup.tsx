@@ -745,13 +745,16 @@ function ConversationWorkSegmentFlow({
   const firstAssistantFlowItemIndex = segment.flowItems.findIndex(
     (item) => item.kind !== "userInput",
   );
+  // 只有答复的回合仍显示耗时；没有过程可以展开时，避免出现无效按钮。
+  const canToggleHistory =
+    !segment.assistantHistoryDefaultOpen && segment.assistantHistoryRows.length > 0;
   let historyChunkIndex = 0;
   const open = turnRunning || segment.assistantHistoryDefaultOpen || historyOpen;
 
   return (
     <Collapsible
       open={open}
-      onOpenChange={turnRunning || segment.assistantHistoryDefaultOpen ? undefined : setHistoryOpen}
+      onOpenChange={!turnRunning && canToggleHistory ? setHistoryOpen : undefined}
       // 外层 flex gap 不属于 Radix 测量的 content 高度，收起到 0 后会在
       // display:none 的最后一帧再少 20px。普通兄弟用外边距保持原盒模型，history
       // 的间距则放进动画层。
@@ -820,6 +823,7 @@ function ConversationWorkSegmentFlow({
                 highspeed={highspeed}
                 highspeedMeta={highspeedMeta}
                 sourceCommandIds={sourceCommandIds}
+                collapsible={canToggleHistory}
               />
             ) : null}
             {content}
@@ -833,6 +837,7 @@ function ConversationWorkSegmentFlow({
           open={open}
           highspeed={highspeed}
           highspeedMeta={highspeedMeta}
+          collapsible={canToggleHistory}
         />
       ) : null}
     </Collapsible>

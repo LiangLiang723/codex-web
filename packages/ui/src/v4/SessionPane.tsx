@@ -171,7 +171,12 @@ import {
 } from "@/lib/codingPlanFunnelTelemetry.js";
 import { decodeCustomModelValue, encodeCustomModelValue } from "@/lib/zcodeCustomModelValue.js";
 import { parseModelPickerValue } from "@/lib/zcodeSessionProjection.js";
-import { prepareComposerRecentReceipt } from "@/lib/composerRecent.js";
+import {
+  acceptComposerRecentReceipt,
+  prepareComposerRecentReceipt,
+  type ComposerRecentReceipt,
+} from "@/lib/composerRecent.js";
+import { getBrowserLocalStorage } from "@/lib/browserEnvironment.js";
 import { useComposerClientNamespace } from "@/hooks/useServices.js";
 import {
   V4_DRAFT_SCOPE_ROOT,
@@ -2321,6 +2326,20 @@ export function SessionPane({
     ],
   );
 
+  const captureSelfhostComposerChoice = useCallback(
+    (selection: ComposerRecentReceipt["selection"], targetSessionId: string) => {
+      if (!selfHostedBuild) return () => {};
+      const receipt = prepareComposerRecentReceipt(newTaskComposerScope, selection);
+      // 回执等待期间账号可能切换，写入仍使用产生这次操作的账号存储。
+      const storage = getBrowserLocalStorage();
+      // 发起时冻结顺序与归属，旧会话的慢回执不能写回较新选择。
+      return () => {
+        acceptComposerRecentReceipt(receipt, storage, targetSessionId);
+      };
+    },
+    [newTaskComposerScope],
+  );
+
   const dispatchCommand = useCallback(
     async (
       type: CommandType,
@@ -2351,7 +2370,11 @@ export function SessionPane({
           : { ...newTaskComposerScope, projectId: creationProjectId };
       // 在异步查询归属前冻结选择与发起顺序，避免慢查询把早发命令排成最新。
       const recentReceipt = recentSubmission
-        ? prepareComposerRecentReceipt(recentScope, recentSubmission)
+        ? prepareComposerRecentReceipt(recentScope, {
+            mode: recentSubmission.mode,
+            modelSelection: recentSubmission.modelSelection,
+            ...(selfHostedBuild ? { planEnabled: recentSubmission.planEnabled } : {}),
+          })
         : undefined;
       if (recentSubmission && sessionId && targetSessionId) {
         recentScope = await resolveRecentScope(targetSessionId);
@@ -3142,6 +3165,7 @@ export function SessionPane({
     [cliSlashCommandNames],
   );
 
+  const switchModeRef = useRef(handleDraftSwitchMode);
   // Plan 选中即开启标准 Composer 开关，不能等发送时解析文本；与 /side 共用本地操作入口。
   const appSlashCommands = useMemo<AppSlashCommand[] | undefined>(() => {
     if (readOnly) return undefined;
@@ -3174,7 +3198,7 @@ export function SessionPane({
       label: intl.formatMessage({ id: "chat.slash.app.plan.label" }),
       description: intl.formatMessage({ id: "chat.slash.app.plan.description" }),
       keywords: ["plan", "计划", "计划模式"],
-      run: () => handleDraftSwitchMode("plan"),
+      run: () => switchModeRef.current("plan"),
     };
     if (
       !sessionId ||
@@ -3207,7 +3231,6 @@ export function SessionPane({
   }, [
     taskRestart.restart,
     cliSlashCommandNames,
-    handleDraftSwitchMode,
     handleOpenSelectionSideConversation,
     intl,
     isMobileTextInputViewport,
@@ -5227,6 +5250,7 @@ export function SessionPane({
         toast(intl.formatMessage({ id: "chat.toolbar.connection.switchFailed" }));
         return;
       }
+      const remember = captureSelfhostComposerChoice({ modelSelection: selection }, targetSessionId);
       // Bug 原因：面板共用 pending 会阻塞 B；按会话和请求归属，返回 A 仍保留门禁。
       const flight = Symbol();
       modelSelectionFlightsRef.current.set(modelSelectionOwnerKey, flight);
@@ -5247,6 +5271,7 @@ export function SessionPane({
         );
         if (ack?.status !== "accepted" && ack?.status !== "noop" && ack?.status !== "duplicate")
           throw new Error(`switchModelConfig: ${ack?.status ?? "missing-ack"}`);
+        remember();
         logger.debug("[v4-pane] 会话模型配置回执", {
           targetSessionId,
           status: ack.status,
@@ -5281,6 +5306,7 @@ export function SessionPane({
     },
     [
       activeHighspeedCard,
+      captureSelfhostComposerChoice,
       configCommandBarrier,
       dispatchConfigCas,
       draftConfigRef,
@@ -5400,13 +5426,54 @@ export function SessionPane({
     ],
   );
 
-  // 模式与模型一样属于下一次 Submission；选择时只更新 Composer。
   const handleSwitchMode = useCallback(
     (mode: string) => {
-      handleDraftSwitchMode(mode);
+      if (!selfHostedBuild || !sessionId) {
+        handleDraftSwitchMode(mode);
+        return;
+      }
+      if (readOnly) return;
+      const planEnabled = mode === "plan" ? true : mode === "plan-off" ? false : undefined;
+      const permission = submissionModeSchema.safeParse(
+        planEnabled === undefined ? mode : draftConfigRef.current.mode ?? "build",
+      );
+      if (!permission.success) return;
+      const remember = captureSelfhostComposerChoice(
+        planEnabled === undefined ? { mode: permission.data } : { planEnabled },
+        sessionId,
+      );
+      // 自托管的权限和 Plan 必须更新原生 Thread，离开当前面板后才能按会话恢复。
+      void configCommandBarrier.enqueue(async () => {
+        const ack = await dispatchConfigCas(
+          "switchCollaborationMode",
+          { mode: permission.data, ...(planEnabled === undefined ? {} : { planEnabled }) },
+          { targetSessionId: sessionId },
+        );
+        if (ack?.status !== "accepted" && ack?.status !== "noop" && ack?.status !== "duplicate")
+          throw new Error(`switchCollaborationMode: ${ack?.status ?? "missing-ack"}`);
+        remember();
+        if (modelSelectionOwnerRef.current.key === modelSelectionOwnerKey)
+          handleDraftSwitchMode(mode);
+      }).catch((error: unknown) => {
+        logger.warn("[v4-pane] 自托管会话权限设置失败", error);
+        if (modelSelectionOwnerRef.current.key === modelSelectionOwnerKey)
+          toast(intl.formatMessage({ id: "settings.source.operationFailed" }));
+      });
     },
-    [handleDraftSwitchMode],
+    [
+      captureSelfhostComposerChoice,
+      configCommandBarrier,
+      dispatchConfigCas,
+      draftConfigRef,
+      handleDraftSwitchMode,
+      intl,
+      modelSelectionOwnerKey,
+      readOnly,
+      sessionId,
+    ],
   );
+
+  switchModeRef.current = handleSwitchMode;
 
   // context usage 面板的压缩入口（命令文本 = "/compact"，复用 slash 解析路径）。
   const handleSendCompressionCommand = useCallback(

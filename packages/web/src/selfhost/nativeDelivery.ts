@@ -7,7 +7,7 @@ import {
 import { z } from "zod";
 import type { Gateway, Message } from "./gateway.js";
 import { buildNativeTurnInput } from "./nativeTurnInput.js";
-import { nativeTurnIsCompacting, nativeMode, rec, str } from "./threadProjection.js";
+import { nativeTurnIsCompacting, nativeMode, nativeSandboxPolicy, rec, str } from "./threadProjection.js";
 
 const nativeDeliveryValue = z.enum(["startNow", "guide", "queue"]);
 const receipt = z.object({
@@ -173,7 +173,14 @@ export async function submitNativeInput(
   const args = { hostId, threadId, deliveryId: commandId, ...material };
   const model = str(rec(p.modelSelection).modelId) || undefined;
   const effort = str(rec(rec(p.modelSelection).options).reasoningLevel) || undefined;
-  const modeModel = model || str(rec(active?.threadSettings).model);
+  const current = rec(active?.threadSettings ?? rec(active?.history).settings);
+  const modeModel = model || str(current.model);
+  const sandbox = rec(current.sandboxPolicy);
+  // 冷恢复可能丢失全访问，切回有确认的模式也必须退出原有全访问沙箱。
+  // 其他原生已生效的沙箱限制随会话保留；引导与排队不改变当前执行配置。
+  const sandboxPolicy = p.mode && (p.mode === "yolo" || sandbox.type === "dangerFullAccess")
+    ? nativeSandboxPolicy(p.mode, sandbox)
+    : undefined;
   const submit = () => {
     if (delivery === "queue") return gateway.call("thread.queue.add", args);
     if (delivery === "guide")
@@ -188,6 +195,7 @@ export async function submitNativeInput(
       model,
       effort,
       ...(p.mode ? { approvalPolicy: nativeMode(p.mode).approvalPolicy } : {}),
+      ...(sandboxPolicy ? { sandboxPolicy } : {}),
       ...(typeof p.planEnabled === "boolean" && modeModel
         ? {
             collaborationMode: {

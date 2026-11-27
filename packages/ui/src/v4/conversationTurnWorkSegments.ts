@@ -171,7 +171,15 @@ export function buildConversationTurnWorkSegments(options: {
   const visualDrafts = splitVisualWorkSegments(options.orderedRows, options.header);
   const tailRowIds = new Set(options.assistantTailRows.map((row) => row.rowId));
   return visualDrafts.map((segment, segmentIndex) => {
-    const segmentAssistantRows = segment.orderedRows.filter(isAssistantWorkRow);
+    const finalAnswer = options.latestAssistantTextRow;
+    // 原生终答之后仍可能收到播报或工具项。只调整展示位置，过程行保留原顺序和身份。
+    const orderedRows =
+      finalAnswer?.presentation === "finalAnswer" &&
+      segment.orderedRows.at(-1) !== finalAnswer &&
+      segment.orderedRows.includes(finalAnswer)
+        ? [...segment.orderedRows.filter((row) => row !== finalAnswer), finalAnswer]
+        : segment.orderedRows;
+    const segmentAssistantRows = orderedRows.filter(isAssistantWorkRow);
     const segmentTailRows = segmentAssistantRows.filter((row) => tailRowIds.has(row.rowId));
     const segmentFlowRows = segmentAssistantRows.filter((row) => !tailRowIds.has(row.rowId));
     const lastSegmentFlowRow = segmentFlowRows.at(-1);
@@ -182,7 +190,9 @@ export function buildConversationTurnWorkSegments(options: {
     const visibleAssistantTextRow =
       productLatestAssistantTextRow && isAssistantTextRow(productLatestAssistantTextRow)
         ? productLatestAssistantTextRow
-        : segmentCompleted && lastSegmentFlowRow && isAssistantTextRow(lastSegmentFlowRow)
+        : segmentCompleted &&
+            lastSegmentFlowRow?.kind === "assistantText" &&
+            lastSegmentFlowRow.presentation !== "progress"
           ? lastSegmentFlowRow
           : undefined;
     const visibleAssistantIndex = visibleAssistantTextRow
@@ -220,7 +230,7 @@ export function buildConversationTurnWorkSegments(options: {
         ? options.key
         : `${options.key}:guide:${segment.triggerRow?.entityId ?? segment.triggerRow?.rowId ?? segmentIndex}`;
     const flowItems = buildConversationFlowItems({
-      orderedRows: segment.orderedRows,
+      orderedRows,
       assistantHistoryRows: segmentHistoryRows,
       assistantFollowingRows: segmentFollowingRows,
       assistantTailRows: segmentTailRows,

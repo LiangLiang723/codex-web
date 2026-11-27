@@ -47,6 +47,7 @@ const STALE_FILE_CHANGES_RETRY_BASE_DELAY_MS = 150;
 
 function joinAssistantTurnText(rows: readonly AssistantTextRow[]): string {
   return rows
+    .filter((row) => row.presentation !== "progress")
     .map((row) => row.text)
     .filter((text) => text.trim().length > 0)
     .join("\n\n");

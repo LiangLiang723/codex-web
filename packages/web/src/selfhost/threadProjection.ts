@@ -46,6 +46,21 @@ function plain(value: unknown): string {
   return "";
 }
 
+function nativeFinalAnswer(items: Message[], turnCompleted: boolean) {
+  const hasAnswerText = (item: Message) =>
+    item.type === "agentMessage" &&
+    item.delivery !== "async" &&
+    str(item.id).length > 0 &&
+    plain(item.text ?? item.content).trim().length > 0;
+  // 旧投影为每条播报都授予分支动作，时间线因而把第一条当成最终答复。
+  // 先按原生阶段确定答复锚点，旧记录仅从已完成轮次的未标阶段消息回退。
+  const explicitAnswer = items.findLast(
+    (item) => item.phase === "final_answer" && hasAnswerText(item),
+  );
+  if (explicitAnswer || !turnCompleted) return explicitAnswer;
+  return items.findLast((item) => item.phase == null && hasAnswerText(item));
+}
+
 function nativeUserText(text: string, images: readonly AttachmentRef[]): string {
   if (images.length === 0) return text;
   const header =
@@ -230,8 +245,8 @@ export function prependNativeHistoryPage(
     );
     return !rowIds.has(itemKey) && !rowIds.has(key) ? [key] : [];
   });
-  const start = oldestRowId - keys.length;
-  for (const [index, key] of keys.entries()) rowIds.set(key, start + index);
+  const start = oldestRowId - 2 * keys.length;
+  for (const [index, key] of keys.entries()) rowIds.set(key, start + 2 * index);
   info.history = mergeThreadTurns(info.history, info.thread, threadId, turns, "prepend");
   info.oldestTimelineCursor = str(page.nextCursor);
   return start;
@@ -245,6 +260,20 @@ export function nativeMode(m: unknown) {
     : m === "guarded"
       ? { approvalPolicy: "untrusted", sandbox: "workspace-write" }
       : { approvalPolicy: "on-request", sandbox: "workspace-write" };
+}
+
+export function nativeSandboxPolicy(mode: unknown, current: Message) {
+  if (mode === "yolo") return { type: "dangerFullAccess" };
+  // 切换确认方式保留原沙箱限制；只有离开全访问时才恢复工作区约束。
+  return current.type && current.type !== "dangerFullAccess"
+    ? current
+    : {
+        type: "workspaceWrite",
+        writableRoots: [],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      };
 }
 
 function nativeCompactionItem(turn: Message | undefined) {
@@ -396,12 +425,9 @@ export function projectThread(
   const model = registry.find((m) => m.model === modelId);
   const thought =
     str(settings.effort) ||
-    str(rec(collaboration.settings).reasoningEffort) ||
-    (nativeChild
-      ? settings.effort === null
-        ? ""
-        : str(thread.reasoningEffort)
-      : (model?.defaultReasoningEffort ?? ""));
+    str(rec(collaboration.settings).reasoningEffort ?? rec(collaboration.settings).reasoning_effort) ||
+    (settings.effort === null ? "" : str(thread.reasoningEffort)) ||
+    (nativeChild ? "" : (model?.defaultReasoningEffort ?? ""));
   result.seq = revision;
   result.revision = revision;
   result.meta = {
@@ -429,7 +455,9 @@ export function projectThread(
     mode:
       settings.approvalPolicy === "never" && rec(settings.sandboxPolicy).type === "dangerFullAccess"
         ? "yolo"
-        : "build",
+        : settings.approvalPolicy === "untrusted"
+          ? "guarded"
+          : "build",
     planEnabled: collaboration.mode === "plan",
     ...(modelId
       ? { modelSelection: { providerId, modelId, options: thought ? {reasoningLevel:thought} : {} } }
@@ -445,13 +473,19 @@ export function projectThread(
     if (key && !pendingToolApprovals.has(key)) pendingToolApprovals.set(key, request.key);
   }
   const created = time(thread.createdAt, 0);
-  const base = (turnId: string, entityId: string, at: number, sourceCommandId = "") => {
+  const base = (
+    turnId: string,
+    entityId: string,
+    at: number,
+    sourceCommandId = "",
+    initialInputRowId?: number,
+  ) => {
     const itemKey = nativeHistoryRowKey(turnId, entityId);
     const key = nativeHistoryRowKey(turnId, entityId, sourceCommandId);
-    let rowId = rowIds.get(key) ?? rowIds.get(itemKey);
+    let rowId = initialInputRowId ?? rowIds.get(key) ?? rowIds.get(itemKey);
     if (rowId === undefined) {
-      // 游标之后可能还有旧页，给更早的行保留编号空间且不移动已发布的行。
-      rowId = rowIdStart + rowIds.size;
+      // 回合首条输入可能晚于答复送达。标题后一位留给它，其余已发布行的编号不变。
+      rowId = rowIdStart + 2 * rowIds.size;
     }
     rowIds.set(key, rowId);
     if (key !== itemKey) rowIds.set(itemKey, rowId);
@@ -462,6 +496,11 @@ export function projectThread(
     const turnId = str(turn.id);
     const at = time(turn.startedAt, created);
     const phase = threadPhase(turn.status);
+    const items = array(turn.items);
+    const initialInput = items.find((item) => item.type === "userMessage" && item.startsTurn === true);
+    const completed = turn.status === "completed";
+    const finalAnswer = nativeFinalAnswer(items, completed);
+    const canFork = completed && controls.fork === true && activation.readOnly !== true;
     const state =
       phase === "error"
         ? "failed"
@@ -470,8 +509,9 @@ export function projectThread(
           : phase === "running"
             ? "running"
             : "completedSuccess";
+    const header = base(turnId, "turn:" + turnId, at);
     rows.push({
-      ...base(turnId, "turn:" + turnId, at),
+      ...header,
       kind: "turnHeader",
       origin: "userInput",
       state,
@@ -480,12 +520,18 @@ export function projectThread(
       ...turnFileHeader(activation, turn, str(thread.cwd)),
     });
     let hasPlan = false;
-    for (const item of array(turn.items)) {
+    for (const item of items) {
       const itemId = str(item.id);
       if (!itemId) continue;
       if (item.type !== "userMessage") collectNativeSources(sources, item);
       const sourceCommandId = item.type === "userMessage" ? str(item.clientId) : "";
-      const fields = base(turnId, itemId, at, sourceCommandId),
+      const fields = base(
+          turnId,
+          itemId,
+          at,
+          sourceCommandId,
+          item === initialInput ? header.rowId + 1 : undefined,
+        ),
         stream = phase === "running" && item.status !== "completed";
       if (item.type === "userMessage") {
         const { attachments, links } = nativeUserImages(item.content, { turnId, itemId });
@@ -501,15 +547,17 @@ export function projectThread(
           ...(attachments.length ? { attachments } : {}),
         });
       } else if (item.type === "agentMessage") {
+        const text = plain(item.text ?? item.content);
+        if (!text.trim()) continue;
+        const isFinalAnswer = item === finalAnswer;
         rows.push({
           ...fields,
           kind: "assistantText",
-          text: plain(item.text ?? item.content),
+          presentation: isFinalAnswer ? "finalAnswer" : "progress",
+          text,
           state: stream ? "streaming" : "complete",
           model: modelId,
-          ...(controls.fork === true && turn.status === "completed" && activation.readOnly !== true
-            ? { actions: { canFork: true } }
-            : {}),
+          ...(isFinalAnswer && canFork ? { actions: { canFork: true } } : {}),
         });
       } else if (item.type === "contextCompaction") {
         const running = nativeCompactionItem(turn)?.id === item.id;

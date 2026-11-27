@@ -23,6 +23,7 @@ import {
 import { projectNativeSubagents } from "./nativeSubagents.js";
 import { loadTurnFileSummaries, markTurnFilesReverted } from "./turnFileChanges.js";
 import { applyNativeInteractionEvent } from "./nativeInteractions.js";
+import { nativeThreadRecency } from "./taskCatalog.js";
 
 type Subscription = {
   kind: "conversation" | "index" | "config";
@@ -73,9 +74,16 @@ export class SessionSubscriptions {
         const event: Message = { ...rec(msg.event), eventEpoch: msg.eventEpoch },
           id = str(event.threadId);
         if (num(event.hostId) !== this.hostId) return;
+        const type = rec(event.event).type;
+        const indexChanged =
+          type === "thread.started" ||
+          type === "thread.status.changed" ||
+          type === "turn.started" ||
+          type === "turn.completed";
         for (const sub of this.subscriptions.values()) {
-          if (sub.kind === "index" && rec(event.event).type === "turn.completed") {
-            this.defer(sub, 300);
+          // 运行状态来自原生目录。开始和等待状态与结束一样触发刷新，流式片段只更新正文。
+          if (sub.kind === "index") {
+            if (indexChanged) this.defer(sub);
             continue;
           }
           if (sub.session !== id) continue;
@@ -123,7 +131,15 @@ export class SessionSubscriptions {
     this.disposeEvents();
     for (const id of this.subscriptions.keys()) void this.removeSubscription(id);
   }
+  refreshIndex() {
+    for (const sub of this.subscriptions.values())
+      if (sub.kind === "index") this.defer(sub, 0);
+  }
   defer(sub: Subscription, delay = 40) {
+    if (sub.kind === "index" && sub.publishing) {
+      sub.dirty = true;
+      return;
+    }
     if (sub.timer) return;
     sub.timer = setTimeout(() => {
       sub.timer = undefined;
@@ -279,17 +295,34 @@ export class SessionSubscriptions {
       }
       snapshot = projection;
     } else if (sub.kind === "index") {
-      const sessions = (await this.threads(this.cwd)).map((t) => ({
-        sessionId: str(t.id),
-        workspaceId: this.cwd,
-        title: threadName(t),
-        phase: rec(t.status).type === "active" ? "running" : "completedSuccess",
-        sessionEnded: false,
-        hasBackgroundWork: false,
-        createdAt: num(t.createdAt) * 1000,
-        lastActivityAt: num(t.updatedAt) * 1000,
-        lastAssistantPreview: str(t.preview),
-      }));
+      const threads = await this.threads(this.cwd);
+      // 读取期间已经收到新状态时直接补读，避免把上一次运行状态短暂写回侧栏。
+      if (sub.dirty) return;
+      const sessions = threads.map((t) => {
+        const status = rec(t.status);
+        const flags = Array.isArray(status.activeFlags) ? status.activeFlags : [];
+        const permissionCount = Number(flags.includes("waitingOnApproval"));
+        const userInputCount = Number(flags.includes("waitingOnUserInput"));
+        return {
+          sessionId: str(t.id),
+          workspaceId: this.cwd,
+          title: threadName(t),
+          phase:
+            status.type === "active"
+              ? "running"
+              : status.type === "systemError"
+                ? "error"
+                : "completedSuccess",
+          sessionEnded: false,
+          hasBackgroundWork: false,
+          createdAt: num(t.createdAt) * 1000,
+          lastActivityAt: nativeThreadRecency(t),
+          lastAssistantPreview: str(t.preview),
+          ...(permissionCount || userInputCount
+            ? { pendingInteractionSummary: { permissionCount, userInputCount } }
+            : {}),
+        };
+      });
       snapshot = { protocolVersion: 1, workspaceId: this.cwd, logEpoch: sub.epoch, sessions };
     } else {
       snapshot = {

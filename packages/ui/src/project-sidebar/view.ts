@@ -13,6 +13,7 @@ import type {
   WindowHostControllerTaskActivity,
 } from "@/project-sidebar/contract.js";
 import { attachTaskListRowActivity } from "@/v4/taskListRowActivity.js";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { compareTaskListItemsByTime, compareZCodeTaskListItems } from "@/lib/taskListOrdering.js";
 import { buildTaskEntityKey } from "@/lib/taskQueryCache.js";
 import { LEGACY_SINGLE_ROOT_PROJECT_PREFIX } from "@/project-sidebar/contract.js";
@@ -36,7 +37,13 @@ export function applyProjectTaskActivities(
     ...tree,
     tasks: tree.tasks.map((task) => {
       const activity = byKey.get(buildTaskEntityKey(task));
-      return activity ? attachTaskListRowActivity(task, activity) : task;
+      if (!activity) return task;
+      // 自托管的目录和实时摘要都读 Codex recencyAt，较早到达的目录响应不能把行排回原处。
+      const row =
+        selfHostedBuild && activity.lastActivityAt > task.updatedAt
+          ? { ...task, updatedAt: activity.lastActivityAt }
+          : task;
+      return attachTaskListRowActivity(row, activity);
     }),
   };
 }

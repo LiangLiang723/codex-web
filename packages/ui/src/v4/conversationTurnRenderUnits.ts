@@ -261,13 +261,16 @@ function materializeDraftUnit(
 
   // product turn 的最终正文仍是唯一 action target；视觉工作段只改变折叠边界。
   const assistantTextRows = flowRows.filter(isAssistantTextRow);
-  const actionAssistantTextRow = assistantTextRows.find(
-    (row) => row.actions?.canFork === true || row.actions?.canRetry === true,
-  );
   const lastFlowRow = flowRows.at(-1);
+  // 自托管只读轮次没有分支动作，也要按原生阶段选中答复，末尾工具或播报不会改变锚点。
   const latestAssistantTextRow =
-    actionAssistantTextRow ??
-    (!isRunning && lastFlowRow && isAssistantTextRow(lastFlowRow) ? lastFlowRow : undefined);
+    assistantTextRows.findLast((row) => row.presentation === "finalAnswer") ??
+    assistantTextRows.find(
+      (row) => row.actions?.canFork === true || row.actions?.canRetry === true,
+    ) ??
+    (!isRunning && lastFlowRow?.kind === "assistantText" && lastFlowRow.presentation !== "progress"
+      ? lastFlowRow
+      : undefined);
   const workDurationMs = resolveConversationTurnWorkDurationMs(draft.header, options, isRunning);
   const workStatus = resolveConversationTurnWorkStatus(
     draft.header,

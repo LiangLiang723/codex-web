@@ -14,13 +14,18 @@ type ThreadListOptions = {
   cwd?: string;
   search?: string;
   archived?: boolean;
-  sortKey?: "created_at" | "updated_at";
+  sortKey?: "created_at" | "recency_at";
   includedThreadIds?: readonly string[];
 };
 const timeMs = (value: unknown) => {
   const time = num(value);
   return time < 1e12 ? time * 1000 : time;
 };
+
+// 流式持久化会推进 updatedAt。列表只按原生活跃时间重排，旧行缺值时使用稳定的创建时间。
+export function nativeThreadRecency(thread: Message): number {
+  return timeMs(thread.recencyAt ?? thread.createdAt ?? thread.updatedAt);
+}
 
 export class NativeThreadCatalog {
   private readonly scans = new Map<string, Promise<Message[]>>();
@@ -40,7 +45,7 @@ export class NativeThreadCatalog {
       limit: String(limit),
       useRemoteStateIndexOnly: "true",
       archived: String(options.archived === true),
-      sortKey: options.sortKey ?? "updated_at",
+      sortKey: options.sortKey ?? "recency_at",
       discoverProjects: "false",
     });
     if (options.cwd) query.set("cwd", options.cwd);
@@ -103,7 +108,7 @@ export class NativeThreadCatalog {
       workspacePath: str(t.cwd, this.cwd),
       cwd: str(t.cwd, this.cwd),
       createdAt: timeMs(t.createdAt),
-      updatedAt: timeMs(t.updatedAt),
+      updatedAt: nativeThreadRecency(t),
       mode: "build",
       provider: "glm",
       status: rec(t.status).type === "active" ? "running" : "completed",
@@ -144,7 +149,7 @@ export class NativeThreadCatalog {
           : [str(p.workspacePath) || this.cwd];
     const wanted = Array.isArray(p.taskIds) ? new Set(p.taskIds.map(String)) : null;
     const sortKey = p.sortBy === "created" ? "createdAt" : "updatedAt";
-    const nativeSortKey = sortKey === "createdAt" ? "created_at" : "updated_at";
+    const nativeSortKey = sortKey === "createdAt" ? "created_at" : "recency_at";
     const search = str(p.search).trim();
     let remote: Message[] = [];
     if (method !== "listDeletedTaskIds" && (!wanted || wanted.size)) {

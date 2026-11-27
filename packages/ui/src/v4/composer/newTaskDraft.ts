@@ -1,6 +1,7 @@
 import type { ComposerInitialConfig } from "@/store/zcodeSessionStoreTypes.js";
 import type { ModelSelection } from "@zcode/shared/model-selection";
 import type { ModelSelectionView } from "@zcode/services";
+import { selfHostedBuild } from "@zcode/shared/runtimeEnv";
 import { readComposerRecent, resolveDraftInitialModelSelection } from "@/lib/composerRecent.js";
 import {
   readV4ComposerDraft,
@@ -27,7 +28,7 @@ export function initializeNewTaskDraft(
     draft: {
       ...draft,
       mode: recent?.mode === "plan" ? "build" : (recent?.mode ?? "build"),
-      planEnabled: false,
+      planEnabled: selfHostedBuild ? recent?.planEnabled ?? false : false,
       modelSelection:
         recent?.modelSelection ??
         resolveDraftInitialModelSelection(view, null).selection ??
