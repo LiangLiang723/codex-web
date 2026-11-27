@@ -359,6 +359,8 @@ export function AgentToolCallBlock(context: ToolCallBlockRenderContext) {
       backgroundAgentInfo,
       childToolCalls,
       context.codePreviewSettings,
+      context.nestedToolRenderer,
+      context.onOpenAutomationsMain,
       context.onLoadFullToolCallFields,
       context.onOpenBrowserUrl,
       context.onOpenCodeViewer,

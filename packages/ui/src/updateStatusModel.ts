@@ -72,19 +72,19 @@ export function deriveUpdateStatusViewModel({
 
 export function isUpdateActionCompleted(
   action: UpdateActionInFlight,
-  updateState: UpdateStatePayload | null,
+  updateKind: UpdateStatePayload["kind"] | undefined,
 ) {
   return (
     // 点击下载后 main 侧可能先广播 checking/idle 等过渡态。
     // 这些状态不代表下载已经进入可观察阶段，不能释放按钮锁并触发弹窗卸载；
     // 只有真正进入下载进度或下载完成，才算下载命令完成。
     (action === "download" &&
-      (updateState?.kind === "download-progress" ||
-        updateState?.kind === "update-downloaded")) ||
-    (action === "cancel" && updateState?.kind !== "download-progress") ||
+      (updateKind === "download-progress" ||
+        updateKind === "update-downloaded")) ||
+    (action === "cancel" && updateKind !== "download-progress") ||
     (action === "skip" &&
-      updateState?.kind !== "update-available" &&
-      updateState?.kind !== "download-progress")
+      updateKind !== "update-available" &&
+      updateKind !== "download-progress")
   );
 }
 

@@ -2127,6 +2127,10 @@ exceptions:
     rule: unmanaged-new-file
     paths: [packages/ui/src/v4/telemetry/useSessionOpenArmsTelemetry.ts]
     reason: 已存在的会话打开埋点 Hook 收紧报告所用的依赖，事件、报告者和模块边界沿用原实现。
+  - id: existing-workspace-file-search-hook
+    rule: unmanaged-new-file
+    paths: [packages/ui/src/workspace-file-search/useWorkspaceFileSearchFilter.ts]
+    reason: 已入库的工作区文件搜索 Hook 明确监听现有查询条件和服务，沿用原搜索结果与工作区归属。
   - id: workflow-fill-frames-scrollbar-loop-fix
     rule: unmanaged-new-file
     paths: [packages/ui/src/app-shell/WorkflowRunFillFrames.tsx]

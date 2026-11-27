@@ -169,32 +169,26 @@ export function PreviewPaneContent({
     unavailable: intl.formatMessage({ id: "codeViewer.mediaUnavailable" }),
     unsupported: intl.formatMessage({ id: "codeViewer.mediaUnsupported" }),
   };
+  const filename = source.type === "multi-file-diff" ? (source.path ?? source.title) : null;
+  const before = source.type === "multi-file-diff" ? source.beforeContent : null;
+  const after = source.type === "multi-file-diff" ? source.afterContent : null;
   const multiFileDiffFiles = useMemo(() => {
-    if (source.type !== "multi-file-diff") {
-      return null;
-    }
-
+    if (filename === null || before === null || after === null) return null;
     // DiffViewer 是 memo 组件，预览 pane 父级滚动/加载状态刷新时，
     // JSX 内联 oldFile/newFile 会生成新对象并强制 diff 重新渲染。
     return {
       oldFile: {
-        name: source.path ?? source.title,
-        contents: source.beforeContent,
-        cacheKey: `old:${source.path ?? source.title}:${source.beforeContent.length}:${source.beforeContent.slice(0, 100)}:${source.beforeContent.slice(-100)}`,
+        name: filename,
+        contents: before,
+        cacheKey: `old:${filename}:${before.length}:${before.slice(0, 100)}:${before.slice(-100)}`,
       },
       newFile: {
-        name: source.path ?? source.title,
-        contents: source.afterContent,
-        cacheKey: `new:${source.path ?? source.title}:${source.afterContent.length}:${source.afterContent.slice(0, 100)}:${source.afterContent.slice(-100)}`,
+        name: filename,
+        contents: after,
+        cacheKey: `new:${filename}:${after.length}:${after.slice(0, 100)}:${after.slice(-100)}`,
       },
     };
-  }, [
-    source.type,
-    source.type === "multi-file-diff" ? source.afterContent : null,
-    source.type === "multi-file-diff" ? source.beforeContent : null,
-    source.type === "multi-file-diff" ? source.path : null,
-    source.type === "multi-file-diff" ? source.title : null,
-  ]);
+  }, [after, before, filename]);
 
   if (source.type === "patch") {
     return (

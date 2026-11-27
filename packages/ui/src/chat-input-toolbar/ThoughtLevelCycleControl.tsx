@@ -83,16 +83,6 @@ export function ThoughtLevelCycleControl({
     setInlineLabelVisible(visible);
   }, []);
 
-  // RAF-based debounce to coalesce resize events
-  let rafId: number | null = null;
-  const debouncedUpdateInlineLabelVisible = () => {
-    if (rafId !== null) return;
-    rafId = requestAnimationFrame(() => {
-      rafId = null;
-      updateInlineLabelVisible(labelRef.current);
-    });
-  };
-
   const entries = option.type === "select" ? (option.options ?? []) : [];
 
   const selectedEntryIndex = entries.findIndex((entry) => entry.value === option.currentValue);
@@ -123,6 +113,15 @@ export function ThoughtLevelCycleControl({
     }
 
     updateInlineLabelVisible(labelElement);
+    // 监听和待执行帧归本次布局 effect，解绑时取消该帧。
+    let rafId: number | null = null;
+    const debouncedUpdateInlineLabelVisible = () => {
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        updateInlineLabelVisible(labelRef.current);
+      });
+    };
 
     const observer =
       typeof ResizeObserver === "undefined"
@@ -141,7 +140,7 @@ export function ThoughtLevelCycleControl({
       window.removeEventListener("resize", debouncedUpdateInlineLabelVisible);
       if (rafId !== null) cancelAnimationFrame(rafId);
     };
-  }, [currentLabel, labelVisibilityClassName]);
+  }, [currentLabel, labelVisibilityClassName, updateInlineLabelVisible]);
 
   // 配置顺序不再经过名称排序，关闭项可能位于任意位置；只计算当前项之前的非关闭项。
   // 未选／失效及关闭值始终为零进度，不能把缺失选择投影成首档。

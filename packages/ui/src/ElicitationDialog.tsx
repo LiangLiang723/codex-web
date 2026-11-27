@@ -55,11 +55,10 @@ export function getElicitationCountdownSeconds(
 }
 
 function getElicitationCountdownRefreshDelay(
-  autoResolution: InteractionAutoResolution | undefined,
+  deadlineAt: number,
   now: number,
 ): number | null {
-  if (!autoResolution || autoResolution.state === "snoozed") return null;
-  const remainingMs = autoResolution.deadlineAt - now;
+  const remainingMs = deadlineAt - now;
   if (remainingMs <= 0) return null;
   if (remainingMs >= ELICITATION_FINAL_MINUTE_MS) {
     return remainingMs - (ELICITATION_FINAL_MINUTE_MS - 1);
@@ -71,16 +70,17 @@ function getElicitationCountdownRefreshDelay(
 
 function useElicitationCountdownSeconds(autoResolution: InteractionAutoResolution | undefined) {
   const [clockNow, setClockNow] = useState(Date.now);
+  const deadlineAt = autoResolution?.state === "snoozed" ? undefined : autoResolution?.deadlineAt;
 
   useEffect(() => {
-    if (!autoResolution || autoResolution.state === "snoozed") return;
+    if (deadlineAt === undefined) return;
     let timeoutId: number | undefined;
     const schedule = () => {
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
       const now = Date.now();
       setClockNow(now);
       if (document.visibilityState === "hidden") return;
-      const delay = getElicitationCountdownRefreshDelay(autoResolution, now);
+      const delay = getElicitationCountdownRefreshDelay(deadlineAt, now);
       if (delay !== null) {
         timeoutId = window.setTimeout(schedule, delay);
       }
@@ -93,11 +93,7 @@ function useElicitationCountdownSeconds(autoResolution: InteractionAutoResolutio
       window.removeEventListener("focus", schedule);
       document.removeEventListener("visibilitychange", schedule);
     };
-  }, [
-    autoResolution?.state,
-    autoResolution?.startedAt,
-    autoResolution?.state === "snoozed" ? autoResolution.snoozedAt : autoResolution?.deadlineAt,
-  ]);
+  }, [deadlineAt]);
 
   return getElicitationCountdownSeconds(autoResolution, clockNow);
 }

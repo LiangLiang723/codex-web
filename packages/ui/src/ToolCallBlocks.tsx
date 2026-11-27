@@ -182,12 +182,15 @@ function ToolCallBlockComponent({
         </div>
       ) : null,
     [
+      animateDiffCountOnMount,
       childToolCalls,
       depth,
+      disableSummaryContentAnimation,
       onLoadFullToolCallFields,
       onOpenAutomationsMain,
       onOpenBrowserUrl,
       onOpenPlanDetail,
+      onOpenWorkflowRun,
       onOpenFileLink,
       showIcon,
       showTodoToolCalls,
@@ -268,7 +271,6 @@ function ToolCallBlockComponent({
       showTodoToolCalls,
       sourceLabel,
       statusLabel,
-      suppressSourceLabel,
       theme,
       toolCallNode,
       toolPreviewCodeViewer,

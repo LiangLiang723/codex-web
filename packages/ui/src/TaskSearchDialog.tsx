@@ -230,6 +230,7 @@ export function TaskSearchDialog({
     [onSelectTask],
   );
 
+  const { refresh: refreshTaskSearch } = taskList;
   useEffect(() => {
     if (!open || !trimmedQuery) {
       return;
@@ -237,8 +238,8 @@ export function TaskSearchDialog({
 
     // Bugfix: 正文搜索上线后，旧的空搜索结果可能已经被 task query cache 记为 fresh。
     // 弹窗输入查询词时主动刷新一次，确保服务层新补的正文索引和按需回填逻辑能够生效。
-    void taskList.refresh();
-  }, [open, taskList.refresh, trimmedQuery]);
+    void refreshTaskSearch();
+  }, [open, refreshTaskSearch, trimmedQuery]);
 
   useEffect(() => {
     setExpandedTaskKeys(new Set());

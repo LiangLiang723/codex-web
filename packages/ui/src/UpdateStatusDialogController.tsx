@@ -244,12 +244,13 @@ export function UpdateStatusDialogController({
     }
   }, [displayVersion, onOpenChange, updateState]);
 
+  const updateKind = updateState?.kind;
   useEffect(() => {
     if (!updateActionInFlight) {
       return;
     }
 
-    if (isUpdateActionCompleted(updateActionInFlight, updateState)) {
+    if (isUpdateActionCompleted(updateActionInFlight, updateKind)) {
       setUpdateActionInFlight(null);
       return;
     }
@@ -258,7 +259,7 @@ export function UpdateStatusDialogController({
     // 应用真正退出前恢复“重启以更新”，让用户误判失败并重复点击。restart 成功路径保持
     // pending 直到应用退出，只有 IPC 明确失败时才由调用处 catch 恢复按钮。
     if (updateActionInFlight === "restart") {
-      if (updateState !== null && updateState.kind !== "update-downloaded") {
+      if (updateKind !== undefined && updateKind !== "update-downloaded") {
         // main 会在退出准备失败时广播 error/idle。即使 IPC reject 因窗口
         // 生命周期丢失，状态已经离开 ready 也必须释放按钮，不能保留上一帧永久 pending。
         setUpdateActionInFlight(null);
@@ -275,7 +276,7 @@ export function UpdateStatusDialogController({
     return () => {
       globalThis.clearTimeout(timeout);
     };
-  }, [setUpdateActionInFlight, updateActionInFlight, updateState?.kind]);
+  }, [setUpdateActionInFlight, updateActionInFlight, updateKind]);
 
   if (!displayVersion) return null;
 

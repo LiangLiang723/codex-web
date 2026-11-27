@@ -152,12 +152,19 @@ export function ImagePreviewSurface({
     observer.observe(viewport);
     return () => observer.disconnect();
   }, []);
+  const { width: imageWidth, height: imageHeight } = size;
+  const { width: viewportWidth, height: viewportHeight } = viewport;
   useEffect(() => {
     setTransform((current) => ({
       ...current,
-      offset: clampOffset(current.offset, current.scale, size, viewport),
+      offset: clampOffset(
+        current.offset,
+        current.scale,
+        { width: imageWidth, height: imageHeight },
+        { width: viewportWidth, height: viewportHeight },
+      ),
     }));
-  }, [size.width, size.height, viewport.width, viewport.height]);
+  }, [imageWidth, imageHeight, viewportWidth, viewportHeight]);
   const wheel = useEffectEvent((event: WheelEvent) => {
     if (saving || actionBusy || pendingExit || gestureRef.current || !natural.width) return;
     event.preventDefault();

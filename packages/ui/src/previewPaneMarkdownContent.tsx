@@ -31,9 +31,12 @@ export function MarkdownPreviewContent({
   onOpenBrowserUrl,
 }: MarkdownPreviewContentProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const workspaceKey = selectionTarget?.workspaceKey;
+  const sessionId = selectionTarget?.sessionId;
+  // 选区跟随实际文档与会话。更换内容时使旧选区和它的菜单失效。
   const selectionScope = useMemo(
-    () => ({}),
-    [content, sourceKey, sourcePath, selectionTarget?.workspaceKey, selectionTarget?.sessionId],
+    () => ({ content, sourceKey, sourcePath, workspaceKey, sessionId }),
+    [content, sourceKey, sourcePath, workspaceKey, sessionId],
   );
   return (
     <div
@@ -41,13 +44,13 @@ export function MarkdownPreviewContent({
       data-markdown-preview="true"
       className="w-full h-full bg-background overflow-auto"
     >
-      {selectionTarget && sourceKey ? (
+      {selectionTarget && selectionScope.sourceKey ? (
         <MarkdownSelectionTooltip
           scopeKey={selectionScope}
           rootRef={rootRef}
-          sourceKey={sourceKey}
-          sourceTitle={sourceTitle ?? sourceKey}
-          sourcePath={sourcePath}
+          sourceKey={selectionScope.sourceKey}
+          sourceTitle={sourceTitle ?? selectionScope.sourceKey}
+          sourcePath={selectionScope.sourcePath}
           target={selectionTarget}
         />
       ) : null}
@@ -59,7 +62,7 @@ export function MarkdownPreviewContent({
           codePreviewSettings={codePreviewSettings}
           onOpenExternalUrl={onOpenBrowserUrl}
         >
-          {content}
+          {selectionScope.content}
         </MessageResponse>
       </div>
     </div>
