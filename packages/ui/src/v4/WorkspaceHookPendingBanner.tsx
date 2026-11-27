@@ -88,14 +88,15 @@ export const WorkspaceHookPendingIndicator = memo(function WorkspaceHookPendingI
     // 两行式打开设置页：设置 intent 再 open tab（仿 V4ComposerToolbar 的 handleOpenModelProviderSettings）
     // ZP-20261110-06：worktree 任务的 Hook 从会话 cwd 发现，只传 section 时设置页按项目目录
     // 发现，看不到 worktree 中待审核的声明。带上项目范围与 cwd，设置页按 cwd 发现（D23）。
-    setPendingSettingsSectionIntent("hooks", {
-      ...(worktreeCwd
+    setPendingSettingsSectionIntent(
+      "hooks",
+      worktreeCwd
         ? {
             pluginScopeKey: getWorkspaceKey(workspacePath, workspaceIdentity),
             hookWorkspacePath: worktreeCwd,
           }
-        : {}),
-    });
+        : {},
+    );
     openSettingsTab?.();
 
     // 通过 command binding 发送 requestWorkspaceHookReview 命令。

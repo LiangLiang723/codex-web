@@ -1,7 +1,7 @@
 import { PenIcon } from "lucide-react";
 import {
   useCallback,
-  useEffect,
+  useEffect, useEffectEvent,
   useId,
   useLayoutEffect,
   useRef,
@@ -35,8 +35,9 @@ export function useFreshFills(
   };
   const [fresh, setFresh] = useState<ReadonlySet<string>>(compute);
   const key = fills.map((fill) => `${fill.holeId}@${fill.filledAt ?? ""}`).join("\u0000");
+  const readFreshFills = useEffectEvent(() => ({ next: compute(), fills }));
   useEffect(() => {
-    const next = compute();
+    const { next, fills } = readFreshFills();
     setFresh(next);
     if (next.size === 0) return undefined;
     const now = Date.now();

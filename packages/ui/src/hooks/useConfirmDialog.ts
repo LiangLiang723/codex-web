@@ -11,17 +11,20 @@ export function useYoloModeConfirmation(scope: unknown, currentMode: string | un
   const { intl } = useZCodeIntl();
   const requestConfirmation = useConfirmDialog();
   const pending = useRef<AbortController | null>(null);
-  useLayoutEffect(
-    () => () => {
-      // 不能只在弹窗关闭时检查 mounted：确认结算与微任务提交之间也可能发生导航。
+  const liveScope = useRef(scope);
+  useLayoutEffect(() => {
+    liveScope.current = scope;
+    return () => {
+      // 确认结算与微任务提交之间也可能发生导航，撤销原会话或草稿的请求。
       pending.current?.abort();
       pending.current = null;
-    },
-    [scope, currentMode],
-  );
+    };
+  }, [scope, currentMode]);
 
   return useCallback(
     (nextMode: string, apply: () => void) => {
+      // 旧菜单的回调可能晚于切换会话到达，提交前确认仍属于原草稿或会话。
+      if (!Object.is(liveScope.current, scope)) return;
       if (
         pending.current ||
         useConfirmDialogStore.getState().pendingRequest?.presentation === "yolo-confirmation"

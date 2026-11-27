@@ -1,5 +1,5 @@
 /* oxlint-disable eslint(max-lines) -- UnifiedBrowserView 集中维护稳定 webview 的导航、事件和 guest 生命周期；横向滚动链已下沉独立 hook。 */
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   BrowserViewScreenshotSurfacePreparePayload,
   EmbeddedBrowserViewportPreference,
@@ -576,6 +576,7 @@ export function UnifiedBrowserView({
   );
 
   // ---- webview 事件接线 + did-attach 上报 guestId ----
+  const readResponsiveMode = useEffectEvent(() => isResponsiveMode);
   useEffect(() => {
     if (!webview) return;
 
@@ -610,7 +611,7 @@ export function UnifiedBrowserView({
       // Electron/Chromium 会把主窗口页面 zoom 继续传播到 guest；仅补偿外层
       // transform 时，guest innerWidth/DPR 仍会变化。自由尺寸必须把 guest zoom 固定为 1，
       // 普通模式仍交给 Electron 自然传播，避免主动改写网页 zoom。
-      if (isResponsiveMode) setGuestZoomFactor(webview, 1);
+      if (readResponsiveMode()) setGuestZoomFactor(webview, 1);
       // did-attach 是完整历史恢复的最早时机；dom-ready 保留为 Electron 版本兼容兜底。
       reportBrowserGuest(isSelected);
 
@@ -1241,7 +1242,7 @@ export function UnifiedBrowserView({
       if (node) webviewTeardownProbeRef.current.hadWebview = true;
       setWebview(node);
     },
-    [logWebviewTeardown],
+    [logWebviewTeardown, recentVisitsScopeKey],
   );
 
   const handleRetryGuest = useCallback(() => {

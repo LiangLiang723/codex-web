@@ -87,6 +87,9 @@ export function MarketingTouchProvider({
   const refreshStartEntitlementRef = useRef(startEntitlement.refresh);
   refreshStartEntitlementRef.current = startEntitlement.refresh;
   const identity = user?.id ?? "anonymous";
+  const authenticated = Boolean(user);
+  const activeIdentity = useRef(identity);
+  activeIdentity.current = identity;
   const createRuntime = useCallback(() => {
     const service = services.marketingTouchService;
     // 冷启动竞态修复：IntlProvider 读完 setting.json 之前 locale 只是占位初值（中文系统即 zh-CN），
@@ -149,6 +152,7 @@ export function MarketingTouchProvider({
         return { delivery, hero: prepared.hero, release };
       },
       execute: async (action, signal, phase) => {
+        if (activeIdentity.current !== identity) return { status: "cancelled" };
         if (action.type === "close") return { status: "cancelled" };
         if (action.type === "navigate" || action.type === "copy_text") {
           try {
@@ -246,7 +250,7 @@ export function MarketingTouchProvider({
             };
           }
         }
-        if (!user) {
+        if (!authenticated) {
           requestLogin();
           return { status: "cancelled" };
         }
@@ -312,7 +316,7 @@ export function MarketingTouchProvider({
     services,
     platform,
     identity,
-    Boolean(user),
+    authenticated,
     restoring,
     locale,
     localeResolved,

@@ -50,8 +50,11 @@ function Fixture() {
   const [target, setTarget] = useState("a");
   const [response, setResponse] = useState("");
   const [commits, setCommits] = useState(0);
+  const [lastCommitTarget, setLastCommitTarget] = useState<string>();
   const switchMode = useCallback(
     (next: string) => {
+      // 草稿回调随目标换代，测试同一模式控件切到另一个会话时的请求归属。
+      setLastCommitTarget(target);
       setCommits((n) => n + 1);
       if (next === "plan" || next === "plan-off") setPlan(next === "plan");
       else setMode(next);
@@ -110,7 +113,7 @@ function Fixture() {
           }}
         />
       )}
-      <output className="sr-only" data-testid="state">
+      <output className="sr-only" data-testid="state" data-commit-target={lastCommitTarget}>
         {JSON.stringify({ mode, planEnabled, commits, response })}
       </output>
       <ConfirmDialogHost />

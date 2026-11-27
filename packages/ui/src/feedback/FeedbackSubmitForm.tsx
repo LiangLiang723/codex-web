@@ -310,6 +310,7 @@ export function FeedbackSubmitForm({
     feedbackService,
     formatMessage,
     includeLogs,
+    intl.formatMessage,
     locale,
     modelContext,
     onCancel,

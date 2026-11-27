@@ -242,10 +242,9 @@ export function useWorkspaceSidebarFooterUsageSummaryState({
       }),
     [
       scopedSelectedProviderId,
-      bigmodelProvider?.accountAccess,
+      providerSettingsView,
       sharedSettings?.providerFamilyConnectionSelections,
       teamSources,
-      zaiProvider?.accountAccess,
     ],
   );
   const selectedProviderId = currentUsageSource?.sourceId;

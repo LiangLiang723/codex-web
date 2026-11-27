@@ -255,12 +255,18 @@ for (const width of [390, 1200])
             document.documentElement.style.removeProperty("--ui-font-size"),
           );
           await acknowledgeRisk(page);
+          const commitsBeforeTargetChange = (await state(page)).commits;
           await page.evaluate(() => window.changeYoloTarget());
           await dialog(page).waitFor({ state: "hidden" });
           assert.equal((await state(page)).mode, "guarded");
+          assert.equal((await state(page)).commits, commitsBeforeTargetChange);
+          assert.equal(await page.getByTestId("state").getAttribute("data-commit-target"), "a");
           await choose(page, "yolo");
           await assertRiskUnchecked(page);
-          await page.getByTestId("yolo-confirmation-cancel").click();
+          await acknowledgeRisk(page);
+          await page.getByTestId("yolo-confirmation-confirm").click();
+          assert.equal((await state(page)).commits, commitsBeforeTargetChange + 1);
+          assert.equal(await page.getByTestId("state").getAttribute("data-commit-target"), "b");
           await page.goto(`${url}&mode=yolo`);
           assert.equal(await dialog(page).count(), 0);
           await choose(page, "yolo");

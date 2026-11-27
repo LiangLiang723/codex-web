@@ -91,13 +91,14 @@ export function useFileMentionProvider(
     getMentionGroupLimitForQuery(query, defaultPreviewLimit) ?? WORKSPACE_FILE_SEARCH_DISPLAY_CAP;
   // 连接实例也属于作用域：相同路径的远程重连不能接纳旧 Host 的查询结果。
   const lifecycle = useMemo(
-    () => ({}),
+    () => ({ fileService, projectService, workspacePath, workspaceIdentity, enabled, sessionId, projectId }),
     [fileService, projectService, workspacePath, workspaceIdentity, enabled, sessionId, projectId],
   );
   // 项目变更只开启同一生命周期内的一次重新查询（revalidate），不切换作用域。
   const scope = useMemo(
     () => ({
       lifecycle,
+      projectRevision,
       error: null as Error | null,
       lastMissQuery: null as string | null,
     }),
@@ -113,6 +114,7 @@ export function useFileMentionProvider(
   } | null>(null);
 
   useEffect(() => {
+    const { enabled, fileService, projectService, workspacePath, workspaceIdentity, sessionId, projectId } = scope.lifecycle;
     // 错误态等待面板/工作区/连接生命周期重置，避免 query 变化触发失败重试循环。
     if (!enabled || scope.error) return;
     let active = true;
@@ -193,18 +195,7 @@ export function useFileMentionProvider(
     return () => {
       active = false;
     };
-  }, [
-    enabled,
-    fileService,
-    projectService,
-    workspacePath,
-    workspaceIdentity,
-    sessionId,
-    projectId,
-    query,
-    limit,
-    scope,
-  ]);
+  }, [query, limit, scope]);
 
   const current =
     enabled &&

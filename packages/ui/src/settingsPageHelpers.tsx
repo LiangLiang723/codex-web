@@ -283,28 +283,25 @@ export function GeneralSectionContent({
     await onTerminalFontFamilyChange(normalizedTerminalFontFamily);
   }, [normalizedTerminalFontFamily, onTerminalFontFamilyChange]);
 
-  const handleIntegratedTerminalShellChange = useCallback(
-    async (value: string) => {
-      if (value === "auto") {
-        await onIntegratedTerminalShellChange({ mode: "auto" });
-        return;
-      }
-      const option = visibleIntegratedTerminalShellOptions.find(
-        (candidate) => candidate.id === value,
-      );
-      if (!option) {
-        return;
-      }
-      await onIntegratedTerminalShellChange({
-        mode: "shell",
-        dialect: option.dialect,
-        id: option.id,
-        label: option.label,
-        path: option.path,
-      });
-    },
-    [onIntegratedTerminalShellChange, visibleIntegratedTerminalShellOptions],
-  );
+  const handleIntegratedTerminalShellChange = async (value: string) => {
+    if (value === "auto") {
+      await onIntegratedTerminalShellChange({ mode: "auto" });
+      return;
+    }
+    const option = visibleIntegratedTerminalShellOptions.find(
+      (candidate) => candidate.id === value,
+    );
+    if (!option) {
+      return;
+    }
+    await onIntegratedTerminalShellChange({
+      mode: "shell",
+      dialect: option.dialect,
+      id: option.id,
+      label: option.label,
+      path: option.path,
+    });
+  };
 
   const [localHttpProxy, setLocalHttpProxy] = useState(httpProxy);
 

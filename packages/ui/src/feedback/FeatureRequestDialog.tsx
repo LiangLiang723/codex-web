@@ -175,6 +175,7 @@ export const FeatureRequestDialog = memo(function FeatureRequestDialogComponent(
     description,
     feedbackService,
     formatMessage,
+    intl.formatMessage,
     locale,
     openTickets,
     solution,

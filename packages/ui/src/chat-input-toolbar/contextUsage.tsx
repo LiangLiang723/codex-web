@@ -470,13 +470,15 @@ export function ChatContextUsage({
       opportunity: { ...opportunityBadge, sourceKey: resetSourceKey },
     },
   );
+  const opportunityKey = opportunityReminder?.opportunityKey;
+  const opportunityPhase = opportunityReminder?.phase;
   const dismissOpportunityReminder = useCallback(() => {
-    if (!opportunityReminder) return;
-    contextQuotaResetOpportunityDismissalStore.dismiss(opportunityReminder);
-  }, [opportunityReminder?.opportunityKey, opportunityReminder?.phase]);
+    if (opportunityKey === undefined || opportunityPhase === undefined) return;
+    contextQuotaResetOpportunityDismissalStore.dismiss({ opportunityKey, phase: opportunityPhase });
+  }, [opportunityKey, opportunityPhase]);
   useEffect(() => {
     // 设置覆盖层保留工作区挂载；后台监听不能把设置页点击算作提醒已读。
-    if (!isWorkspaceVisible || !opportunityReminder || contextOpen) return;
+    if (!isWorkspaceVisible || opportunityKey === undefined || contextOpen) return;
     const handleOutsidePointerDown = (event: PointerEvent) => {
       if (
         shouldDismissContextQuotaResetOpportunityReminder(
@@ -493,8 +495,7 @@ export function ChatContextUsage({
     isWorkspaceVisible,
     contextOpen,
     dismissOpportunityReminder,
-    opportunityReminder?.opportunityKey,
-    opportunityReminder?.phase,
+    opportunityKey,
   ]);
   // 五小时与周额度各自维护撒花轨迹，避免一类完成压制另一类的触发器动效。
   const resetCelebrationStateByTypeRef = useRef<
@@ -535,7 +536,15 @@ export function ChatContextUsage({
   // Main 返回 claim winner 前 Composer 可能已经卸载或切换 source。现在先获取带 token
   // 的临时 reservation，只有组件与候选仍有效且即将展示时才 commit played；失效 winner release，
   // busy loser 保留 observedAt，等待真实 played 广播或 reservation 释放后重试。
+  const {
+    reserveAutomaticCompletion,
+    releaseAutomaticCompletion,
+    commitAutomaticCompletion,
+  } = resetUi;
+  const fiveHourCompletion = automaticCompletionCandidateByType.FIVE_HOUR;
+  const weekCompletion = automaticCompletionCandidateByType.WEEK;
   useEffect(() => {
+    const candidates = { FIVE_HOUR: fiveHourCompletion, WEEK: weekCompletion };
     let active = true;
     const retryTimers: Array<ReturnType<typeof setTimeout>> = [];
     const previous = claimedAutomaticCompletionRef.current;
@@ -546,13 +555,13 @@ export function ChatContextUsage({
         FIVE_HOUR:
           sameSource &&
           previous.completedAtByType.FIVE_HOUR ===
-            automaticCompletionCandidateByType.FIVE_HOUR
+            candidates.FIVE_HOUR
             ? previous.completedAtByType.FIVE_HOUR
             : null,
         WEEK:
           sameSource &&
           previous.completedAtByType.WEEK ===
-            automaticCompletionCandidateByType.WEEK
+            candidates.WEEK
             ? previous.completedAtByType.WEEK
             : null,
       },
@@ -568,7 +577,7 @@ export function ChatContextUsage({
     }
 
     for (const resetType of CODING_PLAN_QUOTA_RESET_TYPES) {
-      const completedAt = automaticCompletionCandidateByType[resetType];
+      const completedAt = candidates[resetType];
       if (
         completedAt === null ||
         synchronized.completedAtByType[resetType] === completedAt
@@ -577,7 +586,7 @@ export function ChatContextUsage({
       }
       void coordinateCodingPlanQuotaResetAutoPlay({
         reserve: () =>
-          resetUi.reserveAutomaticCompletion(resetType, completedAt),
+          reserveAutomaticCompletion(resetType, completedAt),
         isCurrent: () => {
           const latest = latestAutomaticCompletionCandidateRef.current;
           return (
@@ -586,8 +595,8 @@ export function ChatContextUsage({
             latest.completedAtByType[resetType] === completedAt
           );
         },
-        commit: resetUi.commitAutomaticCompletion,
-        release: resetUi.releaseAutomaticCompletion,
+        commit: commitAutomaticCompletion,
+        release: releaseAutomaticCompletion,
         onCommitted: () => {
           const current = claimedAutomaticCompletionRef.current;
           const completedAtByType =
@@ -635,13 +644,13 @@ export function ChatContextUsage({
       }
     };
   }, [
-    automaticCompletionCandidateByType.FIVE_HOUR,
-    automaticCompletionCandidateByType.WEEK,
+    fiveHourCompletion,
+    weekCompletion,
     autoPlayReservationRetryTick,
     resetSourceKey,
-    resetUi.commitAutomaticCompletion,
-    resetUi.releaseAutomaticCompletion,
-    resetUi.reserveAutomaticCompletion,
+    commitAutomaticCompletion,
+    releaseAutomaticCompletion,
+    reserveAutomaticCompletion,
   ]);
 
   // Tooltip/撒花只消费本窗口已经 claim 成功且仍对应当前候选的 used_at。
@@ -809,9 +818,7 @@ export function ChatContextUsage({
     if (!contextOpen) {
       return;
     }
-    if (opportunityReminder) {
-      dismissOpportunityReminder();
-    }
+    dismissOpportunityReminder();
     setResetTooltipDismissed((prev) => {
       let changed = false;
       const next = { ...prev };
@@ -832,8 +839,6 @@ export function ChatContextUsage({
     contextOpen,
     phaseByType,
     automaticCompletedAtByType,
-    opportunityReminder?.opportunityKey,
-    opportunityReminder?.phase,
     dismissOpportunityReminder,
   ]);
 

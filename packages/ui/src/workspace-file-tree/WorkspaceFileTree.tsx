@@ -286,6 +286,7 @@ export function WorkspaceFileTree({
     [scrollMaskStyle],
   );
 
+  const { loadDirectory, setExpandedPaths } = treeData;
   useEffect(() => {
     const previewPath = revealPath?.trim() || activePreviewPath?.trim();
     if (!previewPath || !isWorkspaceFilePathInside(workspacePath, previewPath)) {
@@ -298,7 +299,7 @@ export function WorkspaceFileTree({
       : ancestorDirectories;
     pendingActivePreviewRevealPathRef.current = previewPath;
     setSelectedPath(previewPath);
-    treeData.setExpandedPaths((current) => {
+    setExpandedPaths((current) => {
       const next = new Set(current);
       for (const directoryPath of directoryPathsToExpand) {
         next.add(directoryPath);
@@ -310,7 +311,7 @@ export function WorkspaceFileTree({
         if (disposed) {
           return;
         }
-        await treeData.loadDirectory(directoryPath, index + 1);
+        await loadDirectory(directoryPath, index + 1);
       }
     })();
     return () => {
@@ -319,8 +320,8 @@ export function WorkspaceFileTree({
   }, [
     activePreviewPath,
     revealPath,
-    treeData.loadDirectory,
-    treeData.setExpandedPaths,
+    loadDirectory,
+    setExpandedPaths,
     workspacePath,
   ]);
 
